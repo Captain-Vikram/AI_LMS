@@ -1,0 +1,6 @@
+Quasar/.env
+venv
+.env
+__pycache__/
+models/__pycache__/
+routes/__pycache__/

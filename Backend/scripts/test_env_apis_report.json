@@ -1,0 +1,44 @@
+[
+  {
+    "service": "LM Studio Models",
+    "env_var": "LMSTUDIO_URL",
+    "ok": true,
+    "status_code": 200,
+    "detail": "OK (model: gemma3-270m-instruct)"
+  },
+  {
+    "service": "LM Studio Chat",
+    "env_var": "LMSTUDIO_MODEL",
+    "ok": true,
+    "status_code": 200,
+    "detail": "OK (OK)"
+  },
+  {
+    "service": "Deepgram",
+    "env_var": "DEEPGRAM_API_KEY",
+    "ok": true,
+    "status_code": 200,
+    "detail": "OK"
+  },
+  {
+    "service": "Tavily",
+    "env_var": "TAVILY_API_KEY",
+    "ok": true,
+    "status_code": 200,
+    "detail": "OK"
+  },
+  {
+    "service": "Serper",
+    "env_var": "SERPER_API_KEY",
+    "ok": true,
+    "status_code": 200,
+    "detail": "OK"
+  },
+  {
+    "service": "MongoDB",
+    "env_var": "MONGO_URI",
+    "ok": true,
+    "status_code": null,
+    "detail": "OK"
+  }
+]

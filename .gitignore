@@ -1,0 +1,14 @@
+Quasar/.env
+Backend/routes/__pycache__/onboarding_routes.cpython-310.pyc
+Backend/routes/__pycache__/auth_routes.cpython-310.pyc
+Backend/routes/__pycache__/mcq_routes.cpython-310.pyc
+Backend/models/__pycache__/user_models.cpython-310.pyc
+Backend/models/__pycache__/quiz_models.cpython-310.pyc
+Backend/models/__pycache__/onboarding_models.cpython-310.pyc
+Backend/functions/__pycache__/mcq_functions.cpython-310.pyc
+Backend/__pycache__/main.cpython-310.pyc
+Backend/__pycache__/jwt_config.cpython-310.pyc
+Backend/__pycache__/database.cpython-310.pyc
+.env
+mongo-data/
+.venv/

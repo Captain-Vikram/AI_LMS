@@ -1,0 +1,204 @@
+{
+  "timestamp": "2026-04-12T23:52:54.348790",
+  "backend_url": "http://127.0.0.1:8000",
+  "total_endpoints": 37,
+  "available_endpoints": 35,
+  "unavailable_endpoints": 2,
+  "availability_rate": 94.5945945945946,
+  "endpoint_details": {
+    "GET /api/analytics/dashboard": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/auth/login-activity": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/auth/user-profile": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/auth/user-status": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/auth/login": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/auth/register": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/auth/update-assessment-status": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/auth/update-onboarding-status": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/deepresearch/recommendations": {
+      "status": 422,
+      "available": true
+    },
+    "GET /api/gamification/achievements/recent": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/gamification/badges": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/gamification/xp": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/gamification/award-xp": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/onboarding/status": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/onboarding/user-skills": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/onboarding/save": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/quiz/assessment-history": {
+      "status": 401,
+      "available": true
+    },
+    "GET /api/quiz/statistics": {
+      "status": 401,
+      "available": true
+    },
+    "POST /api/quiz/generate": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/quiz/submit": {
+      "status": 422,
+      "available": true
+    },
+    "GET /": {
+      "status": 200,
+      "available": true
+    },
+    "GET /health": {
+      "status": 200,
+      "available": true
+    },
+    "DELETE /api/user/milestones/{milestone_id}": {
+      "status": 0,
+      "available": false
+    },
+    "GET /api/user/milestones": {
+      "status": 401,
+      "available": true
+    },
+    "PATCH /api/user/milestones/{milestone_id}": {
+      "status": 0,
+      "available": false
+    },
+    "POST /api/user/milestones": {
+      "status": 422,
+      "available": true
+    },
+    "GET /api/youtube/search": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/youtube/get_videos": {
+      "status": 200,
+      "available": true
+    },
+    "POST /api/youtube/recommendations": {
+      "status": 422,
+      "available": true
+    },
+    "GET /api/youtube-qa/transcript/{video_id}": {
+      "status": 500,
+      "available": true
+    },
+    "POST /api/youtube-qa/ask": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/youtube-qa/process": {
+      "status": 422,
+      "available": true
+    },
+    "GET /api/youtube-quiz/status/{quiz_id}": {
+      "status": 200,
+      "available": true
+    },
+    "POST /api/youtube-quiz/comprehensive": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/youtube-quiz/generate": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/youtube-quiz/submit": {
+      "status": 422,
+      "available": true
+    },
+    "POST /api/youtube-quiz/topics": {
+      "status": 422,
+      "available": true
+    }
+  },
+  "categories": {
+    "analytics": {
+      "total": 1,
+      "available": 1
+    },
+    "auth": {
+      "total": 7,
+      "available": 7
+    },
+    "deepresearch": {
+      "total": 1,
+      "available": 1
+    },
+    "gamification": {
+      "total": 4,
+      "available": 4
+    },
+    "onboarding": {
+      "total": 3,
+      "available": 3
+    },
+    "quiz": {
+      "total": 4,
+      "available": 4
+    },
+    "root": {
+      "total": 2,
+      "available": 2
+    },
+    "user": {
+      "total": 4,
+      "available": 2
+    },
+    "youtube": {
+      "total": 3,
+      "available": 3
+    },
+    "youtube-qa": {
+      "total": 3,
+      "available": 3
+    },
+    "youtube-quiz": {
+      "total": 5,
+      "available": 5
+    }
+  }
+}

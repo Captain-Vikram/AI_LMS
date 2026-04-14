@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-04-12T23:52:18.061494",
+  "backend_url": "http://127.0.0.1:8000",
+  "total_tests": 8,
+  "passed_tests": 7,
+  "failed_tests": 1,
+  "success_rate": 87.5,
+  "failed_endpoints": [
+    "POST /api/youtube-education/topics - 404 - "
+  ]
+}

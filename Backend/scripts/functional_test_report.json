@@ -1,0 +1,234 @@
+{
+  "timestamp": "2026-04-12T23:57:20.355742",
+  "backend_url": "http://127.0.0.1:8000",
+  "summary": {
+    "total_tests": 26,
+    "passed": 26,
+    "failed": 0,
+    "success_rate": 100.0
+  },
+  "categories": {
+    "api": {
+      "total": 24,
+      "passed": 24
+    },
+    "": {
+      "total": 1,
+      "passed": 1
+    },
+    "health": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "test_results": [
+    {
+      "endpoint": "/api/auth/register",
+      "method": "POST",
+      "status_code": 201,
+      "success": true,
+      "detail": "User created: 69dbe402...",
+      "timestamp": "2026-04-12T23:57:14.211381"
+    },
+    {
+      "endpoint": "/api/auth/login",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:14.285485"
+    },
+    {
+      "endpoint": "/api/onboarding/save",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:14.471196"
+    },
+    {
+      "endpoint": "/api/onboarding/status",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:14.478947"
+    },
+    {
+      "endpoint": "/api/onboarding/user-skills",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:14.495485"
+    },
+    {
+      "endpoint": "/api/quiz/generate",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:17.594837"
+    },
+    {
+      "endpoint": "/api/quiz/statistics",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.038920"
+    },
+    {
+      "endpoint": "/api/quiz/assessment-history",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.045124"
+    },
+    {
+      "endpoint": "/api/gamification/xp",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.053420"
+    },
+    {
+      "endpoint": "/api/gamification/badges",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.091520"
+    },
+    {
+      "endpoint": "/api/gamification/achievements/recent",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.118096"
+    },
+    {
+      "endpoint": "/api/gamification/award-xp",
+      "method": "POST",
+      "status_code": 400,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.131956"
+    },
+    {
+      "endpoint": "/api/analytics/dashboard",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.147731"
+    },
+    {
+      "endpoint": "/api/user/milestones",
+      "method": "POST",
+      "status_code": 201,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.189132"
+    },
+    {
+      "endpoint": "/api/user/milestones",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.211843"
+    },
+    {
+      "endpoint": "/api/youtube/search",
+      "method": "GET",
+      "status_code": 422,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.215555"
+    },
+    {
+      "endpoint": "/api/youtube/get_videos",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.219451"
+    },
+    {
+      "endpoint": "/api/youtube/recommendations",
+      "method": "POST",
+      "status_code": 422,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.239290"
+    },
+    {
+      "endpoint": "/api/youtube-quiz/topics",
+      "method": "POST",
+      "status_code": 500,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.255678"
+    },
+    {
+      "endpoint": "/api/youtube-quiz/generate",
+      "method": "POST",
+      "status_code": 500,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.270564"
+    },
+    {
+      "endpoint": "/api/youtube-qa/process",
+      "method": "POST",
+      "status_code": 500,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.275263"
+    },
+    {
+      "endpoint": "/api/youtube-qa/ask",
+      "method": "POST",
+      "status_code": 500,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.296986"
+    },
+    {
+      "endpoint": "/api/youtube-qa/transcript/{video_id}",
+      "method": "GET",
+      "status_code": 500,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.310945"
+    },
+    {
+      "endpoint": "/api/deepresearch/recommendations",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.316080"
+    },
+    {
+      "endpoint": "/",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.339068"
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "detail": "",
+      "timestamp": "2026-04-12T23:57:20.354652"
+    }
+  ]
+}
