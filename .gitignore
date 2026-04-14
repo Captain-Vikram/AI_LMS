@@ -12,3 +12,6 @@ Backend/__pycache__/database.cpython-310.pyc
 .env
 mongo-data/
 .venv/
+.idea/
+.vscode/
+__pycache__/
