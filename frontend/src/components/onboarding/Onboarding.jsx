@@ -64,6 +64,15 @@ const Onboarding = () => {
 
         // Teachers and admins skip onboarding and go directly to classroom creation
         if (normalizedRole === "teacher" || normalizedRole === "admin") {
+          // Update backend onboarding status to prevent redirect loops
+          try {
+            await apiClient.post(API_ENDPOINTS.AUTH_UPDATE_ONBOARDING_STATUS, {
+              onboarding_complete: true,
+            });
+          } catch {
+            // Non-blocking: continue even if update fails
+          }
+          
           localStorage.setItem("onboardingComplete", "true");
           localStorage.setItem("isLoggedIn", "true");
           navigate("/classroom/create");
