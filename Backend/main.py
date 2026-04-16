@@ -15,6 +15,10 @@ from routes.deepsearch import router as deepsearch_router
 from routes.rag_route import router as rag_router
 from routes.analytics_routes import router as analytics_router
 from routes.user_routes import router as user_router
+from routes.classroom_routes import router as classroom_router
+from routes.enrollment_routes import router as enrollment_router
+from routes.dashboard_routes import router as dashboard_router
+from routes.announcements_routes import router as announcements_router
 from functions.service_health import get_dependency_health_snapshot
 
 # Load environment variables from .env file
@@ -44,6 +48,10 @@ app.add_middleware(
 app.include_router(mcq_router)
 app.include_router(auth_router)
 app.include_router(onboarding_router)
+app.include_router(classroom_router)
+app.include_router(enrollment_router)
+app.include_router(dashboard_router)
+app.include_router(announcements_router)
 app.include_router(youtube_router)
 app.include_router(youtube_quiz_router)
 app.include_router(gamification_router)  # Add this line

@@ -76,7 +76,7 @@ const FormStep2 = ({
 
         {/* Role */}
         <div>
-          <label className="block text-gray-300 mb-1 text-xs" htmlFor="role">Professional Role</label>
+          <label className="block text-gray-300 mb-1 text-xs" htmlFor="role">Account Role</label>
           <div className="relative">
             <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-gray-400">
               <MdWork className="text-sm" />
@@ -84,15 +84,11 @@ const FormStep2 = ({
             <select
               id="role"
               className={`w-full bg-gray-700/50 border ${errorsStep2.role ? 'border-red-500' : 'border-gray-600'} rounded-lg py-2 pl-7 pr-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              {...registerStep2('role', { required: 'Professional role is required' })}
+              {...registerStep2('role', { required: 'Role is required' })}
             >
               <option value="">Select your role</option>
               <option value="student">Student</option>
-              <option value="professional">Professional</option>
-              <option value="manager">Manager</option>
-              <option value="executive">Executive</option>
-              <option value="educator">Educator</option>
-              <option value="other">Other</option>
+              <option value="teacher">Teacher</option>
             </select>
           </div>
           {errorsStep2.role && <p className="text-red-500 text-xs mt-1">{errorsStep2.role.message}</p>}

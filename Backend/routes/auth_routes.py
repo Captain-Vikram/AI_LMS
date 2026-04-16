@@ -9,6 +9,7 @@ from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 from database import get_db
 from models.user_models import UserRegistration, UserLogin
 from jwt_config import settings
+from functions.utils import get_current_user, normalize_user_role
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -34,22 +35,53 @@ def decode_user_id_from_auth_header(authorization: str) -> str:
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-def create_access_token(user_id: str):
+def create_access_token(
+    user_id: str,
+    email: str = None,
+    role: str = None,
+    institution_id: str = None,
+    active_classroom_id: str = None,
+    classroom_roles: dict = None,
+):
     expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     expire = datetime.utcnow() + expires_delta
-    
+
     payload = {
         "sub": str(user_id),
-        "exp": expire
+        "user_id": str(user_id),
+        "email": email,
+        "role": role,
+        "institution_id": institution_id,
+        "active_classroom_id": active_classroom_id,
+        "classroom_roles": classroom_roles or {},
+        "exp": expire,
     }
 
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def _get_user_classroom_roles_map(user_id: str):
+    db = get_db()
+    try:
+        from bson import ObjectId
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        return {}
+
+    mapping = {}
+    for m in user.get("classroom_memberships", []):
+        cid = m.get("classroom_id")
+        if cid:
+            mapping[str(cid)] = m.get("role", "student")
+    return mapping
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(user: UserRegistration):
     db = get_db()
     users_collection = db.users
     profiles_collection = db.user_profiles
+
+    normalized_role = normalize_user_role(user.role if hasattr(user, 'role') else None)
     
     # Check if user already exists
     if users_collection.find_one({"email": user.email}):
@@ -60,12 +92,14 @@ async def register(user: UserRegistration):
         "first_name": user.first_name,
         "last_name": user.last_name if hasattr(user, 'last_name') else None,
         "location": user.location if hasattr(user, 'location') else None,
-        "role": user.role if hasattr(user, 'role') else None,
+        "role": normalized_role,
         "email": user.email,
         "password_hash": hash_password(user.password),
         "registration_date": datetime.utcnow(),
         "last_login": None,
         "status": "active",
+        "onboarding_complete": False,
+        "assessment_complete": False,
     }
     
     # Insert user and get the ID
@@ -79,17 +113,26 @@ async def register(user: UserRegistration):
             "first_name": user.first_name,
             "last_name": user.last_name if hasattr(user, 'last_name') else None,
             "location": user.location if hasattr(user, 'location') else None,
-            "role": user.role if hasattr(user, 'role') else None,
+            "role": normalized_role,
         }
         profiles_collection.insert_one(profile_data)
     
-    # Generate JWT token
-    access_token = create_access_token(str(user_id))
+    # Generate JWT token (include role + classroom roles)
+    classroom_roles_map = _get_user_classroom_roles_map(user_id)
+    access_token = create_access_token(
+        user_id=str(user_id),
+        email=user.email,
+        role=normalized_role,
+        institution_id=None,
+        active_classroom_id=None,
+        classroom_roles=classroom_roles_map,
+    )
     
     return {
         "id": str(user_id), 
         "message": "User registered successfully",
         "token": access_token,
+        "role": normalized_role,
         "onboarding_complete": False
     }
 
@@ -143,6 +186,11 @@ async def login(credentials: UserLogin):
     
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    normalized_role = normalize_user_role(user.get("role"))
+    if user.get("role") != normalized_role:
+        users_collection.update_one({"_id": user["_id"]}, {"$set": {"role": normalized_role}})
+        user["role"] = normalized_role
     
     # Update the last_login timestamp
     current_login_time = datetime.utcnow()
@@ -156,8 +204,16 @@ async def login(credentials: UserLogin):
         "login_time": current_login_time,
     })
     
-    # Generate JWT token
-    access_token = create_access_token(str(user["_id"]))
+    # Generate JWT token (include role + classroom roles)
+    classroom_roles_map = _get_user_classroom_roles_map(user["_id"]) or {}
+    access_token = create_access_token(
+        user_id=str(user["_id"]),
+        email=user.get("email"),
+        role=normalized_role,
+        institution_id=user.get("institution_id"),
+        active_classroom_id=None,
+        classroom_roles=classroom_roles_map,
+    )
     
     # Get onboarding status and assessment status
     onboarding_complete = user.get("onboarding_complete", False)
@@ -167,9 +223,42 @@ async def login(credentials: UserLogin):
         "message": "User logged in successfully", 
         "user_id": str(user["_id"]),
         "token": access_token,
+        "role": normalized_role,
         "onboarding_complete": onboarding_complete,
         "assessment_complete": assessment_complete
     }
+
+
+@router.post("/set-active-classroom/{classroom_id}")
+async def set_active_classroom(classroom_id: str, current_user = Depends(get_current_user)):
+    """Set active classroom in a refreshed token for current user"""
+    db = get_db()
+    try:
+        from bson import ObjectId
+        class_obj = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    if not class_obj:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    # Check membership
+    user_oid = ObjectId(current_user["user_id"])
+    if not (user_oid == class_obj.get("teacher_id") or user_oid in class_obj.get("students", [])):
+        raise HTTPException(status_code=403, detail="Not a member of this classroom")
+
+    # Build new token
+    classroom_roles_map = _get_user_classroom_roles_map(current_user["user_id"]) or {}
+    new_token = create_access_token(
+        user_id=current_user["user_id"],
+        email=current_user.get("email"),
+        role=current_user.get("role"),
+        institution_id=current_user.get("institution_id"),
+        active_classroom_id=classroom_id,
+        classroom_roles=classroom_roles_map,
+    )
+
+    return {"access_token": new_token, "token_type": "bearer"}
 
 @router.get("/user-profile")
 async def get_user_profile(authorization: str = Header(None)):
@@ -212,7 +301,7 @@ async def get_user_profile(authorization: str = Header(None)):
                 "lastName": user.get("last_name"),
                 "email": user.get("email"),
                 "location": user.get("location"),
-                "role": user.get("role"),
+                "role": normalize_user_role(user.get("role")),
                 "joinedDate": user.get("registration_date").strftime("%B %Y") if user.get("registration_date") else None,
                 "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user.get("last_login") else None,
                 "onboardingComplete": user.get("onboarding_complete", False),
@@ -229,7 +318,7 @@ async def get_user_profile(authorization: str = Header(None)):
             "lastName": user_profile.get("last_name"),
             "email": user.get("email") if user else None,
             "location": user_profile.get("location"),
-            "role": user_profile.get("role"),
+            "role": normalize_user_role(user_profile.get("role") if user_profile else user.get("role") if user else None),
             "bio": user_profile.get("bio"),
             "skills": user_profile.get("skills", []),
             "joinedDate": user.get("registration_date").strftime("%B %Y") if user and user.get("registration_date") else None,
@@ -271,6 +360,7 @@ async def get_user_status(authorization: str = Header(None)):
             last_assessment_date = latest_assessment["timestamp"].isoformat()
 
         return {
+            "role": normalize_user_role(user.get("role")),
             "onboarding_complete": user.get("onboarding_complete", False),
             "assessment_complete": user.get("assessment_complete", False),
             "last_assessment_date": last_assessment_date,

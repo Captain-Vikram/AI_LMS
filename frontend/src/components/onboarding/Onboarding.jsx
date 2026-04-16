@@ -1,266 +1,187 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useForm } from "react-hook-form";
-import { useMutation } from "@tanstack/react-query";
+import {
+  IoPersonAddOutline,
+  IoSchoolOutline,
+} from "react-icons/io5";
+
 import apiClient from "../../services/apiClient";
 import { API_ENDPOINTS } from "../../config/api";
-import IconsCarousel from "../IconsCarousel";
+import GlassDashboardShell from "../UI/GlassDashboardShell";
 
-// Step components
-import GoalSettingStep from "./GoalSettingStep";
-import LearningStyleStep from "./LearningStyleStep";
-import CareerPathStep from "./CareerPathStep";
-import OnboardingComplete from "./OnboardingComplete";
+const normalizeRole = (rawRole) => {
+  const role = (rawRole || "").trim().toLowerCase();
+  if (["teacher", "student", "admin"].includes(role)) {
+    return role;
+  }
+  if (["educator", "instructor", "faculty"].includes(role)) {
+    return "teacher";
+  }
+  return "student";
+};
 
 const Onboarding = () => {
-  const [step, setStep] = useState(1);
-  const [userData, setUserData] = useState({});
   const navigate = useNavigate();
 
-  // Check if user is logged in
-  useEffect(() => {
-    const reassessmentInfo = localStorage.getItem("reassessmentInfo");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-    const verifyAndRoute = async () => {
+  const [role, setRole] = useState("student");
+  const [studentJoinCode, setStudentJoinCode] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrap = async () => {
       const token = localStorage.getItem("token");
       if (!token) {
         navigate("/login");
         return;
       }
 
-      if (reassessmentInfo) {
-        navigate("/assessment");
-        return;
-      }
-
       try {
-        const status = await apiClient.get(API_ENDPOINTS.AUTH_USER_STATUS);
+        const [status, profile] = await Promise.all([
+          apiClient.get(API_ENDPOINTS.AUTH_USER_STATUS),
+          apiClient.get(API_ENDPOINTS.AUTH_USER_PROFILE),
+        ]);
 
-        if (status.onboarding_complete && status.assessment_complete) {
-          navigate("/dashboard");
+        if (!mounted) {
           return;
         }
 
-        if (status.onboarding_complete && !status.assessment_complete) {
-          navigate("/assessment");
+        const normalizedRole = normalizeRole(profile?.role || status?.role);
+        setRole(normalizedRole);
+        localStorage.setItem("userRole", normalizedRole);
+
+        if (status.onboarding_complete) {
+          localStorage.setItem("onboardingComplete", "true");
+          localStorage.setItem("isLoggedIn", "true");
+          navigate("/classrooms");
+          return;
+        }
+
+        // Teachers and admins skip onboarding and go directly to classroom creation
+        if (normalizedRole === "teacher" || normalizedRole === "admin") {
+          localStorage.setItem("onboardingComplete", "true");
+          localStorage.setItem("isLoggedIn", "true");
+          navigate("/classroom/create");
+          return;
         }
       } catch {
+        if (!mounted) {
+          return;
+        }
         navigate("/login");
+        return;
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    verifyAndRoute();
+    bootstrap();
+
+    return () => {
+      mounted = false;
+    };
   }, [navigate]);
 
-  // Setup forms for each step
-  const goalSettingForm = useForm({
-    mode: "onChange",
-    defaultValues: {
-      primaryGoal: userData.primaryGoal || "",
-      timeCommitment: userData.timeCommitment || "moderate",
-      prioritySkills: userData.prioritySkills || [],
-    },
-  });
+  const handleStudentJoin = async (event) => {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
 
-  const learningStyleForm = useForm({
-    mode: "onChange",
-    defaultValues: {
-      preferredStyle: userData.preferredStyle || "",
-      learningPace: userData.learningPace || "balanced",
-      preferredResources: userData.preferredResources || [],
-    },
-  });
+    try {
+      const response = await apiClient.post(API_ENDPOINTS.ONBOARDING_STUDENT_JOIN, {
+        enrollment_code: studentJoinCode.trim(),
+      });
 
-  const careerPathForm = useForm({
-    mode: "onChange",
-    defaultValues: {
-      careerPath: userData.careerPath || "",
-      experienceLevel: userData.experienceLevel || "beginner",
-      desiredCertifications: userData.desiredCertifications || [],
-    },
-  });
-
-  // Function to save onboarding data to API
-  const saveOnboardingData = async (data) => {
-    return apiClient.post(API_ENDPOINTS.ONBOARDING_SAVE, data);
-  };
-
-  // Mutation for saving onboarding data
-  const onboardingMutation = useMutation({
-    mutationFn: saveOnboardingData,
-    onSuccess: () => {
-      // Mark onboarding as complete in localStorage
       localStorage.setItem("onboardingComplete", "true");
+      localStorage.setItem("skillAssessmentComplete", "true");
+      localStorage.setItem("isLoggedIn", "true");
+      localStorage.setItem("userRole", "student");
 
-      // Redirect to dashboard
-      navigate("/assessment");
-    },
-    onError: (error) => {
-      console.error("Error saving onboarding data:", error);
-    },
-  });
+      try {
+        const refreshed = await apiClient.post(
+          `${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${response.classroom_id}`
+        );
+        const token = refreshed.access_token || refreshed.token;
+        if (token) {
+          localStorage.setItem("token", token);
+        }
+      } catch {
+        // non-blocking
+      }
 
-  // Handle step submissions
-  const handleGoalSubmit = (data) => {
-    setUserData((prev) => ({ ...prev, ...data }));
-    setStep(2);
+      navigate(`/classroom/${response.classroom_id}/dashboard`);
+    } catch (requestError) {
+      setError(requestError.message || "Failed to join classroom");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleLearningStyleSubmit = (data) => {
-    setUserData((prev) => ({ ...prev, ...data }));
-    setStep(3);
-  };
-
-  const handleCareerPathSubmit = (data) => {
-    const finalData = { ...userData, ...data };
-    setUserData(finalData);
-
-    // Save to localStorage in case API call fails
-    localStorage.setItem("onboardingData", JSON.stringify(finalData));
-
-    // Submit all data to API
-    onboardingMutation.mutate(finalData);
-  };
-
-  // Animation variants
-  const pageVariants = {
-    initial: { opacity: 0, x: 100 },
-    animate: { opacity: 1, x: 0 },
-    exit: { opacity: 0, x: -100 },
-  };
-
-  const containerVariants = {
-    initial: { opacity: 0, y: 20 },
-    animate: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.5,
-        staggerChildren: 0.1,
-      },
-    },
-  };
+  if (isLoading) {
+    return (
+      <GlassDashboardShell contentClassName="max-w-3xl">
+        <div className="py-6 text-center text-gray-300">Loading onboarding...</div>
+      </GlassDashboardShell>
+    );
+  }
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center px-4 py-12 pt-28">
-      {/* Background Icon Carousel */}
-      <div className="absolute inset-0 overflow-hidden">
-        <IconsCarousel
-          backgroundColor="rgba(17, 24, 39, 0.8)"
-          iconColor="gray-500/30"
-        />
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
-      </div>
-
+    <GlassDashboardShell contentClassName="max-w-5xl" withPanel={false}>
       <motion.div
-        className="w-full max-w-2xl relative z-10"
-        variants={containerVariants}
-        initial="initial"
-        animate="animate"
+        className="w-full"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
       >
-        <div className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-6 shadow-xl">
-          {/* Progress steps */}
-          <div className="mb-8">
-            <div className="flex justify-between items-center">
-              {[1, 2, 3, 4].map((stepNum) => (
-                <div key={stepNum} className="flex flex-col items-center">
-                  <div
-                    className={`w-10 h-10 flex items-center justify-center rounded-full 
-                    ${
-                      step === stepNum
-                        ? "bg-blue-600"
-                        : step > stepNum
-                        ? "bg-green-500"
-                        : "bg-gray-700"
-                    }`}
-                  >
-                    {step > stepNum ? (
-                      <svg
-                        className="w-6 h-6 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    ) : (
-                      <span className="text-white font-medium">{stepNum}</span>
-                    )}
-                  </div>
-                  <div className="mt-2 text-center">
-                    <p
-                      className={`text-xs font-medium ${
-                        step === stepNum
-                          ? "text-blue-400"
-                          : step > stepNum
-                          ? "text-green-400"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      {stepNum === 1 && "Learning Goals"}
-                      {stepNum === 2 && "Learning Style"}
-                      {stepNum === 3 && "Career Path"}
-                      {stepNum === 4 && "Complete"}
-                    </p>
-                  </div>
-                </div>
-              ))}
+        <div className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-6 md:p-8 shadow-xl">
+          {error && (
+            <div className="mb-6 rounded-lg border border-red-700/50 bg-red-900/30 text-red-100 px-4 py-3 text-sm">
+              {error}
             </div>
+          )}
 
-            {/* Progress bar */}
-            <div className="relative mt-2">
-              <div className="absolute top-0 left-0 h-1 bg-gray-600 w-full rounded"></div>
-              <div
-                className="absolute top-0 left-0 h-1 bg-blue-600 rounded transition-all duration-300"
-                style={{ width: `${(step - 1) * 33.33}%` }}
-              ></div>
-            </div>
+          <div className="mb-6">
+            <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
+              <IoPersonAddOutline className="text-green-400" />
+              Join Your Classroom
+            </h1>
+            <p className="text-gray-300 mt-2">
+              Students only need a class enrollment code from their teacher.
+            </p>
           </div>
 
-          {/* Step content */}
-          {step === 1 && (
-            <GoalSettingStep
-              form={goalSettingForm}
-              onSubmit={handleGoalSubmit}
-              pageVariants={pageVariants}
-            />
-          )}
+          <form onSubmit={handleStudentJoin} className="space-y-4 max-w-md">
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Enrollment Code</label>
+              <input
+                type="text"
+                value={studentJoinCode}
+                onChange={(event) => setStudentJoinCode(event.target.value)}
+                placeholder="Enter classroom code"
+                className="w-full px-3 py-2 rounded bg-gray-700/60 border border-gray-600 text-white"
+                required
+              />
+            </div>
 
-          {step === 2 && (
-            <LearningStyleStep
-              form={learningStyleForm}
-              onSubmit={handleLearningStyleSubmit}
-              onBack={() => setStep(1)}
-              pageVariants={pageVariants}
-            />
-          )}
-
-          {step === 3 && (
-            <CareerPathStep
-              form={careerPathForm}
-              onSubmit={handleCareerPathSubmit}
-              onBack={() => setStep(2)}
-              pageVariants={pageVariants}
-              isLoading={onboardingMutation.isPending}
-            />
-          )}
-
-          {step === 4 && (
-            <OnboardingComplete
-              userData={userData}
-              pageVariants={pageVariants}
-            />
-          )}
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded bg-gradient-to-r from-green-600 to-emerald-500 text-white font-medium disabled:opacity-60 flex items-center gap-2"
+            >
+              <IoSchoolOutline />
+              {isSubmitting ? "Joining Classroom..." : "Join Classroom"}
+            </button>
+          </form>
         </div>
       </motion.div>
-    </section>
+    </GlassDashboardShell>
   );
 };
 

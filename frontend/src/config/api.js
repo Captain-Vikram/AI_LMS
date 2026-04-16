@@ -22,6 +22,9 @@ export const API_ENDPOINTS = {
   AUTH_UPDATE_ASSESSMENT_STATUS: "/api/auth/update-assessment-status",
 
   ONBOARDING_SAVE: "/api/onboarding/save",
+  ONBOARDING_TEACHER_SETUP: "/api/onboarding/teacher/setup",
+  ONBOARDING_STUDENT_JOIN: "/api/onboarding/student/join",
+  ONBOARDING_TEACHER_PATHWAY: "/api/onboarding/teacher/pathway/", // append classroom id
   ONBOARDING_USER_SKILLS: "/api/onboarding/user-skills",
 
   QUIZ_GENERATE: "/api/quiz/generate",
@@ -45,3 +48,16 @@ export const API_ENDPOINTS = {
   YOUTUBE_QUIZ_GENERATE: "/api/youtube-quiz/generate",
   YOUTUBE_QUIZ_SUBMIT: "/api/youtube-quiz/submit",
 };
+
+// Classroom endpoints (Phase 1)
+API_ENDPOINTS.CLASSROOM_LIST = "/api/classroom";
+API_ENDPOINTS.CLASSROOM_CREATE = "/api/classroom/create";
+API_ENDPOINTS.CLASSROOM_GET = "/api/classroom/"; // append id
+API_ENDPOINTS.CLASSROOM_JOIN = "/api/classroom/{id}/join";
+API_ENDPOINTS.CLASSROOM_FIND_BY_CODE = "/api/classroom/find";
+API_ENDPOINTS.CLASSROOM_MY_ENROLLMENTS = "/api/classroom/my/enrollments";
+API_ENDPOINTS.CLASSROOM_BOOTSTRAP_DEMO = "/api/classroom/bootstrap/demo";
+API_ENDPOINTS.CLASSROOM_RESOURCES = "/api/classroom/{id}/resources";
+API_ENDPOINTS.CLASSROOM_RESOURCE_APPROVAL = "/api/classroom/{id}/resources/{resourceId}/approval";
+
+API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM = "/api/auth/set-active-classroom/";

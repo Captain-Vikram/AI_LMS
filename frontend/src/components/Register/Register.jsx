@@ -60,6 +60,9 @@ const Register = () => {
       localStorage.setItem("isLoggedIn", "true");
       // Store the JWT token
       localStorage.setItem('token', data.token);
+      if (data.role) {
+        localStorage.setItem('userRole', data.role);
+      }
       
       // Initialize empty onboarding data
       localStorage.setItem('onboardingData', JSON.stringify({}));

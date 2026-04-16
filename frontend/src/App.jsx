@@ -13,6 +13,16 @@ import YoutubeAssessment from "./components/YoutubeAssessment";
 import Dashboard from "./components/Dashboard";
 import Signout from "./components/Signout";
 import OverallStatistics from "./components/OverallStatistics";
+import ClassroomList from "./components/Classroom/ClassroomList";
+import CreateClassroom from "./components/Classroom/CreateClassroom";
+import JoinByCode from "./components/Classroom/JoinByCode";
+import ClassroomPage from "./components/Classroom/ClassroomPage";
+import ClassroomDashboard from "./pages/Classroom/ClassroomDashboard";
+import ClassroomRoster from "./pages/Classroom/ClassroomRoster";
+import LearningModulesPage from "./pages/Classroom/LearningModules";
+import ClassroomSettings from "./pages/Classroom/ClassroomSettings";
+import ClassroomResources from "./pages/Classroom/ClassroomResources";
+import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import apiClient from "./services/apiClient";
 import { API_ENDPOINTS } from "./config/api";
@@ -32,7 +42,6 @@ const UserProgressRoute = ({ children }) => {
   const reassessmentInfo = localStorage.getItem("reassessmentInfo");
   const [statusLoading, setStatusLoading] = useState(!!token);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [assessmentComplete, setAssessmentComplete] = useState(false);
   const [statusError, setStatusError] = useState(false);
 
   useEffect(() => {
@@ -53,20 +62,17 @@ const UserProgressRoute = ({ children }) => {
         }
 
         const onboardingDone = !!status.onboarding_complete;
-        const assessmentDone = !!status.assessment_complete;
 
         setOnboardingComplete(onboardingDone);
-        setAssessmentComplete(assessmentDone);
         setStatusError(false);
+        if (status.role) {
+          localStorage.setItem("userRole", status.role);
+        }
 
         localStorage.setItem("isLoggedIn", "true");
         localStorage.setItem(
           "onboardingComplete",
           onboardingDone ? "true" : "false"
-        );
-        localStorage.setItem(
-          "skillAssessmentComplete",
-          assessmentDone ? "true" : "false"
         );
       } catch {
         if (isMounted) {
@@ -105,9 +111,6 @@ const UserProgressRoute = ({ children }) => {
   if (!onboardingComplete && !reassessmentInfo) {
     return <Navigate to="/onboarding" replace />;
   }
-  if (!assessmentComplete && !reassessmentInfo) {
-    return <Navigate to="/assessment" replace />;
-  }
   return children;
 };
 
@@ -117,9 +120,10 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <BackgroundProvider>
-        <BrowserRouter>
-          <Navbar />
-          <Routes>
+        <ClassroomProvider>
+          <BrowserRouter>
+            <Navbar />
+            <Routes>
             {/* Public routes */}
             <Route
               path="/"
@@ -178,9 +182,82 @@ const App = () => {
                 </UserProgressRoute>
               }
             />
+            <Route
+              path="/classrooms"
+              element={
+                <UserProgressRoute>
+                  <ClassroomList />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/create"
+              element={
+                <UserProgressRoute>
+                  <CreateClassroom />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/join"
+              element={
+                <UserProgressRoute>
+                  <JoinByCode />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id"
+              element={
+                <UserProgressRoute>
+                  <ClassroomPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/dashboard"
+              element={
+                <UserProgressRoute>
+                  <ClassroomDashboard />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/roster"
+              element={
+                <UserProgressRoute>
+                  <ClassroomRoster />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/modules"
+              element={
+                <UserProgressRoute>
+                  <LearningModulesPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/settings"
+              element={
+                <UserProgressRoute>
+                  <ClassroomSettings />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/resources"
+              element={
+                <UserProgressRoute>
+                  <ClassroomResources />
+                </UserProgressRoute>
+              }
+            />
             <Route path="/overall-statistics" element={<OverallStatistics />} />
           </Routes>
         </BrowserRouter>
+        </ClassroomProvider>
       </BackgroundProvider>
     </QueryClientProvider>
   );

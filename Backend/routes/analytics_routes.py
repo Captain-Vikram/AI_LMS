@@ -187,3 +187,80 @@ async def get_dashboard_analytics(authorization: str = Header(None)):
         "upcomingMilestones": upcoming_milestones,
         "recent_achievements": recent_achievements,
     }
+
+
+# Classroom analytics endpoints (Phase 2)
+from fastapi import Depends
+from services.classroom_analytics_service import ClassroomAnalyticsService
+from services.rbac_service import RBACService
+from functions.utils import get_current_user
+
+
+@router.get("/classroom/{classroom_id}")
+async def get_classroom_analytics(
+    classroom_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Get classroom-wide analytics (teacher only)"""
+    db = get_db()
+    rbac = RBACService(db)
+
+    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can view classroom analytics"
+        )
+
+    analytics_svc = ClassroomAnalyticsService(db)
+    try:
+        analytics = analytics_svc.get_classroom_analytics(classroom_id)
+        return {"status": "success", "data": analytics}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/classroom/{classroom_id}/student/{student_id}")
+async def get_student_progress(
+    classroom_id: str,
+    student_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Get student's progress in classroom (teacher only)"""
+    db = get_db()
+    rbac = RBACService(db)
+
+    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can view student analytics"
+        )
+
+    analytics_svc = ClassroomAnalyticsService(db)
+    try:
+        progress = analytics_svc.get_student_progress(classroom_id, student_id)
+        return {"status": "success", "data": progress}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/classroom/{classroom_id}/my-progress")
+async def get_my_progress(
+    classroom_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Get current student's progress (students only)"""
+    db = get_db()
+    rbac = RBACService(db)
+
+    if not rbac.is_student(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Students can only view their own progress"
+        )
+
+    analytics_svc = ClassroomAnalyticsService(db)
+    try:
+        progress = analytics_svc.get_student_progress(classroom_id, current_user["user_id"])
+        return {"status": "success", "data": progress}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -33,6 +33,9 @@ const Login = () => {
     onSuccess: (data) => {
       localStorage.setItem("isLoggedIn", "true");
       localStorage.setItem("token", data.token);
+      if (data.role) {
+        localStorage.setItem("userRole", data.role);
+      }
 
       // Store onboarding status
       if (data.onboarding_complete) {
@@ -51,15 +54,10 @@ const Login = () => {
         // If there's a reassessment in progress, continue with it
         navigate("/assessment");
       } else {
-        // Normal login flow based on completion status
-        if (data.assessment_complete) {
-          // Both onboarding and assessment are complete, go to dashboard
-          navigate("/dashboard");
-        } else if (data.onboarding_complete && !data.assessment_complete) {
-          // Onboarding is complete but assessment is not
-          navigate("/assessment");
+        // Classroom-first flow
+        if (data.onboarding_complete) {
+          navigate("/classrooms");
         } else {
-          // Onboarding is not complete
           navigate("/onboarding");
         }
       }

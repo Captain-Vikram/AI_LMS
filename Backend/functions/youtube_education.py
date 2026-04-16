@@ -107,6 +107,22 @@ def _build_youtube_search_link(skill: str, concept: str) -> str:
     return f"https://www.youtube.com/results?search_query={query}"
 
 
+def _build_youtube_tool_query(skill: str, concept: str, max_results: int = 1) -> str:
+    """
+    Build a YouTubeSearchTool query with a single trailing comma delimiter.
+
+    The tool parses input in the shape "query,max_results". Concepts like
+    "IaaS, PaaS, SaaS" can otherwise introduce extra commas and crash parsing.
+    """
+    safe_skill = re.sub(r"[\r\n,]+", " ", str(skill or ""))
+    safe_concept = re.sub(r"[\r\n,]+", " ", str(concept or ""))
+
+    safe_skill = re.sub(r"\s+", " ", safe_skill).strip()
+    safe_concept = re.sub(r"\s+", " ", safe_concept).strip()
+
+    return f"{safe_skill} {safe_concept} course,{int(max_results)}"
+
+
 def generate_skill_playlist(input_json, force_fallback: bool = False):
     """
     Build YouTube recommendations for each skill with robust LLM fallbacks.
@@ -187,7 +203,8 @@ Use 5 to 8 concise concepts.
 
         for concept in concepts:
             try:
-                link = youtube_tool.run(f"{skill} {concept} course,1")
+                query = _build_youtube_tool_query(skill, concept, max_results=1)
+                link = youtube_tool.run(query)
                 if not link:
                     link = _build_youtube_search_link(skill, concept)
                 playlist.append({"concept": concept, "youtube_link": str(link)})
