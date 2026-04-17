@@ -197,6 +197,9 @@ const ClassroomRoster = () => {
                     students={students}
                     loading={enrollmentLoading}
                     onRemoveStudent={removeStudent}
+                    onViewProgress={(student) =>
+                      navigate(`/classroom/${classroomId}/roster/${student.user_id}`)
+                    }
                     isTeacher={canManage}
                   />
                 </div>

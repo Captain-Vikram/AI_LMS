@@ -1,18 +1,19 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   IoBookOutline,
   IoCheckmarkCircleOutline,
+  IoCloseCircleOutline,
   IoGridOutline,
+  IoLinkOutline,
   IoPeopleOutline,
   IoRefreshOutline,
   IoSettingsOutline,
-  IoSparklesOutline,
 } from 'react-icons/io5';
 import {
   useAssignResourcesToModule,
-  useAutoGenerateModules,
   useClassroomAnalytics,
+  useClassroomResources,
   useCreateLearningModule,
   useLearningModules,
   useModuleApprovedResources,
@@ -20,11 +21,130 @@ import {
 } from '../../hooks/useClassroom';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
+import LearningModulesStudent from '../../components/Classroom/LearningModulesStudent';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 
 const getModuleId = (module) => module?.module_id || module?._id || '';
 
 const getModuleName = (module) => module?.name || module?.title || 'Untitled Module';
+
+const normalizeResourceLink = (urlValue) => {
+  if (!urlValue) {
+    return '';
+  }
+
+  const unwrapQuotes = (value) => {
+    let text = String(value || '').trim();
+    while (
+      (text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))
+    ) {
+      text = text.slice(1, -1).trim();
+    }
+    return text;
+  };
+
+  let raw = urlValue;
+  if (Array.isArray(raw)) {
+    raw = raw.find((item) => typeof item === 'string' && item.trim()) || '';
+  }
+
+  let text = unwrapQuotes(raw);
+  if (!text) {
+    return '';
+  }
+
+  if (text.startsWith('[') && text.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(text.replace(/'/g, '"'));
+      if (Array.isArray(parsed)) {
+        text = unwrapQuotes(parsed.find((item) => typeof item === 'string' && item.trim()) || '');
+      }
+    } catch {
+      // Keep current text and continue with regex extraction.
+    }
+  }
+
+  text = unwrapQuotes(text).replace(/\\u0026/g, '&').replace(/&amp;/gi, '&');
+
+  const matched = text.match(/https?:\/\/[^\s'"\]]+/i);
+  if (matched) {
+    text = matched[0].trim();
+  }
+
+  if (!/^https?:\/\//i.test(text) && /^[\w.-]+\.[a-z]{2,}(?:\/|$)/i.test(text)) {
+    text = `https://${text}`;
+  }
+
+  return /^https?:\/\//i.test(text) ? text : '';
+};
+
+const getLinkCategory = (resource) => {
+  const rawType = String(resource?.resource_type || '').trim().toLowerCase();
+  const rawSource = String(resource?.source || '').trim().toLowerCase();
+  const link = normalizeResourceLink(resource?.url).toLowerCase();
+
+  if (rawType.includes('youtube') || link.includes('youtube.com') || link.includes('youtu.be')) {
+    return 'youtube';
+  }
+
+  if (
+    rawType.includes('blog') ||
+    rawSource.includes('blog') ||
+    link.includes('medium.com') ||
+    link.includes('substack.com') ||
+    link.includes('dev.to') ||
+    link.includes('hashnode.') ||
+    link.includes('wordpress.') ||
+    link.includes('blogger.')
+  ) {
+    return 'blog';
+  }
+
+  return 'article';
+};
+
+const toShortTitle = (value, maxLength = 80) => {
+  const title = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!title) {
+    return 'Untitled Resource';
+  }
+
+  if (title.length <= maxLength) {
+    return title;
+  }
+
+  return `${title.slice(0, maxLength - 1).trim()}...`;
+};
+
+const getApprovalStatusLabel = (status) => {
+  if (status === 'approved') return 'Approved';
+  if (status === 'rejected') return 'Rejected';
+  return 'Pending';
+};
+
+const getApprovalStatusClasses = (status) => {
+  if (status === 'approved') {
+    return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200';
+  }
+  if (status === 'rejected') {
+    return 'border-rose-500/40 bg-rose-500/15 text-rose-200';
+  }
+  return 'border-amber-500/40 bg-amber-500/15 text-amber-200';
+};
+
+const normalizeClassroomRole = (rawRole) => {
+  const role = String(rawRole || '').trim().toLowerCase();
+  if (role === 'teacher' || role === 'admin' || role === 'student') {
+    return role;
+  }
+
+  if (role === 'educator' || role === 'instructor' || role === 'faculty') {
+    return 'teacher';
+  }
+
+  return 'student';
+};
 
 const getSortedModules = (modules = []) =>
   [...modules].sort((first, second) => {
@@ -39,17 +159,22 @@ const getSortedModules = (modules = []) =>
 
 const LearningModulesPage = () => {
   const { id: classroomId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [userRole] = useState((localStorage.getItem('userRole') || 'student').toLowerCase());
+  const [userRole] = useState(normalizeClassroomRole(localStorage.getItem('userRole')));
   const canManageModules = userRole === 'teacher' || userRole === 'admin';
+  const isResourceHubRoute = location.pathname.toLowerCase().includes('/resources');
 
   const [newModuleName, setNewModuleName] = useState('');
   const [newModuleDescription, setNewModuleDescription] = useState('');
   const [activeModuleForResources, setActiveModuleForResources] = useState(null);
   const [selectedResourceIds, setSelectedResourceIds] = useState([]);
-  const [generationMessage, setGenerationMessage] = useState('');
   const [managementMessage, setManagementMessage] = useState('');
-  const [showGenerationSuccess, setShowGenerationSuccess] = useState(false);
+  const [resourceFilter, setResourceFilter] = useState('all');
+  const [linkCategoryFilter, setLinkCategoryFilter] = useState('all');
+  const [resourceActionPendingId, setResourceActionPendingId] = useState('');
+  const [resourceActionMessage, setResourceActionMessage] = useState('');
+  const [resourceActionError, setResourceActionError] = useState('');
 
   const {
     modules,
@@ -61,10 +186,13 @@ const LearningModulesPage = () => {
   const { studentProgress, loading: analyticsLoading } = useClassroomAnalytics(classroomId);
 
   const {
-    generateModules,
-    loading: generatingModules,
-    error: generationError,
-  } = useAutoGenerateModules(classroomId);
+    resources: classResources,
+    summary: classResourceSummary,
+    loading: classResourcesLoading,
+    error: classResourcesError,
+    approveResource,
+    refresh: refreshClassResources,
+  } = useClassroomResources(classroomId, 'class', isResourceHubRoute && canManageModules);
 
   const {
     createModule,
@@ -137,33 +265,65 @@ const LearningModulesPage = () => {
     [modules]
   );
 
-  const handleAutoGenerate = async () => {
-    setGenerationMessage('');
-    setManagementMessage('');
+  const orderedClassResources = useMemo(() => {
+    const weightByStatus = {
+      pending: 0,
+      approved: 1,
+      rejected: 2,
+    };
 
-    const result = await generateModules();
-    if (result?.success) {
-      const processed = Number(
-        result.modulesProcessed || (result.modulesCreated || 0) + (result.modulesUpdated || 0)
-      );
-      const created = Number(result.modulesCreated || 0);
-      const updated = Number(result.modulesUpdated || 0);
+    return [...(classResources || [])].sort((first, second) => {
+      const firstStatus = String(first?.approval_status || 'pending').toLowerCase();
+      const secondStatus = String(second?.approval_status || 'pending').toLowerCase();
+      const firstWeight = weightByStatus[firstStatus] ?? 3;
+      const secondWeight = weightByStatus[secondStatus] ?? 3;
 
-      setGenerationMessage(
-        `Module generation complete: ${processed} processed (${created} created, ${updated} updated).`
-      );
-      setShowGenerationSuccess(true);
-      refreshModules();
-      if (canManageModules) {
-        refreshApprovedResources();
+      if (firstWeight !== secondWeight) {
+        return firstWeight - secondWeight;
       }
-      setTimeout(() => setShowGenerationSuccess(false), 5000);
-      return;
+
+      const firstTitle = String(first?.title || '').trim();
+      const secondTitle = String(second?.title || '').trim();
+      return firstTitle.localeCompare(secondTitle);
+    });
+  }, [classResources]);
+
+  const visibleClassResources = useMemo(() => {
+    let filtered = orderedClassResources;
+
+    if (resourceFilter !== 'all') {
+      filtered = filtered.filter(
+        (resource) => String(resource?.approval_status || 'pending').toLowerCase() === resourceFilter
+      );
     }
 
-    setGenerationMessage(`Failed to generate modules: ${result?.message || 'Unknown error'}`);
-    setShowGenerationSuccess(false);
-  };
+    if (linkCategoryFilter === 'all') {
+      return filtered;
+    }
+
+    return filtered.filter((resource) => getLinkCategory(resource) === linkCategoryFilter);
+  }, [orderedClassResources, resourceFilter, linkCategoryFilter]);
+
+  const groupedResourceLinks = useMemo(() => {
+    const groups = {
+      youtube: [],
+      article: [],
+      blog: [],
+    };
+
+    for (const resource of visibleClassResources) {
+      const category = getLinkCategory(resource);
+      if (groups[category]) {
+        groups[category].push(resource);
+      }
+    }
+
+    return [
+      { key: 'youtube', label: 'YouTube Links', items: groups.youtube },
+      { key: 'article', label: 'Article Links', items: groups.article },
+      { key: 'blog', label: 'Blog Links', items: groups.blog },
+    ];
+  }, [visibleClassResources]);
 
   const handleCreateModule = async (event) => {
     event.preventDefault();
@@ -257,6 +417,25 @@ const LearningModulesPage = () => {
     setManagementMessage(result?.message || 'Failed to assign resources.');
   };
 
+  const handleUpdateResourceApproval = async (resourceId, approved) => {
+    if (!resourceId) {
+      return;
+    }
+
+    setResourceActionPendingId(resourceId);
+    setResourceActionMessage('');
+    setResourceActionError('');
+
+    try {
+      await approveResource(resourceId, approved);
+      setResourceActionMessage(approved ? 'Resource approved successfully.' : 'Resource rejected successfully.');
+    } catch (err) {
+      setResourceActionError(err instanceof Error ? err.message : 'Failed to update resource approval status.');
+    } finally {
+      setResourceActionPendingId('');
+    }
+  };
+
   const renderModuleActions = canManageModules
     ? (module) => {
         const moduleId = getModuleId(module);
@@ -294,10 +473,236 @@ const LearningModulesPage = () => {
             >
               {isActive ? 'Close' : 'Add'}
             </button>
+            <button
+              type="button"
+              onClick={() =>
+                navigate(`/classroom/${classroomId}/modules/${moduleId}/assessment-builder`)
+              }
+              className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:border-purple-500"
+            >
+              Assessment
+            </button>
           </>
         );
       }
     : null;
+
+  if (isResourceHubRoute && !canManageModules) {
+    return <Navigate to={`/classroom/${classroomId}/personal-resources`} replace />;
+  }
+
+  if (isResourceHubRoute && canManageModules) {
+    const summary = classResourceSummary || { total: 0, approved: 0, pending: 0, rejected: 0 };
+
+    return (
+      <GlassDashboardShell contentClassName="max-w-7xl">
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-r from-slate-900 via-purple-950/40 to-slate-900 p-6 shadow-2xl">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-purple-200">Teacher Resource Hub</p>
+                <h1 className="mt-2 text-3xl font-bold text-gray-100">Classroom Resource Review</h1>
+                <p className="mt-2 text-sm text-gray-300">
+                  Review incoming AI resources, approve what fits your syllabus, and reject low-quality entries.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                <button
+                  onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-cyan-500 px-3 py-2 font-medium text-white transition-colors hover:bg-cyan-600"
+                >
+                  <IoGridOutline /> Dashboard
+                </button>
+                <button
+                  onClick={() => navigate(`/classroom/${classroomId}/modules`)}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 font-medium text-white transition-colors hover:bg-emerald-600"
+                >
+                  <IoBookOutline /> Modules
+                </button>
+                <button
+                  onClick={() => refreshClassResources('class')}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-purple-600 px-3 py-2 font-medium text-white transition-colors hover:bg-purple-500"
+                >
+                  <IoRefreshOutline /> Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {(resourceActionMessage || resourceActionError || classResourcesError) && (
+            <div
+              className={`rounded-lg border p-4 text-sm ${
+                resourceActionError || classResourcesError
+                  ? 'border-red-500/50 bg-red-500/10 text-red-200'
+                  : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-100'
+              }`}
+            >
+              {resourceActionError || classResourcesError || resourceActionMessage}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
+              <p className="text-xs text-cyan-200/80">Total</p>
+              <p className="mt-1 text-2xl font-bold text-cyan-100">{Number(summary.total || 0)}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+              <p className="text-xs text-emerald-200/80">Approved</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-100">{Number(summary.approved || 0)}</p>
+            </div>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="text-xs text-amber-200/80">Pending</p>
+              <p className="mt-1 text-2xl font-bold text-amber-100">{Number(summary.pending || 0)}</p>
+            </div>
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4">
+              <p className="text-xs text-rose-200/80">Rejected</p>
+              <p className="mt-1 text-2xl font-bold text-rose-100">{Number(summary.rejected || 0)}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { value: 'all', label: 'All Status' },
+                { value: 'pending', label: 'Pending' },
+                { value: 'approved', label: 'Approved' },
+                { value: 'rejected', label: 'Rejected' },
+              ].map((option) => {
+                const selected = resourceFilter === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setResourceFilter(option.value)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      selected
+                        ? 'border-purple-400 bg-purple-500/20 text-purple-100'
+                        : 'border-gray-600 bg-gray-800 text-gray-300 hover:border-purple-400'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {[
+                { value: 'all', label: 'All Links' },
+                { value: 'youtube', label: 'YouTube' },
+                { value: 'article', label: 'Articles' },
+                { value: 'blog', label: 'Blogs' },
+              ].map((option) => {
+                const selected = linkCategoryFilter === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setLinkCategoryFilter(option.value)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      selected
+                        ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
+                        : 'border-gray-600 bg-gray-800 text-gray-300 hover:border-cyan-400'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {classResourcesLoading ? (
+            <LoadingState message="Loading classroom resources..." />
+          ) : visibleClassResources.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-600 p-6 text-center text-gray-300">
+              <p className="text-lg">No resources found for this filter.</p>
+              <p className="mt-2 text-sm text-gray-400">
+                Try switching filters or generate new classroom resources from your dashboard.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groupedResourceLinks.map((group) => {
+                if (group.items.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <section key={group.key} className="rounded-xl border border-gray-700 bg-gray-900/70 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-cyan-200">{group.label}</h2>
+                      <span className="text-xs text-gray-400">{group.items.length} link(s)</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {group.items.map((resource) => {
+                        const resourceId = resource?.resource_id;
+                        const status = String(resource?.approval_status || 'pending').toLowerCase();
+                        const link = normalizeResourceLink(resource?.url);
+                        const actionPending = resourceActionPendingId === resourceId;
+
+                        return (
+                          <article
+                            key={resourceId}
+                            className="rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 transition-colors hover:border-purple-400/50"
+                          >
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-medium text-gray-100">{toShortTitle(resource?.title)}</p>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${getApprovalStatusClasses(status)}`}>
+                                    {getApprovalStatusLabel(status)}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-400">{resource?.skill || 'General'}</p>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 sm:justify-end">
+                                {link ? (
+                                  <a
+                                    href={link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/20"
+                                  >
+                                    <IoLinkOutline /> Open Link
+                                  </a>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateResourceApproval(resourceId, true)}
+                                  disabled={actionPending || status === 'approved'}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                                >
+                                  <IoCheckmarkCircleOutline />
+                                  {status === 'approved' ? 'Approved' : 'Approve'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateResourceApproval(resourceId, false)}
+                                  disabled={actionPending || status === 'rejected'}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-rose-500 disabled:opacity-60"
+                                >
+                                  <IoCloseCircleOutline />
+                                  {status === 'rejected' ? 'Rejected' : 'Reject'}
+                                </button>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </GlassDashboardShell>
+    );
+  }
 
   if (modulesLoading) {
     return (
@@ -311,6 +716,14 @@ const LearningModulesPage = () => {
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
         <ErrorState message={modulesError} />
+      </GlassDashboardShell>
+    );
+  }
+
+  if (!canManageModules) {
+    return (
+      <GlassDashboardShell contentClassName="max-w-7xl">
+        <LearningModulesStudent classroomId={classroomId} modules={orderedModules} />
       </GlassDashboardShell>
     );
   }
@@ -330,22 +743,7 @@ const LearningModulesPage = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-4">
-              {canManageModules && (
-                <button
-                  onClick={handleAutoGenerate}
-                  disabled={generatingModules}
-                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500 px-3 py-2 font-medium text-white transition-colors hover:bg-amber-600 disabled:bg-gray-500"
-                  title="Auto-generate modules from approved resources"
-                >
-                  {generatingModules ? (
-                    <IoRefreshOutline className="animate-spin" />
-                  ) : (
-                    <IoSparklesOutline />
-                  )}
-                  <span className="hidden sm:inline">Generate</span>
-                </button>
-              )}
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
               <button
                 onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}
                 className="inline-flex items-center justify-center gap-1 rounded-lg bg-cyan-500 px-3 py-2 font-medium text-white transition-colors hover:bg-cyan-600"
@@ -367,24 +765,6 @@ const LearningModulesPage = () => {
             </div>
           </div>
         </div>
-
-        {showGenerationSuccess && (
-          <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
-            <p className="text-sm text-emerald-200">{generationMessage}</p>
-          </div>
-        )}
-
-        {!showGenerationSuccess && generationMessage && (
-          <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4">
-            <p className="text-sm text-red-200">{generationMessage}</p>
-          </div>
-        )}
-
-        {generationError && (
-          <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4">
-            <p className="text-sm text-red-200">{generationError}</p>
-          </div>
-        )}
 
         {managementMessage && (
           <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-4">
@@ -608,7 +988,7 @@ const LearningModulesPage = () => {
             <p className="text-lg">No learning modules available yet.</p>
             <p className="mt-2 text-sm text-gray-400">
               {canManageModules
-                ? 'Create one manually above or run auto-generation from approved resources.'
+                ? 'Create your first module manually above. Classroom creation AI also seeds modules from curriculum focus areas.'
                 : 'Your teacher will publish modules soon.'}
             </p>
           </div>

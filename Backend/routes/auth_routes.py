@@ -244,7 +244,11 @@ async def set_active_classroom(classroom_id: str, current_user = Depends(get_cur
 
     # Check membership
     user_oid = ObjectId(current_user["user_id"])
-    if not (user_oid == class_obj.get("teacher_id") or user_oid in class_obj.get("students", [])):
+    is_student = user_oid in class_obj.get("students", [])
+    is_teacher = user_oid == class_obj.get("teacher_id")
+    is_co_teacher = current_user["user_id"] in class_obj.get("co_teachers", [])
+    
+    if not (is_student or is_teacher or is_co_teacher):
         raise HTTPException(status_code=403, detail="Not a member of this classroom")
 
     # Build new token

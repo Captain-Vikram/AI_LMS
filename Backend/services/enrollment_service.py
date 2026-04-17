@@ -153,7 +153,11 @@ class EnrollmentService:
         if not classroom:
             raise ValueError("Classroom not found")
 
-        if str(classroom.get("teacher_id")) != teacher_id:
+        # Allow primary teacher or co-teachers
+        is_primary_teacher = str(classroom.get("teacher_id")) == teacher_id
+        is_co_teacher = teacher_id in classroom.get("co_teachers", [])
+        
+        if not (is_primary_teacher or is_co_teacher):
             raise ValueError("Only classroom teacher can bulk enroll")
 
         success_count = 0

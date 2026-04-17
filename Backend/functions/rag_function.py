@@ -219,6 +219,35 @@ class YouTubeLangChainRAG:
             + "\n\nPlease ask again shortly for a full generated explanation."
         )
 
+    def _retrieve_docs_without_vector_store(
+        self,
+        documents: List[Document],
+        question: str,
+        top_k: int,
+    ) -> List[Document]:
+        if not documents:
+            return []
+
+        tokens = set(re.findall(r"[a-zA-Z0-9]+", str(question or "").lower()))
+        ranked: List[tuple] = []
+
+        for index, doc in enumerate(documents):
+            content = str(doc.page_content or "").lower()
+            if tokens:
+                score = sum(1 for token in tokens if token in content)
+            else:
+                score = 0
+            ranked.append((score, -index, doc))
+
+        ranked.sort(reverse=True)
+        selected = [item[2] for item in ranked[: max(1, top_k)]]
+
+        # If relevance is weak, keep deterministic earliest chunks for context coverage.
+        if all(item[0] == 0 for item in ranked[: max(1, top_k)]):
+            return documents[: max(1, top_k)]
+
+        return selected
+
     def process_video(self, video_url, languages=['en'], force_refresh=False):
         """
         Process a video transcript and create a vector store.
@@ -246,11 +275,17 @@ class YouTubeLangChainRAG:
         # Convert to LangChain documents
         documents = create_langchain_documents(transcriptions)
 
-        # Create vector store
-        vector_store = FAISS.from_documents(
-            documents,
-            self.embedding_model
-        )
+        # Create vector store. If FAISS is unavailable, we keep raw docs and
+        # use a lightweight retrieval fallback in answer_question.
+        vector_store = None
+        vector_store_error = None
+        try:
+            vector_store = FAISS.from_documents(
+                documents,
+                self.embedding_model
+            )
+        except Exception as exc:
+            vector_store_error = str(exc)
 
         # Store processed data
         self.video_data[video_id] = {
@@ -258,7 +293,8 @@ class YouTubeLangChainRAG:
             "video_url": video_url,
             "transcriptions": transcriptions,
             "documents": documents,
-            "vector_store": vector_store
+            "vector_store": vector_store,
+            "vector_store_error": vector_store_error,
         }
 
         return self.video_data[video_id]
@@ -288,17 +324,31 @@ class YouTubeLangChainRAG:
         # Get video data
         video_data = self.video_data[video_id]
 
-        # Get vector store
-        vector_store = video_data["vector_store"]
+        # Get vector store, with graceful fallback when FAISS retrieval isn't available.
+        vector_store = video_data.get("vector_store")
+        vector_store_error = video_data.get("vector_store_error")
+        relevant_docs: List[Document]
 
-        # Create retriever with top_k
-        retriever = vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": top_k}
-        )
-
-        # Get relevant documents
-        relevant_docs = retriever.get_relevant_documents(question)
+        if vector_store is not None:
+            try:
+                retriever = vector_store.as_retriever(
+                    search_type="similarity",
+                    search_kwargs={"k": top_k}
+                )
+                relevant_docs = retriever.get_relevant_documents(question)
+            except Exception as exc:
+                vector_store_error = str(exc)
+                relevant_docs = self._retrieve_docs_without_vector_store(
+                    video_data.get("documents", []),
+                    question,
+                    top_k,
+                )
+        else:
+            relevant_docs = self._retrieve_docs_without_vector_store(
+                video_data.get("documents", []),
+                question,
+                top_k,
+            )
 
         # Format context from relevant documents
         context = ""
@@ -320,10 +370,10 @@ class YouTubeLangChainRAG:
                 snippet_text = f"{snippet_text[:300]}..."
 
             sources.append({
-                "start_time": doc.metadata["start_time"],
-                "end_time": doc.metadata["end_time"],
-                "start_seconds": doc.metadata["start_seconds"],
-                "end_seconds": doc.metadata["end_seconds"],
+                "start_time": doc.metadata.get("start_time", "00:00:00"),
+                "end_time": doc.metadata.get("end_time", "00:00:00"),
+                "start_seconds": doc.metadata.get("start_seconds", 0),
+                "end_seconds": doc.metadata.get("end_seconds", 0),
                 "text": snippet_text,
             })
 
@@ -337,6 +387,9 @@ class YouTubeLangChainRAG:
             fallback = True
             fallback_reason = self._classify_fallback_reason(str(exc))
             answer = self._build_fallback_answer(question, relevant_docs)
+
+        if vector_store_error and not fallback_reason:
+            fallback_reason = "VECTOR_RETRIEVAL_FALLBACK"
 
         # Return answer with metadata
         return {

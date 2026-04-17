@@ -7,9 +7,6 @@ import { BackgroundProvider } from "./context/BackgroundContext";
 import Register from "./components/Register/Register";
 import Login from "./components/Login";
 import Onboarding from "./components/onboarding/Onboarding";
-import SkillAssesment from "./components/SkillAssessment";
-import SkillAssessmentRecommendations from "./components/SkillAssessmentRecommendations";
-import YoutubeAssessment from "./components/YoutubeAssessment";
 import Dashboard from "./components/Dashboard";
 import Signout from "./components/Signout";
 import OverallStatistics from "./components/OverallStatistics";
@@ -20,8 +17,12 @@ import ClassroomPage from "./components/Classroom/ClassroomPage";
 import ClassroomDashboard from "./pages/Classroom/ClassroomDashboard";
 import ClassroomRoster from "./pages/Classroom/ClassroomRoster";
 import LearningModulesPage from "./pages/Classroom/LearningModules";
+import StudentPersonalResourcesPage from "./pages/Classroom/StudentPersonalResourcesPage";
+import ModuleAssessmentBuilderPage from "./pages/Classroom/ModuleAssessmentBuilderPage";
 import ClassroomSettings from "./pages/Classroom/ClassroomSettings";
-import ClassroomResources from "./pages/Classroom/ClassroomResources";
+import InteractiveLessonViewer from "./components/Classroom/InteractiveLessonViewer";
+import TeacherGradingDashboard from "./components/Classroom/TeacherGradingDashboard";
+import StudentProgressTimeline from "./components/Classroom/StudentProgressTimeline";
 import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import apiClient from "./services/apiClient";
@@ -151,30 +152,6 @@ const App = () => {
               }
             />
             <Route
-              path="/assessment"
-              element={
-                <ProtectedRoute>
-                  <SkillAssesment />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/recommendations"
-              element={
-                <ProtectedRoute>
-                  <SkillAssessmentRecommendations />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/youtube-assesment"
-              element={
-                <ProtectedRoute>
-                  <YoutubeAssessment />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/dashboard"
               element={
                 <UserProgressRoute>
@@ -239,18 +216,50 @@ const App = () => {
               }
             />
             <Route
-              path="/classroom/:id/settings"
+              path="/classroom/:id/personal-resources"
               element={
                 <UserProgressRoute>
-                  <ClassroomSettings />
+                  <StudentPersonalResourcesPage />
                 </UserProgressRoute>
               }
             />
             <Route
-              path="/classroom/:id/resources"
+              path="/classroom/:id/modules/:moduleId/learn/:resourceId"
               element={
                 <UserProgressRoute>
-                  <ClassroomResources />
+                  <InteractiveLessonViewer />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/modules/:moduleId/assessment-builder"
+              element={
+                <UserProgressRoute>
+                  <ModuleAssessmentBuilderPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/roster/:studentId"
+              element={
+                <UserProgressRoute>
+                  <StudentProgressTimeline />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/grading"
+              element={
+                <UserProgressRoute>
+                  <TeacherGradingDashboard />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/settings"
+              element={
+                <UserProgressRoute>
+                  <ClassroomSettings />
                 </UserProgressRoute>
               }
             />

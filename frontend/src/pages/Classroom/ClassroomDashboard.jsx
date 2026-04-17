@@ -10,6 +10,7 @@ import { LoadingState, ErrorState, ClassroomStats } from '../../components/Class
 import { AnnouncementFeed, AnnouncementCreate } from '../../components/Classroom/AnnouncementFeed';
 import { PendingAssignments, SubmissionList } from '../../components/Classroom/PendingAssignments';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
+import ActivityFeed from '../../components/Classroom/ActivityFeed';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
@@ -20,7 +21,6 @@ import {
   IoFlameOutline,
   IoGridOutline,
   IoRocketOutline,
-  IoSparklesOutline,
   IoTimeOutline,
   IoArrowForwardOutline,
   IoAlertCircleOutline,
@@ -77,6 +77,7 @@ const ClassroomDashboard = () => {
   const [studentClassProgress, setStudentClassProgress] = useState({});
   const [classContextLoading, setClassContextLoading] = useState(false);
   const [classContextError, setClassContextError] = useState('');
+  const [pendingGradingCount, setPendingGradingCount] = useState(0);
 
   // Fetch dashboard data
   const { dashboard, overview, loading: dashboardLoading, error: dashboardError } =
@@ -228,6 +229,40 @@ const ClassroomDashboard = () => {
     };
   }, [dashboard, userRole, classroomId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPendingGrading = async () => {
+      if (!classroomId || userRole !== 'teacher') {
+        return;
+      }
+
+      try {
+        const response = await apiClient.get(
+          `/api/classroom/${classroomId}/pending-grading-count`
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        setPendingGradingCount(Number(response?.pending_count || 0));
+      } catch {
+        if (isMounted) {
+          setPendingGradingCount(0);
+        }
+      }
+    };
+
+    loadPendingGrading();
+    const interval = setInterval(loadPendingGrading, 20000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [classroomId, userRole]);
+
   if (dashboardLoading) {
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
@@ -353,6 +388,12 @@ const ClassroomDashboard = () => {
                 Open Modules
               </button>
               <button
+                onClick={() => navigate(`/classroom/${classroomId}/grading`)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+              >
+                Grade Queue ({pendingGradingCount})
+              </button>
+              <button
                 onClick={() => navigate(`/classroom/${classroomId}/settings`)}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors"
               >
@@ -410,6 +451,20 @@ const ClassroomDashboard = () => {
           </div>
 
           <div className="xl:col-span-4 space-y-6">
+            <div className="p-6 rounded-xl bg-gray-800/60 border border-gray-700">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-100">Activity Feed</h3>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/classroom/${classroomId}/grading`)}
+                  className="text-xs text-amber-300 hover:text-amber-200"
+                >
+                  Pending grading: {pendingGradingCount}
+                </button>
+              </div>
+              <ActivityFeed classroomId={classroomId} limit={12} compact />
+            </div>
+
             <div className="p-6 rounded-xl bg-gradient-to-br from-blue-500/10 to-indigo-500/10 border border-blue-500/30">
               <h3 className="font-semibold text-gray-100 mb-4">Class Pulse</h3>
 
@@ -535,12 +590,6 @@ const ClassroomDashboard = () => {
 
   // Render student dashboard
   const studentDashboard = dashboard;
-  const studentResourceSummary = studentDashboard?.class_resource_summary || {
-    total: 0,
-    approved: 0,
-    pending: 0,
-    rejected: 0,
-  };
 
   const currentProgress = studentProgress || {};
   const averageScore = clampPercent(currentProgress.average_score_percentage || 0);
@@ -626,10 +675,10 @@ const ClassroomDashboard = () => {
               All Classrooms
             </button>
             <button
-              onClick={() => navigate(`/classroom/${classroomId}/resources`)}
+              onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-purple-500 hover:bg-purple-600 text-white transition-colors"
             >
-              Open Resource Hub
+              Personal Resources
             </button>
             <button
               onClick={() => navigate(`/classroom/${classroomId}/modules`)}
@@ -822,48 +871,6 @@ const ClassroomDashboard = () => {
               studentProgress={currentProgress}
               loading={modulesLoading}
             />
-          </div>
-
-          <div className="p-6 rounded-xl bg-gray-800/60 border border-gray-700">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
-                  <IoSparklesOutline className="text-cyan-300" />
-                  AI Learning Resources
-                </h2>
-                <p className="text-sm text-gray-400 mt-1">
-                  Browse class and personal resources from the dedicated Resource Hub.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => navigate(`/classroom/${classroomId}/resources`)}
-                className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-700"
-              >
-                Open Resource Hub
-                <IoArrowForwardOutline />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <div className="rounded-lg border border-gray-700 bg-gray-900/50 px-3 py-2 text-gray-200">
-                <p className="text-gray-400">Total</p>
-                <p className="text-lg font-semibold text-cyan-300">{studentResourceSummary.total || 0}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-900/50 px-3 py-2 text-gray-200">
-                <p className="text-gray-400">Approved</p>
-                <p className="text-lg font-semibold text-emerald-300">{studentResourceSummary.approved || 0}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-900/50 px-3 py-2 text-gray-200">
-                <p className="text-gray-400">Pending</p>
-                <p className="text-lg font-semibold text-amber-300">{studentResourceSummary.pending || 0}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-900/50 px-3 py-2 text-gray-200">
-                <p className="text-gray-400">Rejected</p>
-                <p className="text-lg font-semibold text-rose-300">{studentResourceSummary.rejected || 0}</p>
-              </div>
-            </div>
           </div>
         </div>
       </div>

@@ -5,6 +5,56 @@ const getModuleId = (module, idx) =>
 
 const getModuleName = (module) => module?.name || module?.title || 'Untitled Module';
 
+const normalizeResourceUrl = (urlValue) => {
+  if (!urlValue) {
+    return '';
+  }
+
+  const unwrapQuotes = (value) => {
+    let text = String(value || '').trim();
+    while (
+      (text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))
+    ) {
+      text = text.slice(1, -1).trim();
+    }
+    return text;
+  };
+
+  let raw = urlValue;
+  if (Array.isArray(raw)) {
+    raw = raw.find((item) => typeof item === 'string' && item.trim()) || '';
+  }
+
+  let text = unwrapQuotes(raw);
+  if (!text) {
+    return '';
+  }
+
+  if (text.startsWith('[') && text.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(text.replace(/'/g, '"'));
+      if (Array.isArray(parsed)) {
+        text = unwrapQuotes(parsed.find((item) => typeof item === 'string' && item.trim()) || '');
+      }
+    } catch {
+      // Continue with regex extraction.
+    }
+  }
+
+  text = unwrapQuotes(text).replace(/\\u0026/g, '&').replace(/&amp;/gi, '&');
+  const matched = text.match(/https?:\/\/[^\s'"\]]+/i);
+  if (matched) {
+    text = matched[0].trim();
+  }
+
+  if (!/^https?:\/\//i.test(text) && /^[\w.-]+\.[a-z]{2,}(?:\/|$)/i.test(text)) {
+    text = `https://${text}`;
+  }
+
+  return /^https?:\/\//i.test(text) ? text : '';
+};
+
 const toPercent = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -116,20 +166,37 @@ export const ModuleList = ({ modules = [], loading = false, moduleActions = null
                     Resources:
                   </h5>
                   <div className="space-y-2">
-                    {module.resources.map((resource, idx) => (
-                      <a
-                        key={idx}
-                        href={resource.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block text-xs text-blue-400 hover:text-blue-300 p-2 bg-gray-700/50 rounded hover:bg-gray-700 transition-colors"
-                      >
-                        <div className="font-medium">{resource.title}</div>
-                        <div className="text-gray-500 text-xs mt-1">
-                          {resource.resource_type}
-                        </div>
-                      </a>
-                    ))}
+                    {module.resources.map((resource, idx) => {
+                      const link = normalizeResourceUrl(resource?.url);
+                      const className =
+                        'block text-xs p-2 bg-gray-700/50 rounded transition-colors';
+
+                      if (!link) {
+                        return (
+                          <div key={idx} className={`${className} text-gray-300`}>
+                            <div className="font-medium">{resource.title}</div>
+                            <div className="text-gray-500 text-xs mt-1">
+                              {resource.resource_type}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <a
+                          key={idx}
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`${className} text-blue-400 hover:text-blue-300 hover:bg-gray-700`}
+                        >
+                          <div className="font-medium">{resource.title}</div>
+                          <div className="text-gray-500 text-xs mt-1">
+                            {resource.resource_type}
+                          </div>
+                        </a>
+                      );
+                    })}
                   </div>
                 </div>
               )}

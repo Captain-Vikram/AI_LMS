@@ -13,7 +13,6 @@ from database import get_db
 from functions.llm_adapter import generate_text
 from functions.utils import get_current_user, normalize_user_role
 from jwt_config import settings
-from models.onboarding_models import OnboardingData
 
 
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
@@ -400,7 +399,12 @@ async def student_join_onboarding(
     classroom_oid = classroom["_id"]
     classroom_id = str(classroom_oid)
 
-    if user_oid != classroom.get("teacher_id"):
+    # Check if user is already a teacher or co-teacher
+    is_teacher = user_oid == classroom.get("teacher_id")
+    is_co_teacher = current_user["user_id"] in classroom.get("co_teachers", [])
+    
+    # Only add as student if not already a teacher/co-teacher
+    if not (is_teacher or is_co_teacher):
         db.classrooms.update_one(
             {"_id": classroom_oid},
             {"$addToSet": {"students": user_oid}},
@@ -441,6 +445,58 @@ async def student_join_onboarding(
         },
     )
 
+    # Create StudentProgress records for all modules
+    # First resource of first module is unlocked; all others are locked
+    try:
+        modules = list(db.learning_modules.find(
+            {"classroom_id": classroom_oid},
+            sort=[("created_at", 1)]
+        ))
+        
+        for module_idx, module in enumerate(modules):
+            module_oid = module["_id"]
+            module_id_str = str(module_oid)
+            
+            resources = module.get("resources", [])
+            for resource_idx, resource in enumerate(resources):
+                resource_id = resource.get("id") or str(resource.get("_id", ""))
+                
+                # First resource of first module is unlocked
+                is_first = (module_idx == 0 and resource_idx == 0)
+                
+                progress_doc = {
+                    "student_id": str(user_oid),
+                    "classroom_id": classroom_id,
+                    "module_id": module_id_str,
+                    "resource_id": resource_id,
+                    "is_unlocked": is_first,
+                    "unlocked_at": datetime.utcnow() if is_first else None,
+                    "tests_taken": 0,
+                    "passed_tests_count": 0,
+                    "failed_tests_count": 0,
+                    "highest_score": None,
+                    "last_test_date": None,
+                    "single_turn_chat_history": [],
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "last_accessed_at": None,
+                }
+                
+                # Upsert to avoid duplicates if student rejoins
+                db.student_progress.update_one(
+                    {
+                        "student_id": str(user_oid),
+                        "classroom_id": classroom_id,
+                        "module_id": module_id_str,
+                        "resource_id": resource_id,
+                    },
+                    {"$set": progress_doc},
+                    upsert=True,
+                )
+    except Exception as e:
+        # Log error but don't fail the join request
+        print(f"Warning: Failed to create StudentProgress records: {e}")
+
     return {
         "status": "success",
         "classroom_id": classroom_id,
@@ -453,6 +509,7 @@ async def student_join_onboarding(
 @router.get("/teacher/pathway/{classroom_id}")
 async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(get_current_user)):
     db = get_db()
+    rbac = RBACService(db)
     try:
         classroom_oid = ObjectId(classroom_id)
     except Exception:
@@ -465,7 +522,8 @@ async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(ge
     requester_oid = ObjectId(current_user["user_id"])
     normalized_role = normalize_user_role(current_user.get("role"))
 
-    if requester_oid != classroom.get("teacher_id") and normalized_role != "admin":
+    # Allow primary teacher, co-teachers, or admins
+    if normalized_role != "admin" and not rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=403, detail="Only classroom teacher can view the full pathway")
 
     return {
@@ -477,79 +535,7 @@ async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(ge
 
 
 # Legacy onboarding endpoint (kept for backward compatibility)
-@router.post("/save")
-async def save_onboarding_data(onboarding_data: OnboardingData, user_id: str = Depends(get_current_user_id)):
-    db = get_db()
-
-    # 1. Update UserPreferences
-    preferences_data = {
-        "user_id": ObjectId(user_id),
-        "learning_style": onboarding_data.preferredStyle,
-        "learning_pace": onboarding_data.learningPace,
-        "preferred_resources": onboarding_data.preferredResources,
-        "time_commitment": onboarding_data.timeCommitment,
-        "updated_at": datetime.utcnow(),
-    }
-
-    db.user_preferences.update_one(
-        {"user_id": ObjectId(user_id)},
-        {"$set": preferences_data},
-        upsert=True,
-    )
-
-    # 2. Create/Update UserGoals
-    if onboarding_data.primaryGoal:
-        goal_data = {
-            "user_id": ObjectId(user_id),
-            "goal_title": onboarding_data.primaryGoal,
-            "target_date": datetime.utcnow() + timedelta(days=90),
-            "status": "active",
-            "created_at": datetime.utcnow(),
-        }
-        db.user_goals.insert_one(goal_data)
-
-    # 3. Update UserProfile with career-related info
-    career_data = {
-        "career_path": onboarding_data.careerPath,
-        "experience_level": onboarding_data.experienceLevel,
-        "desired_certifications": onboarding_data.desiredCertifications,
-    }
-
-    db.user_profiles.update_one(
-        {"user_id": ObjectId(user_id)},
-        {"$set": career_data},
-    )
-
-    # 4. Save priority skills to user_skills collection
-    if onboarding_data.prioritySkills and len(onboarding_data.prioritySkills) > 0:
-        db.user_skills.delete_many({"user_id": ObjectId(user_id)})
-
-        current_time = datetime.utcnow()
-        skill_documents = []
-
-        for skill_id in onboarding_data.prioritySkills:
-            skill_document = {
-                "user_id": ObjectId(user_id),
-                "skill_id": skill_id,
-                "experience_level": onboarding_data.experienceLevel or "beginner",
-                "proficiency": 0,
-                "status": "in_progress",
-                "created_at": current_time,
-                "updated_at": current_time,
-                "last_practiced": None,
-            }
-            skill_documents.append(skill_document)
-
-        if skill_documents:
-            db.user_skills.insert_many(skill_documents)
-
-    # 5. Mark onboarding as complete in user record
-    db.users.update_one(
-        {"_id": ObjectId(user_id)},
-        {"$set": {"onboarding_complete": True}},
-    )
-
-    return {"message": "Onboarding data saved successfully"}
+# Removed: /save endpoint (dead code - OnboardingData not used in module system)
 
 
 @router.get("/status")
@@ -563,17 +549,4 @@ async def get_onboarding_status(user_id: str = Depends(get_current_user_id)):
     return {"onboarding_complete": user.get("onboarding_complete", False)}
 
 
-@router.get("/user-skills")
-async def get_user_skills(user_id: str = Depends(get_current_user_id)):
-    """Retrieve a user's skills"""
-    db = get_db()
-
-    skills_cursor = db.user_skills.find({"user_id": ObjectId(user_id)})
-    skills = []
-
-    for skill in skills_cursor:
-        skill["_id"] = str(skill["_id"])
-        skill["user_id"] = str(skill["user_id"])
-        skills.append(skill)
-
-    return skills
+# Removed: /user-skills endpoint (dead code - not used by frontend or module system)

@@ -66,6 +66,50 @@ def _parse_bool(value: Any) -> bool:
     return False
 
 
+def _normalize_module_seed_name(candidate: Any) -> str:
+    cleaned = re.sub(r"\s+", " ", str(candidate or "").strip())
+    if not cleaned:
+        return ""
+    if len(cleaned) > 120:
+        cleaned = cleaned[:120].strip()
+    return cleaned
+
+
+def _derive_initial_module_names(
+    focus_areas: List[str],
+    ai_resources: List[Dict[str, Any]],
+    max_items: int = 10,
+) -> List[str]:
+    ordered_candidates: List[str] = []
+    seen_keys = set()
+
+    def add_candidate(value: Any):
+        normalized = _normalize_module_seed_name(value)
+        if not normalized:
+            return
+
+        key = normalized.lower()
+        if key in seen_keys:
+            return
+
+        seen_keys.add(key)
+        ordered_candidates.append(normalized)
+
+    for area in focus_areas or []:
+        add_candidate(area)
+        if len(ordered_candidates) >= max_items:
+            return ordered_candidates
+
+    for resource in ai_resources or []:
+        if not isinstance(resource, dict):
+            continue
+        add_candidate(resource.get("module_name") or resource.get("skill"))
+        if len(ordered_candidates) >= max_items:
+            break
+
+    return ordered_candidates
+
+
 def _to_iso(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
@@ -260,15 +304,43 @@ def _build_assessment_seed(subject: str, focus_areas: List[str], student_expecta
 
 
 def _normalize_url(url_value) -> str:
-    """Extract URL from string or list, handles both formats gracefully."""
+    """Extract a clean absolute URL from string/list/legacy list-like string inputs."""
     if not url_value:
         return ""
-    
-    # If it's a list, take the first element
-    if isinstance(url_value, list):
-        url_value = url_value[0] if url_value else ""
-    
-    return str(url_value or "").strip()
+
+    def _unwrap_quotes(value: Any) -> str:
+        text = str(value or "").strip()
+        while (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+            text = text[1:-1].strip()
+        return text
+
+    raw_value = url_value
+    if isinstance(raw_value, list):
+        raw_value = next((item for item in raw_value if str(item or "").strip()), "")
+
+    text = _unwrap_quotes(raw_value)
+    if not text:
+        return ""
+
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text.replace("'", '"'))
+            if isinstance(parsed, list):
+                text = _unwrap_quotes(next((item for item in parsed if str(item or "").strip()), ""))
+        except Exception:
+            pass
+
+    text = _unwrap_quotes(text).replace("\\u0026", "&").replace("&amp;", "&")
+    matched = re.search(r"https?://[^\s'\"\]]+", text)
+    if matched:
+        text = matched.group(0).strip()
+
+    if not re.match(r"^https?://", text, flags=re.IGNORECASE) and re.match(
+        r"^[\w.-]+\.[a-z]{2,}(?:/|$)", text, flags=re.IGNORECASE
+    ):
+        text = f"https://{text}"
+
+    return text if re.match(r"^https?://", text, flags=re.IGNORECASE) else ""
 
 
 def _resource_from_playlist(skill: str, concept: str, url: str, source: str, approval_status: str) -> Dict[str, Any]:
@@ -733,12 +805,38 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
 
     _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
 
+    module_service = LearningModuleService(db)
+    seeded_modules = []
+    initial_module_names = _derive_initial_module_names(focus_areas, ai_resources)
+
+    for module_name in initial_module_names:
+        seed_result = module_service.create_module(
+            classroom_id=classroom_id,
+            name=module_name,
+            description=f"AI-seeded module for {module_name}.",
+            status="published",
+        )
+        if seed_result.get("status") != "success":
+            continue
+
+        module_payload = seed_result.get("module") or {}
+        seeded_modules.append(
+            {
+                "module_id": module_payload.get("module_id"),
+                "name": module_payload.get("name", module_name),
+            }
+        )
+
     return {
         "classroom_id": classroom_id,
         "enrollment_code": enrollment_code,
         "resource_summary": _resource_counts(ai_resources),
         "resource_preview": [_serialize_resource(resource) for resource in ai_resources[:6]],
         "subject_focus_areas": focus_areas,
+        "module_summary": {
+            "seeded": len(seeded_modules),
+        },
+        "module_preview": seeded_modules[:6],
     }
 
 
@@ -861,6 +959,116 @@ async def get_classroom_resources(
     }
 
 
+@router.get("/{classroom_id}/activity-feed")
+async def get_classroom_activity_feed(
+    classroom_id: str,
+    limit: int = Query(10, ge=1, le=100),
+    current_user=Depends(get_current_user),
+):
+    db = get_db()
+    rbac = RBACService(db)
+
+    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
+
+    try:
+        classroom_oid = ObjectId(classroom_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid classroom id")
+
+    entries = list(
+        db.activity_feed.find(
+            {"classroom_id": {"$in": [classroom_id, classroom_oid]}}
+        )
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+
+    user_ids = {
+        str(item.get("student_id"))
+        for item in entries
+        if item.get("student_id") is not None
+    }
+    user_ids.update(
+        {
+            str(item.get("action_performed_by_id"))
+            for item in entries
+            if item.get("action_performed_by_id") is not None
+        }
+    )
+
+    name_lookup: Dict[str, str] = {}
+    for user_id in user_ids:
+        user_name = "Unknown"
+        try:
+            user_oid = ObjectId(user_id)
+            user = db.users.find_one({"_id": user_oid}, {"name": 1})
+            if user and user.get("name"):
+                user_name = str(user.get("name"))
+        except Exception:
+            pass
+        name_lookup[user_id] = user_name
+
+    serialized = []
+    for entry in entries:
+        student_id = str(entry.get("student_id") or "")
+        actor_id = str(entry.get("action_performed_by_id") or "")
+        created_at = entry.get("created_at")
+        serialized.append(
+            {
+                "id": str(entry.get("_id")),
+                "action_type": entry.get("action_type"),
+                "student_id": student_id,
+                "student_name": name_lookup.get(student_id, "Unknown"),
+                "action_performed_by_id": actor_id,
+                "action_performed_by_name": name_lookup.get(actor_id, "Unknown"),
+                "resource_id": entry.get("resource_id"),
+                "module_id": entry.get("module_id"),
+                "assessment_id": entry.get("assessment_id"),
+                "details": entry.get("details", {}),
+                "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+            }
+        )
+
+    return {
+        "status": "success",
+        "items": serialized,
+    }
+
+
+@router.get("/{classroom_id}/pending-grading-count")
+async def get_pending_grading_count(
+    classroom_id: str,
+    current_user=Depends(get_current_user),
+):
+    db = get_db()
+    rbac = RBACService(db)
+    role = normalize_user_role(current_user.get("role"))
+
+    if role not in {"teacher", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can access pending grading counts")
+
+    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
+
+    try:
+        classroom_oid = ObjectId(classroom_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid classroom id")
+
+    pending_count = db.assessment_submissions.count_documents(
+        {
+            "classroom_id": {"$in": [classroom_id, classroom_oid]},
+            "grading_status": "pending_manual_grade",
+        }
+    )
+
+    return {
+        "status": "success",
+        "pending_count": int(pending_count),
+    }
+
+
 @router.patch("/{classroom_id}/resources/{resource_id}/approval")
 async def update_resource_approval(
     classroom_id: str,
@@ -869,6 +1077,7 @@ async def update_resource_approval(
     current_user = Depends(get_current_user),
 ):
     db = get_db()
+    rbac = RBACService(db)
     role = normalize_user_role(current_user.get("role"))
     if role not in {"teacher", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can approve classroom resources")
@@ -883,7 +1092,8 @@ async def update_resource_approval(
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    if role != "admin" and classroom.get("teacher_id") != user_oid:
+    # Allow primary teacher, co-teachers, or admins to approve resources
+    if role != "admin" and not rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the classroom teacher can approve resources")
 
     approval_status = "approved" if payload.approved else "rejected"
@@ -989,6 +1199,7 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
 @router.put("/{classroom_id}")
 async def update_classroom(classroom_id: str, update_data: dict, current_user = Depends(get_current_user)):
     db = get_db()
+    rbac = RBACService(db)
     try:
         classroom_oid = ObjectId(classroom_id)
         teacher_oid = ObjectId(current_user["user_id"])
@@ -999,7 +1210,8 @@ async def update_classroom(classroom_id: str, update_data: dict, current_user = 
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    if classroom.get("teacher_id") != teacher_oid:
+    # Allow primary teacher or co-teachers to update classroom
+    if not rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teacher can update class")
 
     allowed = [

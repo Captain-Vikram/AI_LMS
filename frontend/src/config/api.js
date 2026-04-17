@@ -21,11 +21,9 @@ export const API_ENDPOINTS = {
   AUTH_UPDATE_ONBOARDING_STATUS: "/api/auth/update-onboarding-status",
   AUTH_UPDATE_ASSESSMENT_STATUS: "/api/auth/update-assessment-status",
 
-  ONBOARDING_SAVE: "/api/onboarding/save",
   ONBOARDING_TEACHER_SETUP: "/api/onboarding/teacher/setup",
   ONBOARDING_STUDENT_JOIN: "/api/onboarding/student/join",
   ONBOARDING_TEACHER_PATHWAY: "/api/onboarding/teacher/pathway/", // append classroom id
-  ONBOARDING_USER_SKILLS: "/api/onboarding/user-skills",
 
   QUIZ_GENERATE: "/api/quiz/generate",
   QUIZ_SUBMIT: "/api/quiz/submit",
@@ -43,10 +41,24 @@ export const API_ENDPOINTS = {
 
   YOUTUBE_RECOMMENDATIONS: "/api/youtube/recommendations",
   YOUTUBE_QA_PROCESS: "/api/youtube-qa/process",
-  YOUTUBE_QA_ASK: "/api/youtube-qa/ask",
+  YOUTUBE_QA_ASK: "/api/resource/qa/ask",
   YOUTUBE_QUIZ_COMPREHENSIVE: "/api/youtube-quiz/comprehensive",
   YOUTUBE_QUIZ_GENERATE: "/api/youtube-quiz/generate",
   YOUTUBE_QUIZ_SUBMIT: "/api/youtube-quiz/submit",
+
+  RESOURCE_SUMMARY_GET_OR_CREATE: "/api/resource/summary/get-or-create",
+  RESOURCE_CHAT_HISTORY_PREFIX: "/api/resource/chat-history/", // append resourceId/studentId
+
+  STUDENT_PROGRESS_MODULE_PREFIX: "/api/student/progress/", // append module id
+
+  MODULE_ASSESSMENT_DRAFT_GENERATE: "/api/module-assessment/draft-generate",
+  MODULE_ASSESSMENT_PREFIX: "/api/module-assessment/", // append assessment id
+  MODULE_ASSESSMENT_SUBMISSION_START: "/api/module-assessment/submission/start",
+  MODULE_ASSESSMENT_SUBMISSION_PREFIX: "/api/module-assessment/submission/", // append submission id
+  MODULE_ASSESSMENT_PENDING_GRADES_PREFIX: "/api/module-assessment/pending-grades/", // append classroom id
+
+  CLASSROOM_ACTIVITY_FEED_PREFIX: "/api/classroom/", // append classroom id + /activity-feed
+  CLASSROOM_PENDING_GRADING_COUNT_PREFIX: "/api/classroom/", // append classroom id + /pending-grading-count
 };
 
 // Classroom endpoints (Phase 1)

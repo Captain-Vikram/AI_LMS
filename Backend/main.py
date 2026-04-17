@@ -10,7 +10,7 @@ from routes.auth_routes import router as auth_router
 from routes.onboarding_routes import router as onboarding_router
 from routes.youtube_education import router as youtube_router
 from routes.youtube_quiz_routes import router as youtube_quiz_router
-from routes.gamification_routes import router as gamification_router  # Add this line
+from routes.gamification_routes import router as gamification_router
 from routes.deepsearch import router as deepsearch_router
 from routes.rag_route import router as rag_router
 from routes.analytics_routes import router as analytics_router
@@ -19,6 +19,8 @@ from routes.classroom_routes import router as classroom_router
 from routes.enrollment_routes import router as enrollment_router
 from routes.dashboard_routes import router as dashboard_router
 from routes.announcements_routes import router as announcements_router
+from routes.student_progress_routes import router as student_progress_router
+from routes.module_assessment_routes import router as module_assessment_router
 from functions.service_health import get_dependency_health_snapshot
 
 # Load environment variables from .env file
@@ -54,11 +56,13 @@ app.include_router(dashboard_router)
 app.include_router(announcements_router)
 app.include_router(youtube_router)
 app.include_router(youtube_quiz_router)
-app.include_router(gamification_router)  # Add this line
+app.include_router(gamification_router)
 app.include_router(deepsearch_router)
 app.include_router(rag_router)
 app.include_router(analytics_router)
 app.include_router(user_router)
+app.include_router(student_progress_router)
+app.include_router(module_assessment_router)
 
 
 def _classify_unhandled_exception(exc: Exception):

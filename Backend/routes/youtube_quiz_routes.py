@@ -1,14 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
-from fastapi.responses import JSONResponse
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, HttpUrl
+"""YouTube quiz endpoints for strict resource progression."""
+
+from datetime import datetime
+import json
 import os
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from bson import ObjectId
 from dotenv import load_dotenv
-import uuid
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, HttpUrl
 
-from functions.youtube_quiz_functions import YouTubeQuizGenerator, extract_video_id, get_transcript, extract_core_topics
+from database import db
+from functions.youtube_quiz_functions import YouTubeQuizGenerator, extract_video_id
+from models.activity_feed import ActivityType
+from models.quiz_attempt import QuestionType, QuizAttempt, QuizQuestion
 
-# Ensure environment variables are loaded
 load_dotenv(override=True)
 
 router = APIRouter(
@@ -17,303 +24,636 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Cache for storing generated quizzes (in a production app, use a proper cache like Redis)
-youtube_quiz_cache = {}
+
+class GenerateQuizRequest(BaseModel):
+    """Request to generate a quiz for a resource"""
+    youtube_url: str = Field(..., description="YouTube video URL")
+    resource_id: str = Field(..., description="Resource ID from database")
+    module_id: str = Field(..., description="Module ID from database")
+    classroom_id: str = Field(..., description="Classroom ID from database")
+    student_id: str = Field(..., description="Student ID requesting this quiz")
 
 
-class YouTubeQuizRequest(BaseModel):
-    """Request model for generating a quiz from a YouTube video"""
-    video_url: HttpUrl
-    num_questions: int = 5
-    difficulty: str = "intermediate"
-    languages: List[str] = ["en"]
+class SubmitQuizRequest(BaseModel):
+    """Request to submit quiz answers"""
+    quiz_attempt_id: str = Field(..., description="ID of the quiz attempt")
+    student_id: str = Field(..., description="ID of the student submitting")
+    answers: List[Dict[str, str]] = Field(
+        ...,
+        description="List of {question_id, answer} pairs"
+    )
 
 
-class YouTubeTopicsRequest(BaseModel):
-    """Request model for extracting core topics from a YouTube video"""
-    video_url: HttpUrl
-    languages: List[str] = ["en"]
-    model_name: str = "auto"
-    include_transcript: bool = False
-
-
-class QuizSubmission(BaseModel):
-    """User's quiz submission with answers"""
-    quiz_id: str
-    user_answers: List[int]
+class QuizFeedback(BaseModel):
+    """Feedback after quiz submission"""
+    score_obtained: int
+    total_points: int
+    score_percentage: float
+    passed: bool
+    ai_feedback: str
+    correct_answers: List[Dict[str, Any]]
+    progress_update: Dict[str, Any]
 
 
 def get_quiz_generator():
-    """Dependency to get the quiz generator"""
+    """Get the quiz generator instance"""
     api_token = os.getenv("LMSTUDIO_API_TOKEN") or os.getenv("LMSTUDIO_API_KEY")
     return YouTubeQuizGenerator(api_token)
 
 
-@router.post("/generate", response_model=Dict[str, Any])
-async def generate_youtube_quiz(
-        params: YouTubeQuizRequest,
-        background_tasks: BackgroundTasks,
-        quiz_gen=Depends(get_quiz_generator)
-):
-    """
-    Generate a quiz based on a YouTube video
-    """
+def _to_object_id(value: str) -> Optional[ObjectId]:
     try:
-        # Generate a unique ID for this quiz
-        quiz_id = str(uuid.uuid4())
+        return ObjectId(str(value))
+    except Exception:
+        return None
 
-        # Extract video_id first as a quick validation
-        video_id = extract_video_id(str(params.video_url))
-        if not video_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid YouTube URL"
-            )
 
-        # Start quiz generation
-        quiz_content = quiz_gen.generate_quiz_from_video_url(
-            video_url=str(params.video_url),
-            num_questions=params.num_questions,
-            difficulty=params.difficulty,
-            languages=params.languages
+def _resource_id(resource: Dict[str, Any]) -> str:
+    return str(resource.get("id") or resource.get("resource_id") or "").strip()
+
+
+def _normalize_resource_url(raw_url: Any) -> str:
+    if isinstance(raw_url, list):
+        for item in raw_url:
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+        return ""
+
+    text = str(raw_url or "").strip()
+    if not text:
+        return ""
+
+    # Handle legacy list-like string payloads such as ['https://...'].
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text.replace("'", '"'))
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, str) and item.strip():
+                        return item.strip()
+        except Exception:
+            pass
+
+    text = text.replace("\\u0026", "&")
+    matched = re.search(r"https?://[^\s'\"]+", text)
+    if matched:
+        return matched.group(0).strip()
+
+    return text.strip("'\"")
+
+
+def _sorted_module_resources(module: Dict[str, Any]) -> List[Dict[str, Any]]:
+    resources = [item for item in module.get("resources", []) if isinstance(item, dict)]
+    return sorted(resources, key=lambda item: int(item.get("order", 0) or 0))
+
+
+def _resolve_module_resource(
+    module: Dict[str, Any],
+    resource_id: str,
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], int]:
+    ordered_resources = _sorted_module_resources(module)
+    target_index = -1
+    target_resource: Optional[Dict[str, Any]] = None
+
+    for index, resource in enumerate(ordered_resources):
+        if _resource_id(resource) == resource_id:
+            target_index = index
+            target_resource = resource
+            break
+
+    return target_resource, ordered_resources, target_index
+
+
+def _require_previous_resource_completion(
+    student_id: str,
+    module_id: str,
+    ordered_resources: List[Dict[str, Any]],
+    target_index: int,
+) -> None:
+    if target_index <= 0:
+        return
+
+    previous_resource_id = _resource_id(ordered_resources[target_index - 1])
+    if not previous_resource_id:
+        return
+
+    previous_progress = db.student_progress.find_one(
+        {
+            "student_id": student_id,
+            "module_id": module_id,
+            "resource_id": previous_resource_id,
+        }
+    )
+
+    if not previous_progress or int(previous_progress.get("passed_tests_count", 0) or 0) < 2:
+        raise HTTPException(
+            status_code=403,
+            detail="Resource locked. Complete the previous resource (2 passing quizzes) first.",
         )
 
-        # Add the quiz ID to the content
-        quiz_content["quiz_id"] = quiz_id
 
-        # Store the quiz with correct answers in cache
-        youtube_quiz_cache[quiz_id] = quiz_content
+def _normalize_quiz_questions(raw_questions: List[Dict[str, Any]]) -> List[QuizQuestion]:
+    questions: List[QuizQuestion] = []
+    for item in raw_questions:
+        question_text = str(item.get("question") or item.get("question_text") or "").strip()
+        if not question_text:
+            continue
 
-        # Create a user-facing version without correct answers
-        user_quiz = {
-            "quiz_id": quiz_id,
-            "video_id": quiz_content["video_id"],
-            "video_url": quiz_content["video_url"],
+        options = item.get("options")
+        option_values = [str(value) for value in options] if isinstance(options, list) and options else None
+        correct_answer = item.get("correct_answer")
+
+        if isinstance(correct_answer, int):
+            correct_value = str(correct_answer)
+        elif correct_answer is None:
+            correct_value = ""
+        else:
+            correct_value = str(correct_answer).strip()
+
+        try:
+            points = int(item.get("points", 10) or 10)
+        except Exception:
+            points = 10
+
+        question_type = QuestionType.MCQ if option_values else QuestionType.SHORT_ANSWER
+        questions.append(
+            QuizQuestion(
+                type=question_type,
+                question_text=question_text,
+                options=option_values,
+                correct_answer=correct_value,
+                points=max(points, 1),
+            )
+        )
+
+    return questions
+
+
+def _count_existing_attempts(student_id: str, resource_id: str) -> int:
+    student_candidates: List[Any] = [student_id]
+    resource_candidates: List[Any] = [resource_id]
+
+    student_oid = _to_object_id(student_id)
+    resource_oid = _to_object_id(resource_id)
+    if student_oid:
+        student_candidates.append(student_oid)
+    if resource_oid:
+        resource_candidates.append(resource_oid)
+
+    return db.quiz_attempts.count_documents(
+        {
+            "student_id": {"$in": student_candidates},
+            "resource_id": {"$in": resource_candidates},
+        }
+    )
+
+
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_quiz_attempt_doc_for_model(quiz_doc: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(quiz_doc or {})
+
+    # Mongo stores _id as ObjectId, but the Pydantic model expects alias _id as str.
+    if normalized.get("_id") is not None:
+        normalized["_id"] = str(normalized["_id"])
+
+    for field in ("resource_id", "student_id", "classroom_id", "module_id"):
+        if normalized.get(field) is not None:
+            normalized[field] = str(normalized[field])
+
+    return normalized
+
+
+def _is_answer_correct(question: QuizQuestion, student_answer: str) -> bool:
+    student_normalized = _normalize_text(student_answer)
+    correct_value = str(question.correct_answer or "").strip()
+
+    if question.options:
+        if correct_value.isdigit():
+            correct_index = int(correct_value)
+            if 0 <= correct_index < len(question.options):
+                correct_option = _normalize_text(question.options[correct_index])
+                return student_normalized in {correct_value, correct_option}
+        return student_normalized == _normalize_text(correct_value)
+
+    return student_normalized == _normalize_text(correct_value)
+
+
+def _next_resource_id(module: Dict[str, Any], current_resource_id: str) -> Optional[str]:
+    ordered_resources = _sorted_module_resources(module)
+    for index, resource in enumerate(ordered_resources):
+        if _resource_id(resource) == current_resource_id:
+            if index + 1 < len(ordered_resources):
+                return _resource_id(ordered_resources[index + 1])
+            return None
+    return None
+
+
+@router.post("/generate", response_model=Dict[str, Any])
+async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
+    """
+    Generate a new, unique quiz for a resource.
+    Creates a QuizAttempt record in MongoDB and returns the quiz.
+    """
+    try:
+        classroom_oid = _to_object_id(request.classroom_id)
+        module_oid = _to_object_id(request.module_id)
+
+        if not classroom_oid or not module_oid:
+            raise HTTPException(status_code=400, detail="Invalid classroom or module id")
+
+        classroom = db.classrooms.find_one({"_id": classroom_oid})
+        if not classroom:
+            raise HTTPException(status_code=404, detail="Classroom not found")
+
+        module = db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
+        if not module:
+            raise HTTPException(status_code=404, detail="Module not found")
+
+        module_resource, ordered_resources, target_index = _resolve_module_resource(
+            module,
+            request.resource_id,
+        )
+        if not module_resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        _require_previous_resource_completion(
+            student_id=request.student_id,
+            module_id=str(module["_id"]),
+            ordered_resources=ordered_resources,
+            target_index=target_index,
+        )
+
+        normalized_youtube_url = _normalize_resource_url(request.youtube_url)
+        if not normalized_youtube_url:
+            raise HTTPException(status_code=400, detail="Missing youtube_url for this resource")
+
+        if not extract_video_id(normalized_youtube_url):
+            raise HTTPException(status_code=400, detail="Invalid YouTube URL for this resource")
+
+        # Generate a fresh quiz for each attempt.
+        quiz_gen = get_quiz_generator()
+        quiz_content = quiz_gen.generate_quiz_from_video_url(
+            video_url=normalized_youtube_url,
+            num_questions=5,
+            difficulty="intermediate",
+            languages=["en"],
+        )
+
+        questions = _normalize_quiz_questions(quiz_content.get("questions", []))
+        if not questions:
+            raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
+
+        total_points = sum(question.points for question in questions)
+        existing_attempts = _count_existing_attempts(request.student_id, request.resource_id)
+
+        quiz_attempt = QuizAttempt(
+            resource_id=str(request.resource_id),
+            student_id=str(request.student_id),
+            classroom_id=str(request.classroom_id),
+            module_id=str(request.module_id),
+            questions=questions,
+            total_points=total_points,
+            started_at=datetime.utcnow(),
+            attempt_number=existing_attempts + 1,
+        )
+
+        # Save to database
+        quiz_dict = quiz_attempt.model_dump(by_alias=True, exclude={"id"})
+        result = db.quiz_attempts.insert_one(quiz_dict)
+
+        # Return quiz to student (without correct answers)
+        return {
+            "quiz_attempt_id": str(result.inserted_id),
             "questions": [
                 {
-                    "question": q["question"],
-                    "options": q["options"],
-                    "difficulty": q.get("difficulty", params.difficulty)
+                    "id": q.id,
+                    "type": q.type.value,
+                    "question_text": q.question_text,
+                    "options": q.options,
+                    "points": q.points,
                 }
-                for q in quiz_content["questions"]
-            ]
+                for q in questions
+            ],
+            "total_points": total_points,
+            "time_limit_minutes": None,
         }
 
-        return user_quiz
-
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Error generating quiz: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate quiz: {str(e)}"
+            status_code=500,
+            detail=f"Error generating quiz: {str(e)}"
         )
 
 
-@router.post("/submit", response_model=Dict[str, Any])
-async def submit_youtube_quiz(submission: QuizSubmission):
+@router.post("/submit", response_model=QuizFeedback)
+async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
     """
-    Submit answers for a YouTube video quiz and get results
+    Submit quiz answers.
+    Grades the quiz, updates StudentProgress, and unlocks next resource if applicable.
     """
-    # Retrieve the quiz from cache
-    if submission.quiz_id not in youtube_quiz_cache:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Quiz not found. It may have expired."
+    try:
+        quiz_attempt_oid = _to_object_id(request.quiz_attempt_id)
+        quiz_attempt_filter: Dict[str, Any] = (
+            {"_id": quiz_attempt_oid} if quiz_attempt_oid else {"_id": request.quiz_attempt_id}
+        )
+        quiz_doc = db.quiz_attempts.find_one(quiz_attempt_filter)
+
+        if not quiz_doc:
+            raise HTTPException(status_code=404, detail="Quiz attempt not found")
+
+        if quiz_doc.get("submitted_at"):
+            raise HTTPException(status_code=400, detail="Quiz attempt already submitted")
+
+        quiz_attempt_id = quiz_doc.get("_id")
+
+        # Grade the quiz
+        quiz_attempt = QuizAttempt(**_normalize_quiz_attempt_doc_for_model(quiz_doc))
+        score_obtained = 0
+        correct_answers_list = []
+
+        for answer in request.answers:
+            question_id = answer["question_id"]
+            student_answer = str(answer["answer"])
+
+            # Find the question
+            question = next((q for q in quiz_attempt.questions if q.id == question_id), None)
+            if not question:
+                continue
+
+            # Check if correct
+            is_correct = _is_answer_correct(question, student_answer)
+            if is_correct:
+                score_obtained += question.points
+
+            # Store the answer in the quiz
+            question.student_answer = student_answer
+            question.is_correct = is_correct
+
+            # Add to correct answers response
+            correct_answers_list.append({
+                "question_id": question_id,
+                "question_text": question.question_text,
+                "your_answer": student_answer,
+                "correct_answer": question.correct_answer,
+                "is_correct": is_correct,
+                "points": question.points if is_correct else 0,
+            })
+
+        # Calculate results
+        score_percentage = (
+            score_obtained / quiz_attempt.total_points if quiz_attempt.total_points else 0.0
+        )
+        passed = score_percentage >= 0.80
+
+        # Generate AI feedback
+        ai_feedback = generate_quiz_feedback(
+            score_percentage,
+            passed,
+            correct_answers_list,
         )
 
-    quiz_content = youtube_quiz_cache[submission.quiz_id]
-
-    # Validate submission
-    if len(submission.user_answers) != len(quiz_content["questions"]):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Number of answers doesn't match number of questions"
+        # Update quiz attempt in database
+        db.quiz_attempts.update_one(
+            {"_id": quiz_attempt_id},
+            {
+                "$set": {
+                    "submitted_at": datetime.utcnow(),
+                    "score_obtained": score_obtained,
+                    "score_percentage": score_percentage,
+                    "passed": passed,
+                    "ai_feedback": ai_feedback,
+                    "questions": [q.model_dump(by_alias=True) for q in quiz_attempt.questions],
+                    "duration_seconds": (datetime.utcnow() - quiz_attempt.started_at).total_seconds(),
+                }
+            }
         )
 
-    # Score the quiz
-    total_questions = len(quiz_content["questions"])
-    correct_count = 0
-    question_feedback = []
-
-    for i, (answer, question) in enumerate(zip(submission.user_answers, quiz_content["questions"])):
-        is_correct = answer == question["correct_answer"]
-        if is_correct:
-            correct_count += 1
-
-        question_feedback.append({
-            "question_index": i,
-            "is_correct": is_correct,
-            "correct_answer": question["correct_answer"],
-            "explanation": question["explanation"]
+        # Update StudentProgress
+        progress = db.student_progress.find_one({
+            "student_id": request.student_id,
+            "module_id": quiz_attempt.module_id,
+            "resource_id": quiz_attempt.resource_id
         })
 
-    score_percentage = (correct_count / total_questions) * 100 if total_questions > 0 else 0
+        now = datetime.utcnow()
+        if not progress:
+            progress = {
+                "student_id": request.student_id,
+                "classroom_id": quiz_attempt.classroom_id,
+                "module_id": quiz_attempt.module_id,
+                "resource_id": quiz_attempt.resource_id,
+                "is_unlocked": True,
+                "unlocked_at": now,
+                "tests_taken": 1,
+                "passed_tests_count": 1 if passed else 0,
+                "failed_tests_count": 0 if passed else 1,
+                "highest_score": score_percentage,
+                "last_test_date": now,
+                "single_turn_chat_history": [],
+                "created_at": now,
+                "updated_at": now,
+            }
+            result = db.student_progress.insert_one(progress)
+            progress["_id"] = result.inserted_id
+        else:
+            passed_count = int(progress.get("passed_tests_count", 0) or 0)
+            failed_count = int(progress.get("failed_tests_count", 0) or 0)
+            highest_score = float(progress.get("highest_score", 0) or 0)
 
-    # Determine knowledge level for this video content
-    if score_percentage >= 80:
-        knowledge_level = "advanced"
-    elif score_percentage >= 50:
-        knowledge_level = "intermediate"
-    else:
-        knowledge_level = "beginner"
+            if passed:
+                passed_count += 1
+            else:
+                failed_count += 1
 
-    # Construct the response
-    response = {
-        "quiz_id": submission.quiz_id,
-        "video_id": quiz_content["video_id"],
-        "video_url": quiz_content["video_url"],
-        "score": {
-            "correct": correct_count,
-            "total": total_questions,
-            "percentage": score_percentage
-        },
-        "knowledge_level": knowledge_level,
-        "question_feedback": question_feedback
-    }
+            highest_score = max(highest_score, score_percentage)
 
-    # In a production app, you'd probably want to clean up the cache eventually
-    # background_tasks.add_task(lambda: youtube_quiz_cache.pop(submission.quiz_id, None))
-
-    return response
-
-
-@router.get("/status/{quiz_id}")
-async def get_quiz_status(quiz_id: str):
-    """
-    Check if a quiz exists in the cache
-    """
-    if quiz_id in youtube_quiz_cache:
-        return {"status": "available", "quiz_id": quiz_id}
-    else:
-        return {"status": "not_found", "quiz_id": quiz_id}
-
-
-# New route for core topics extraction
-@router.post("/topics", response_model=Dict[str, Any])
-async def extract_youtube_topics(
-        params: YouTubeTopicsRequest,
-        quiz_gen=Depends(get_quiz_generator)
-):
-    """
-    Extract core topics with timestamp ranges from a YouTube video
-    """
-    try:
-        # Extract video_id first as a quick validation
-        video_id = extract_video_id(str(params.video_url))
-        if not video_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid YouTube URL"
-            )
-
-        # Get transcript
-        transcriptions = get_transcript(video_id, params.languages)
-
-        # Extract core topics with timestamp ranges
-        result = quiz_gen.extract_topics_from_transcript(
-            transcriptions=transcriptions,
-            model_name=params.model_name
-        )
-
-        # Build response
-        response = {
-            "success": True,
-            "video_id": video_id,
-            "video_url": str(params.video_url),
-            "core_topics": result.get("core_topics", []),
-            "summary": result.get("summary", "")
-        }
-
-        # Include transcript if requested
-        if params.include_transcript:
-            response["transcriptions"] = transcriptions
-
-        return response
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to extract topics: {str(e)}"
-        )
-
-
-@router.post("/comprehensive", response_model=Dict[str, Any])
-async def generate_comprehensive_content(
-        params: YouTubeQuizRequest,
-        background_tasks: BackgroundTasks,
-        quiz_gen=Depends(get_quiz_generator)
-):
-    """
-    Generate comprehensive content from a YouTube video:
-    - Transcript
-    - Core topics with timestamp ranges
-    - Brief summary
-    - Quiz (optional)
-    """
-    try:
-        # Generate a unique ID for this content
-        content_id = str(uuid.uuid4())
-
-        # Extract video_id first as a quick validation
-        video_id = extract_video_id(str(params.video_url))
-        if not video_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid YouTube URL"
-            )
-
-        # Get transcript
-        transcriptions = get_transcript(video_id, params.languages)
-
-        # Extract core topics with timestamp ranges
-        topics_result = quiz_gen.extract_topics_from_transcript(
-            transcriptions=transcriptions
-        )
-
-        # Generate quiz
-        transcript_text = " ".join([entry["description"] for entry in transcriptions])
-        quiz_result = quiz_gen.generate_quiz_from_transcript(
-            transcript_text,
-            num_questions=params.num_questions,
-            difficulty=params.difficulty
-        )
-
-        # Combine everything
-        result = {
-            "video_id": video_id,
-            "video_url": str(params.video_url),
-            "transcriptions": transcriptions,
-            "core_topics": topics_result.get("core_topics", []),
-            "summary": topics_result.get("summary", ""),
-            "questions": quiz_result.get("questions", [])
-        }
-
-        # Add to cache
-        youtube_quiz_cache[content_id] = result
-
-        # Create a user-facing version without quiz answers
-        user_content = {
-            "content_id": content_id,
-            "video_id": video_id,
-            "video_url": str(params.video_url),
-            "core_topics": topics_result.get("core_topics", []),
-            "summary": topics_result.get("summary", "")
-        }
-
-        # Add quiz without answers if it exists
-        if "questions" in quiz_result:
-            user_content["quiz"] = [
+            db.student_progress.update_one(
+                {"_id": progress["_id"]},
                 {
-                    "question": q["question"],
-                    "options": q["options"],
-                    "difficulty": q.get("difficulty", params.difficulty)
+                    "$set": {
+                        "tests_taken": progress.get("tests_taken", 0) + 1,
+                        "passed_tests_count": passed_count,
+                        "failed_tests_count": failed_count,
+                        "highest_score": highest_score,
+                        "last_test_date": now,
+                        "updated_at": now,
+                        "is_unlocked": True,
+                    }
                 }
-                for q in quiz_result.get("questions", [])
-            ]
+            )
 
-        return user_content
+        updated_progress = db.student_progress.find_one({"_id": progress["_id"]}) or progress
+        passed_tests_count = int(updated_progress.get("passed_tests_count", 0) or 0)
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate comprehensive content: {str(e)}"
+        # Check if student should unlock next resource
+        progress_update = {
+            "passed_tests_count": passed_tests_count,
+            "highest_score": max(float(updated_progress.get("highest_score", 0) or 0), score_percentage),
+            "is_unlocked": False,
+            "message": "",
+            "unlocked_resource_id": None,
+        }
+
+        module_doc = None
+        module_oid = _to_object_id(quiz_attempt.module_id)
+        if module_oid:
+            module_doc = db.learning_modules.find_one({"_id": module_oid})
+
+        if passed and passed_tests_count >= 2:
+            progress_update["is_unlocked"] = True
+
+            next_resource_id = _next_resource_id(module_doc, quiz_attempt.resource_id) if module_doc else None
+            progress_update["unlocked_resource_id"] = next_resource_id
+
+            if next_resource_id:
+                next_progress = db.student_progress.find_one(
+                    {
+                        "student_id": request.student_id,
+                        "module_id": quiz_attempt.module_id,
+                        "resource_id": next_resource_id,
+                    }
+                )
+                if next_progress:
+                    db.student_progress.update_one(
+                        {"_id": next_progress["_id"]},
+                        {
+                            "$set": {
+                                "is_unlocked": True,
+                                "unlocked_at": now,
+                                "updated_at": now,
+                            }
+                        },
+                    )
+                else:
+                    db.student_progress.insert_one(
+                        {
+                            "student_id": request.student_id,
+                            "classroom_id": quiz_attempt.classroom_id,
+                            "module_id": quiz_attempt.module_id,
+                            "resource_id": next_resource_id,
+                            "is_unlocked": True,
+                            "unlocked_at": now,
+                            "tests_taken": 0,
+                            "passed_tests_count": 0,
+                            "failed_tests_count": 0,
+                            "highest_score": None,
+                            "last_test_date": None,
+                            "single_turn_chat_history": [],
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    )
+
+                progress_update["message"] = (
+                    "Great work. You completed this resource and unlocked the next one."
+                )
+
+                log_activity(
+                    classroom_id=quiz_attempt.classroom_id,
+                    action_type=ActivityType.RESOURCE_UNLOCKED,
+                    student_id=request.student_id,
+                    resource_id=next_resource_id,
+                    details={"source_resource_id": quiz_attempt.resource_id},
+                )
+            else:
+                progress_update["message"] = (
+                    "Great work. You completed this resource and finished the module resource chain."
+                )
+        else:
+            remaining = max(0, 2 - passed_tests_count)
+            if passed:
+                progress_update["message"] = (
+                    f"You passed this quiz. You need {remaining} more passing test(s) "
+                    "to unlock the next resource."
+                )
+            else:
+                progress_update["message"] = (
+                    "This attempt did not reach 80%. Review the lesson and try again."
+                )
+
+        # Log activity
+        log_activity(
+            classroom_id=quiz_attempt.classroom_id,
+            action_type=ActivityType.QUIZ_PASSED if passed else ActivityType.QUIZ_FAILED,
+            student_id=request.student_id,
+            resource_id=quiz_attempt.resource_id,
+            quiz_attempt_id=str(quiz_attempt_id),
+            details={
+                "score": round(score_percentage * 100, 2),
+                "attempt_number": int(quiz_attempt.attempt_number or 1),
+            },
         )
+
+        return QuizFeedback(
+            score_obtained=score_obtained,
+            total_points=quiz_attempt.total_points,
+            score_percentage=score_percentage,
+            passed=passed,
+            ai_feedback=ai_feedback,
+            correct_answers=correct_answers_list,
+            progress_update=progress_update,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error submitting quiz: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error submitting quiz: {str(e)}"
+        )
+
+
+def generate_quiz_feedback(score_percentage: float, passed: bool, answers: List[Dict]) -> str:
+    """Generate AI feedback for quiz performance"""
+    feedback_lines = []
+    
+    if passed:
+        feedback_lines.append(f"Great job! You scored {score_percentage*100:.1f}%.")
+    else:
+        feedback_lines.append(f"You scored {score_percentage*100:.1f}%. You need at least 80% to pass.")
+    
+    # Analyze which questions were missed
+    missed = [a for a in answers if not a["is_correct"]]
+    if missed:
+        feedback_lines.append(f"\nYou missed {len(missed)} question(s):")
+        for answer in missed[:3]:  # Show first 3
+            feedback_lines.append(
+                f"  • {answer['question_text'][:60]}... "
+                f"(You answered: '{answer['your_answer']}', Correct: '{answer['correct_answer']}')"
+            )
+    
+    feedback_lines.append("\nReview the video to strengthen your understanding of the material.")
+    
+    return "\n".join(feedback_lines)
+
+
+def log_activity(
+    classroom_id: str,
+    action_type: ActivityType,
+    student_id: str,
+    resource_id: Optional[str] = None,
+    quiz_attempt_id: Optional[str] = None,
+    details: Optional[Dict] = None
+):
+    """Log an activity to the activity feed"""
+    try:
+        activity = {
+            "classroom_id": classroom_id,
+            "action_type": action_type.value,
+            "student_id": student_id,
+            "action_performed_by_id": student_id,
+            "resource_id": resource_id,
+            "quiz_attempt_id": quiz_attempt_id,
+            "details": details or {},
+            "created_at": datetime.utcnow(),
+        }
+        db.activity_feed.insert_one(activity)
+    except Exception as e:
+        print(f"Error logging activity: {e}")

@@ -1,6 +1,12 @@
 import os
 from pymongo import MongoClient
 from dotenv import load_dotenv
+import sys
+from pathlib import Path
+from datetime import datetime
+
+# Add migrations directory to path
+sys.path.insert(0, str(Path(__file__).parent / "migrations"))
 
 load_dotenv(override=True)
 
@@ -14,6 +20,7 @@ client = MongoClient(
 )
 
 db = client.get_database("quasar") 
+MIGRATION_001_NAME = "001_add_lms_collections"
 
 def get_db():
     return db
@@ -60,8 +67,53 @@ def setup_phase_2_indexes():
         print(f"⚠️  Warning: Could not create indexes: {e}")
 
 
+def run_migrations():
+    """Run all pending database migrations in order"""
+    try:
+        from migration_001_add_lms_collections import migrate_up as migrate_001_up
+
+        # Track applied migrations so each version runs once per database.
+        migration_collection = db.schema_migrations
+        migration_collection.create_index("migration_name", unique=True)
+
+        already_applied = migration_collection.find_one(
+            {"migration_name": MIGRATION_001_NAME, "status": "applied"}
+        )
+        if already_applied:
+            print("Migration 001 already applied, skipping")
+            return
+
+        print("Running migration 001: Adding LMS collections...")
+        migrate_001_up(db)
+
+        now = datetime.utcnow()
+        migration_collection.update_one(
+            {"migration_name": MIGRATION_001_NAME},
+            {
+                "$set": {
+                    "migration_name": MIGRATION_001_NAME,
+                    "status": "applied",
+                    "applied_at": now,
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+        print("Migration 001 marked as applied")
+    except ImportError:
+        print("⚠️  Migration 001 module not found, skipping")
+    except Exception as e:
+        print(f"⚠️  Error running migration 001: {e}")
+
+
 # Initialize indexes on module load
 try:
     setup_phase_2_indexes()
 except Exception as e:
     print(f"Database index setup error: {e}")
+
+# Run migrations on module load
+try:
+    run_migrations()
+except Exception as e:
+    print(f"Database migration error: {e}")

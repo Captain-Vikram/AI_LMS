@@ -484,14 +484,14 @@ export const useLearningModules = (classroomId) => {
   };
 };
 
-export const useClassroomResources = (classroomId, mode = 'class') => {
+export const useClassroomResources = (classroomId, mode = 'class', enabled = true) => {
   const [resourcePayload, setResourcePayload] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchResources = useCallback(
     async (targetMode = mode) => {
-      if (!classroomId) return;
+      if (!enabled || !classroomId) return;
 
       setLoading(true);
       setError(null);
@@ -509,12 +509,12 @@ export const useClassroomResources = (classroomId, mode = 'class') => {
         setLoading(false);
       }
     },
-    [classroomId, mode]
+    [classroomId, mode, enabled]
   );
 
   const approveResource = useCallback(
     async (resourceId, approved = true) => {
-      if (!classroomId || !resourceId) return;
+      if (!enabled || !classroomId || !resourceId) return;
 
       await apiClient.patch(
         `/api/classroom/${classroomId}/resources/${resourceId}/approval`,
@@ -523,12 +523,15 @@ export const useClassroomResources = (classroomId, mode = 'class') => {
 
       await fetchResources('class');
     },
-    [classroomId, fetchResources]
+    [classroomId, fetchResources, enabled]
   );
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     fetchResources(mode);
-  }, [classroomId, mode, fetchResources]);
+  }, [classroomId, mode, fetchResources, enabled]);
 
   return {
     resourcePayload,

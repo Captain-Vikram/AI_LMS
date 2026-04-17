@@ -4,6 +4,7 @@ export const RosterTable = ({
   students = [], 
   loading = false,
   onRemoveStudent,
+  onViewProgress,
   isTeacher = false 
 }) => {
   const [sortBy, setSortBy] = useState('name');
@@ -77,16 +78,26 @@ export const RosterTable = ({
                 </td>
                 {isTeacher && (
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Remove ${student.name} from classroom?`)) {
-                          onRemoveStudent?.(student.user_id);
-                        }
-                      }}
-                      className="px-3 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors"
-                    >
-                      Remove
-                    </button>
+                    <div className="inline-flex gap-2">
+                      {onViewProgress && (
+                        <button
+                          onClick={() => onViewProgress(student)}
+                          className="px-3 py-1 text-xs bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 rounded transition-colors"
+                        >
+                          Progress
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Remove ${student.name} from classroom?`)) {
+                            onRemoveStudent?.(student.user_id);
+                          }
+                        }}
+                        className="px-3 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </td>
                 )}
               </tr>

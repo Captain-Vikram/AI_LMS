@@ -198,7 +198,7 @@ const ClassroomList = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-400">No enrolled classes found. Join with a code if you are co-learning in another teacher's class.</p>
+              <p className="text-gray-400">No enrolled classes. Join another teacher's class with an enrollment code if you're co-learning.</p>
             )}
           </div>
         </div>
