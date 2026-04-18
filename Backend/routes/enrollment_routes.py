@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from database import get_db
 from bson import ObjectId
+from bson.errors import InvalidId
 from typing import List
 import csv
 import io
@@ -43,7 +44,7 @@ async def add_student_to_classroom(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only classroom teacher can add students"
@@ -53,7 +54,7 @@ async def add_student_to_classroom(
     try:
         result = enrollment_svc.enroll_student(student_id, classroom_id)
         return {"status": "success", "data": result}
-    except ValueError as e:
+    except (ValueError, InvalidId) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 # Teacher: Bulk enroll students from CSV
@@ -67,7 +68,7 @@ async def bulk_upload_roster(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only classroom teacher can upload roster"
@@ -106,7 +107,7 @@ async def remove_student(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only classroom teacher can remove students"
@@ -116,7 +117,7 @@ async def remove_student(
     try:
         result = enrollment_svc.disenroll_student(student_id, classroom_id)
         return {"status": "success", "data": result}
-    except ValueError as e:
+    except (ValueError, InvalidId) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 # Get classroom roster
@@ -129,7 +130,7 @@ async def get_classroom_roster(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -153,7 +154,7 @@ async def create_student_group(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only classroom teacher can create groups"
@@ -168,7 +169,7 @@ async def create_student_group(
             group_data.get("students", [])
         )
         return {"status": "success", "data": result}
-    except ValueError as e:
+    except (ValueError, InvalidId) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 # Add student to group
@@ -183,7 +184,7 @@ async def add_to_group(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only classroom teacher can manage groups"
@@ -197,7 +198,7 @@ async def add_to_group(
             student_id
         )
         return {"status": "success", "data": result}
-    except ValueError as e:
+    except (ValueError, InvalidId) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 

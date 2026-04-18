@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncClient, AsyncDatabase
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 # Add migrations directory to path
 sys.path.insert(0, str(Path(__file__).parent / "migrations"))
@@ -21,20 +21,20 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
 MONGO_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 
 # Global async client and database instances
-_async_client: Optional[AsyncClient] = None
-_async_db: Optional[AsyncDatabase] = None
+_async_client: Optional[AsyncIOMotorClient] = None
+_async_db: Optional[AsyncIOMotorDatabase] = None
 
 MIGRATION_001_NAME = "001_add_lms_collections"
 
 
-async def connect_to_mongo() -> AsyncDatabase:
+async def connect_to_mongo() -> AsyncIOMotorDatabase:
     """
     Initialize async MongoDB connection using Motor.
     Call this during FastAPI startup event.
     """
     global _async_client, _async_db
     
-    _async_client = AsyncClient(
+    _async_client = AsyncIOMotorClient(
         MONGO_URI,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
         connectTimeoutMS=MONGO_TIMEOUT_MS,
@@ -65,7 +65,7 @@ async def disconnect_from_mongo():
         print("✅ Disconnected from MongoDB")
 
 
-def get_db() -> AsyncDatabase:
+def get_db() -> AsyncIOMotorDatabase:
     """
     Get the async database instance.
     Must be called after connect_to_mongo() has been called.

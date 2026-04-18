@@ -205,7 +205,7 @@ async def get_classroom_analytics(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=403,
             detail="Only teachers can view classroom analytics"
@@ -229,7 +229,7 @@ async def get_student_progress(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=403,
             detail="Only teachers can view student analytics"
@@ -252,7 +252,7 @@ async def get_my_progress(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_student(current_user["user_id"], classroom_id):
+    if not await rbac.is_student(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=403,
             detail="Students can only view their own progress"

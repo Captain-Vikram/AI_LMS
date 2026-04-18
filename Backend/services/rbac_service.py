@@ -1,7 +1,8 @@
+import inspect
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 from bson import ObjectId
-from database import get_db
+from database_async import get_db
 
 
 class Permission(Enum):
@@ -23,10 +24,23 @@ class RBACService:
     def __init__(self, db=None):
         self.db = db if db is not None else get_db()
 
-    def is_classroom_member(self, user_id: str, classroom_id: str) -> bool:
+    async def _resolve(self, value: Any):
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    async def _cursor_to_list(self, cursor):
+        if hasattr(cursor, "to_list"):
+            value = cursor.to_list(None)
+            if inspect.isawaitable(value):
+                return await value
+            return value
+        return list(cursor)
+
+    async def is_classroom_member(self, user_id: str, classroom_id: str) -> bool:
         db = self.db
         try:
-            classroom = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+            classroom = await self._resolve(db.classrooms.find_one({"_id": ObjectId(classroom_id)}))
         except Exception:
             return False
         if not classroom:
@@ -37,10 +51,10 @@ class RBACService:
         is_co_teacher = user_id in classroom.get("co_teachers", [])
         return is_student or is_primary_teacher or is_co_teacher
 
-    def is_teacher(self, user_id: str, classroom_id: str) -> bool:
+    async def is_teacher(self, user_id: str, classroom_id: str) -> bool:
         db = self.db
         try:
-            classroom = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+            classroom = await self._resolve(db.classrooms.find_one({"_id": ObjectId(classroom_id)}))
         except Exception:
             return False
         if not classroom:
@@ -50,20 +64,31 @@ class RBACService:
         is_co_teacher = user_id in classroom.get("co_teachers", [])
         return is_primary_teacher or is_co_teacher
 
-    def is_student(self, user_id: str, classroom_id: str) -> bool:
+    async def is_student(self, user_id: str, classroom_id: str) -> bool:
         db = self.db
         try:
-            classroom = db.classrooms.find_one({"_id": ObjectId(classroom_id), "students": ObjectId(user_id)})
+            classroom = await self._resolve(
+                db.classrooms.find_one({"_id": ObjectId(classroom_id), "students": ObjectId(user_id)})
+            )
         except Exception:
             return False
         return classroom is not None
 
-    def get_user_classrooms(self, user_id: str) -> dict:
+    async def get_user_classrooms(self, user_id: str) -> dict:
         db = self.db
         user_oid = ObjectId(user_id)
         # Find classrooms where user is teacher (creator) or co-teacher
-        as_teacher = list(db.classrooms.find({"$or": [{"teacher_id": user_oid}, {"co_teachers": user_id}]}, {"_id": 1, "name": 1, "subject": 1}).sort("name", 1))
-        as_student = list(db.classrooms.find({"students": user_oid}, {"_id": 1, "name": 1, "subject": 1}).sort("name", 1))
+        as_teacher_cursor = db.classrooms.find(
+            {"$or": [{"teacher_id": user_oid}, {"co_teachers": user_id}]},
+            {"_id": 1, "name": 1, "subject": 1},
+        ).sort("name", 1)
+        as_student_cursor = db.classrooms.find(
+            {"students": user_oid},
+            {"_id": 1, "name": 1, "subject": 1},
+        ).sort("name", 1)
+
+        as_teacher = await self._cursor_to_list(as_teacher_cursor)
+        as_student = await self._cursor_to_list(as_student_cursor)
         # convert ids to str
         def map_list(items):
             out = []
@@ -77,12 +102,12 @@ class RBACService:
             "total": len(as_teacher) + len(as_student)
         }
 
-    def has_permission(self, user_id: str, classroom_id: str, permission: Permission) -> bool:
+    async def has_permission(self, user_id: str, classroom_id: str, permission: Permission) -> bool:
         # derive role from classroom membership
-        if not self.is_classroom_member(user_id, classroom_id):
+        if not await self.is_classroom_member(user_id, classroom_id):
             return False
 
-        if self.is_teacher(user_id, classroom_id):
+        if await self.is_teacher(user_id, classroom_id):
             teacher_perms = {
                 Permission.VIEW_CLASSROOM,
                 Permission.EDIT_CLASSROOM,

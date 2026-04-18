@@ -20,7 +20,7 @@ async def create_announcement(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only teachers can create announcements"
@@ -50,7 +50,7 @@ async def get_announcements(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -59,7 +59,7 @@ async def get_announcements(
     ann_svc = AnnouncementsService(db)
     announcements = ann_svc.get_classroom_announcements(
         classroom_id,
-        current_user["user_id"] if rbac.is_student(current_user["user_id"], classroom_id) else None
+        current_user["user_id"] if await rbac.is_student(current_user["user_id"], classroom_id) else None
     )
 
     return {"status": "success", "data": announcements}
@@ -93,7 +93,7 @@ async def update_announcement(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only teachers can update announcements"
@@ -122,7 +122,7 @@ async def delete_announcement(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only teachers can delete announcements"

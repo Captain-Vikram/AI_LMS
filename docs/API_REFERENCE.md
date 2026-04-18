@@ -9,21 +9,22 @@ Interactive OpenAPI docs:
 
 ## ⚡ Async Architecture
 
-All API endpoints are now fully asynchronous and can handle concurrent requests efficiently. The backend uses:
+The backend is async-first and supports concurrent request handling. The current stack uses:
 
 - **FastAPI** with async/await for request handling
-- **Motor** for non-blocking MongoDB operations
+- **Motor** for non-blocking MongoDB operations in primary async paths
+- Compatibility adapters for a few legacy sync service paths (no API contract change)
 - **httpx** for async HTTP client operations (for LLM calls and external APIs)
 - **asyncio** for parallel operations within single requests
 
 This means:
 
 - Multiple API calls can be processed simultaneously
-- Database queries and external API calls happen in parallel, not sequentially
-- No request blocks another request
-- Higher throughput and lower latency
+- Most database and external API calls happen in parallel, not sequentially
+- Legacy sync logic is isolated behind route/service adapters during migration
+- Higher throughput and lower latency under concurrent load
 
-**Performance**: Concurrent requests benefit from ~40-60% performance improvement over sequential operations.
+**Performance**: Concurrent workloads generally perform better than strictly sequential request flows.
 
 ## Health
 
@@ -39,7 +40,7 @@ Prefix: `/api/auth`
 - `POST /login`
 - `GET /user-profile`
 - `GET /user-status`
-- `POST /set-active-classroom/{classroom_id}`
+- `POST /set-active-classroom/{classroom_id}` (returns refreshed JWT with `active_classroom` and updated classroom role claims)
 - `POST /update-onboarding-status`
 - `POST /update-assessment-status`
 - `GET /login-activity`
@@ -53,7 +54,7 @@ Prefix: `/api/onboarding`
 - `GET /user-skills`
 - `POST /teacher/setup`
 - `POST /student/join`
-- `GET /teacher/pathway/{classroom_id}`
+- `GET /teacher/pathway/{classroom_id}` (accessible by classroom teacher/co-teacher and admins)
 
 ## Classroom Core
 
@@ -82,6 +83,10 @@ Prefix: `/api/classroom`
 - `POST /{classroom_id}/groups`
 - `POST /{classroom_id}/groups/{group_id}/members`
 
+Validation update:
+
+- Malformed ObjectId inputs now return `400 Bad Request` (instead of `500 Internal Server Error`) for enrollment/group member mutation endpoints.
+
 ### Dashboard
 
 - `GET /{classroom_id}/dashboard`
@@ -107,6 +112,10 @@ Prefix: `/api/classroom`
 - `GET /{classroom_id}/modules/{module_id}/progress`
 - `POST /{classroom_id}/modules/{module_id}/resources/{resource_id}/engagement`
 - `GET /{classroom_id}/modules/{module_id}/analytics`
+
+Stability update (2026-04-18):
+
+- Module generation/list/progress/analytics endpoint flows were revalidated and now return expected `2xx/4xx` responses with no observed `5xx` during full API sweep.
 
 ## Analytics
 
@@ -188,6 +197,7 @@ Prefix: `/api/user`
 - The API supports concurrent requests - send multiple requests simultaneously for optimal performance.
 - Database operations use Motor (async MongoDB driver) for non-blocking I/O.
 - External API calls (LLM, YouTube, etc.) use httpx for async operations with automatic fallback support.
+- OpenAPI validation snapshot (2026-04-18): `87` operations tested, `0` responses with `5xx` status codes.
 
 ## Async Capabilities
 

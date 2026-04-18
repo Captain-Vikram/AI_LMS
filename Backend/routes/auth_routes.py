@@ -60,12 +60,15 @@ def create_access_token(
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def _get_user_classroom_roles_map(user_id: str):
+async def _get_user_classroom_roles_map(user_id: str):
     db = get_db()
     try:
-        from bson import ObjectId
-        user = db.users.find_one({"_id": ObjectId(user_id)})
+        user_oid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+        user = await db.users.find_one({"_id": user_oid})
     except Exception:
+        return {}
+
+    if not user:
         return {}
 
     mapping = {}
@@ -119,7 +122,7 @@ async def register(user: UserRegistration):
         await profiles_collection.insert_one(profile_data)
     
     # Generate JWT token (include role + classroom roles)
-    classroom_roles_map = _get_user_classroom_roles_map(user_id)
+    classroom_roles_map = await _get_user_classroom_roles_map(user_id)
     access_token = create_access_token(
         user_id=str(user_id),
         email=user.email,
@@ -209,7 +212,7 @@ async def login(credentials: UserLogin):
     })
     
     # Generate JWT token (include role + classroom roles)
-    classroom_roles_map = _get_user_classroom_roles_map(user["_id"]) or {}
+    classroom_roles_map = await _get_user_classroom_roles_map(user["_id"]) or {}
     access_token = create_access_token(
         user_id=str(user["_id"]),
         email=user.get("email"),
@@ -256,7 +259,7 @@ async def set_active_classroom(classroom_id: str, current_user = Depends(get_cur
         raise HTTPException(status_code=403, detail="Not a member of this classroom")
 
     # Build new token
-    classroom_roles_map = _get_user_classroom_roles_map(current_user["user_id"]) or {}
+    classroom_roles_map = await _get_user_classroom_roles_map(current_user["user_id"]) or {}
     new_token = create_access_token(
         user_id=current_user["user_id"],
         email=current_user.get("email"),

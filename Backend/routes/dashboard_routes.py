@@ -19,7 +19,7 @@ async def get_classroom_dashboard(
     dashboard_svc = DashboardService(db)
 
     # Check classroom membership
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -27,7 +27,7 @@ async def get_classroom_dashboard(
 
     try:
         # Return role-specific dashboard
-        if rbac.is_teacher(current_user["user_id"], classroom_id):
+        if await rbac.is_teacher(current_user["user_id"], classroom_id):
             dashboard = dashboard_svc.get_teacher_dashboard(
                 classroom_id,
                 current_user["user_id"]
@@ -52,7 +52,7 @@ async def get_classroom_overview(
     rbac = RBACService(db)
     dashboard_svc = DashboardService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"

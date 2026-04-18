@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from database import get_db
 from functions.llm_adapter import generate_text
+from services.rbac_service import RBACService
 from functions.utils import get_current_user, normalize_user_role
 from jwt_config import settings
 
@@ -523,7 +524,7 @@ async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(ge
     normalized_role = normalize_user_role(current_user.get("role"))
 
     # Allow primary teacher, co-teachers, or admins
-    if normalized_role != "admin" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if normalized_role != "admin" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=403, detail="Only classroom teacher can view the full pathway")
 
     return {

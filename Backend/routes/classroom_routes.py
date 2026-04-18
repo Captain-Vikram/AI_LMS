@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
-from database import get_db
+from database_async import get_db
+from database import get_db as get_sync_db
 from bson import ObjectId
+import asyncio
 from datetime import datetime
 import hashlib
 import json
@@ -517,8 +519,8 @@ def _generate_ai_resource_bundle(
     )
 
 
-def _latest_assessment_snapshot(db, user_oid: ObjectId) -> Optional[Dict[str, Any]]:
-    assessment = db.skill_assessment_results.find_one(
+async def _latest_assessment_snapshot(db, user_oid: ObjectId) -> Optional[Dict[str, Any]]:
+    assessment = await db.skill_assessment_results.find_one(
         {"user_id": user_oid},
         sort=[("timestamp", -1)],
     )
@@ -535,12 +537,12 @@ def _latest_assessment_snapshot(db, user_oid: ObjectId) -> Optional[Dict[str, An
     }
 
 
-def _ensure_user_membership(db, user_oid: ObjectId, classroom_id: str, role: str):
-    user_doc = db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
+async def _ensure_user_membership(db, user_oid: ObjectId, classroom_id: str, role: str):
+    user_doc = await db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
     memberships = user_doc.get("classroom_memberships", [])
     already_member = any(str(m.get("classroom_id")) == classroom_id for m in memberships)
     if not already_member:
-        db.users.update_one(
+        await db.users.update_one(
             {"_id": user_oid},
             {
                 "$push": {
@@ -557,15 +559,15 @@ def _ensure_user_membership(db, user_oid: ObjectId, classroom_id: str, role: str
         )
 
 
-def _build_demo_students(db, classroom_oid: ObjectId, teacher_oid: ObjectId, count: int = 12):
+async def _build_demo_students(db, classroom_oid: ObjectId, teacher_oid: ObjectId, count: int = 12):
     suffix = str(teacher_oid)[-6:]
     student_ids = []
 
     for i in range(1, count + 1):
         email = f"demo_student_{suffix}_{i}@edusaarthi.local"
-        student = db.users.find_one({"email": email})
+        student = await db.users.find_one({"email": email})
         if not student:
-            created = db.users.insert_one(
+            created = await db.users.insert_one(
                 {
                     "email": email,
                     "password_hash": "",
@@ -586,18 +588,18 @@ def _build_demo_students(db, classroom_oid: ObjectId, teacher_oid: ObjectId, cou
             student_oid = student["_id"]
 
         student_ids.append(student_oid)
-        _ensure_user_membership(db, student_oid, str(classroom_oid), "student")
+        await _ensure_user_membership(db, student_oid, str(classroom_oid), "student")
 
     if student_ids:
-        db.classrooms.update_one(
+        await db.classrooms.update_one(
             {"_id": classroom_oid},
             {"$addToSet": {"students": {"$each": student_ids}}, "$set": {"updated_date": datetime.utcnow()}},
         )
 
 
-def _create_demo_teacher_classroom(db, current_user: dict) -> str:
+async def _create_demo_teacher_classroom(db, current_user: dict) -> str:
     teacher_oid = ObjectId(current_user["user_id"])
-    existing = db.classrooms.find_one({"teacher_id": teacher_oid}, {"_id": 1})
+    existing = await db.classrooms.find_one({"teacher_id": teacher_oid}, {"_id": 1})
     if existing:
         return str(existing["_id"])
 
@@ -624,14 +626,14 @@ def _create_demo_teacher_classroom(db, current_user: dict) -> str:
         "updated_date": datetime.utcnow(),
     }
 
-    inserted = db.classrooms.insert_one(classroom_doc)
+    inserted = await db.classrooms.insert_one(classroom_doc)
     classroom_oid = inserted.inserted_id
     classroom_id = str(classroom_oid)
 
-    _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
-    _build_demo_students(db, classroom_oid, teacher_oid, count=12)
+    await _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
+    await _build_demo_students(db, classroom_oid, teacher_oid, count=12)
 
-    db.announcements.insert_many(
+    await db.announcements.insert_many(
         [
             {
                 "classroom_id": classroom_oid,
@@ -667,12 +669,12 @@ def _create_demo_teacher_classroom(db, current_user: dict) -> str:
 async def list_classrooms(current_user = Depends(get_current_user)):
     db = get_db()
     rbac = RBACService(db)
-    classrooms = rbac.get_user_classrooms(current_user["user_id"])
+    classrooms = await rbac.get_user_classrooms(current_user["user_id"])
 
     role = normalize_user_role(current_user.get("role"))
     if classrooms.get("total", 0) == 0 and role in {"teacher", "admin"}:
-        _create_demo_teacher_classroom(db, current_user)
-        classrooms = rbac.get_user_classrooms(current_user["user_id"])
+        await _create_demo_teacher_classroom(db, current_user)
+        classrooms = await rbac.get_user_classrooms(current_user["user_id"])
 
     return classrooms
 
@@ -685,7 +687,7 @@ async def bootstrap_demo_classroom(current_user = Depends(get_current_user)):
     if role not in {"teacher", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can bootstrap demo classrooms")
 
-    classroom_id = _create_demo_teacher_classroom(db, current_user)
+    classroom_id = await _create_demo_teacher_classroom(db, current_user)
     return {"status": "success", "classroom_id": classroom_id, "message": "Demo classroom is ready"}
 
 
@@ -738,7 +740,7 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
         )
 
     teacher_oid = ObjectId(current_user["user_id"])
-    duplicate_subject = db.classrooms.find_one({
+    duplicate_subject = await db.classrooms.find_one({
         "teacher_id": teacher_oid,
         "subject": {"$regex": _subject_regex(subject), "$options": "i"},
     })
@@ -800,12 +802,12 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
         "updated_date": datetime.utcnow(),
     }
 
-    result = db.classrooms.insert_one(classroom)
+    result = await db.classrooms.insert_one(classroom)
     classroom_id = str(result.inserted_id)
 
-    _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
+    await _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
 
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     seeded_modules = []
     initial_module_names = _derive_initial_module_names(focus_areas, ai_resources)
 
@@ -849,7 +851,7 @@ async def get_classroom_resources(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
 
     normalized_mode = (mode or "class").strip().lower()
@@ -861,7 +863,7 @@ async def get_classroom_resources(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    classroom = db.classrooms.find_one(
+    classroom = await db.classrooms.find_one(
         {"_id": classroom_oid},
         {
             "name": 1,
@@ -875,7 +877,7 @@ async def get_classroom_resources(
 
     if normalized_mode == "class":
         role = normalize_user_role(current_user.get("role"))
-        can_manage = role == "admin" or rbac.is_teacher(current_user["user_id"], classroom_id)
+        can_manage = role == "admin" or await rbac.is_teacher(current_user["user_id"], classroom_id)
 
         resources = [item for item in classroom.get("ai_resources", []) if isinstance(item, dict)]
         if not can_manage:
@@ -894,7 +896,7 @@ async def get_classroom_resources(
         }
 
     user_oid = ObjectId(current_user["user_id"])
-    assessment_snapshot = _latest_assessment_snapshot(db, user_oid)
+    assessment_snapshot = await _latest_assessment_snapshot(db, user_oid)
     if not assessment_snapshot:
         return {
             "status": "success",
@@ -908,7 +910,7 @@ async def get_classroom_resources(
         }
 
     signature = _assessment_signature(assessment_snapshot)
-    cached_doc = db.generated_personal_resources.find_one(
+    cached_doc = await db.generated_personal_resources.find_one(
         {
             "user_id": user_oid,
             "assessment_signature": signature,
@@ -933,7 +935,7 @@ async def get_classroom_resources(
         approval_status="approved",
     )
 
-    db.generated_personal_resources.update_one(
+    await db.generated_personal_resources.update_one(
         {
             "user_id": user_oid,
             "assessment_signature": signature,
@@ -968,7 +970,7 @@ async def get_classroom_activity_feed(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
 
     try:
@@ -976,13 +978,9 @@ async def get_classroom_activity_feed(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    entries = list(
-        db.activity_feed.find(
-            {"classroom_id": {"$in": [classroom_id, classroom_oid]}}
-        )
-        .sort("created_at", -1)
-        .limit(limit)
-    )
+    entries = await db.activity_feed.find(
+        {"classroom_id": {"$in": [classroom_id, classroom_oid]}}
+    ).sort("created_at", -1).limit(limit).to_list(None)
 
     user_ids = {
         str(item.get("student_id"))
@@ -1002,7 +1000,7 @@ async def get_classroom_activity_feed(
         user_name = "Unknown"
         try:
             user_oid = ObjectId(user_id)
-            user = db.users.find_one({"_id": user_oid}, {"name": 1})
+            user = await db.users.find_one({"_id": user_oid}, {"name": 1})
             if user and user.get("name"):
                 user_name = str(user.get("name"))
         except Exception:
@@ -1048,7 +1046,7 @@ async def get_pending_grading_count(
     if role not in {"teacher", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can access pending grading counts")
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
 
     try:
@@ -1056,7 +1054,7 @@ async def get_pending_grading_count(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    pending_count = db.assessment_submissions.count_documents(
+    pending_count = await db.assessment_submissions.count_documents(
         {
             "classroom_id": {"$in": [classroom_id, classroom_oid]},
             "grading_status": "pending_manual_grade",
@@ -1088,18 +1086,18 @@ async def update_resource_approval(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    classroom = db.classrooms.find_one({"_id": classroom_oid}, {"teacher_id": 1, "ai_resources": 1})
+    classroom = await db.classrooms.find_one({"_id": classroom_oid}, {"teacher_id": 1, "ai_resources": 1})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
     # Allow primary teacher, co-teachers, or admins to approve resources
-    if role != "admin" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if role != "admin" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the classroom teacher can approve resources")
 
     approval_status = "approved" if payload.approved else "rejected"
     now = datetime.utcnow()
 
-    update_result = db.classrooms.update_one(
+    update_result = await db.classrooms.update_one(
         {
             "_id": classroom_oid,
             "ai_resources.resource_id": resource_id,
@@ -1118,7 +1116,7 @@ async def update_resource_approval(
     if update_result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Resource not found in classroom")
 
-    refreshed = db.classrooms.find_one({"_id": classroom_oid}, {"ai_resources": 1}) or {}
+    refreshed = await db.classrooms.find_one({"_id": classroom_oid}, {"ai_resources": 1}) or {}
     resources = [item for item in refreshed.get("ai_resources", []) if isinstance(item, dict)]
 
     return {
@@ -1134,11 +1132,11 @@ async def update_resource_approval(
 async def get_classroom(classroom_id: str, current_user = Depends(get_current_user)):
     db = get_db()
     rbac = RBACService(db)
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
 
     try:
-        classroom = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+        classroom = await db.classrooms.find_one({"_id": ObjectId(classroom_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
@@ -1157,7 +1155,7 @@ async def get_classroom(classroom_id: str, current_user = Depends(get_current_us
 async def find_classroom_by_code(code: str):
     """Find a classroom by enrollment code. Returns basic info if found."""
     db = get_db()
-    classroom = db.classrooms.find_one({"enrollment_code": code})
+    classroom = await db.classrooms.find_one({"enrollment_code": code})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
@@ -1173,7 +1171,7 @@ async def find_classroom_by_code(code: str):
 async def join_classroom(classroom_id: str, enrollment_code: str, current_user = Depends(get_current_user)):
     db = get_db()
     try:
-        classroom = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+        classroom = await db.classrooms.find_one({"_id": ObjectId(classroom_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
@@ -1185,8 +1183,8 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
         raise HTTPException(status_code=400, detail="Already a member")
 
     # add student
-    db.classrooms.update_one({"_id": ObjectId(classroom_id)}, {"$push": {"students": user_oid}})
-    db.users.update_one({"_id": user_oid}, {"$push": {"classroom_memberships": {
+    await db.classrooms.update_one({"_id": ObjectId(classroom_id)}, {"$push": {"students": user_oid}})
+    await db.users.update_one({"_id": user_oid}, {"$push": {"classroom_memberships": {
         "classroom_id": classroom_id,
         "role": "student",
         "joined_date": datetime.utcnow(),
@@ -1206,12 +1204,12 @@ async def update_classroom(classroom_id: str, update_data: dict, current_user = 
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    classroom = db.classrooms.find_one({"_id": classroom_oid})
+    classroom = await db.classrooms.find_one({"_id": classroom_oid})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
     # Allow primary teacher or co-teachers to update classroom
-    if not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teacher can update class")
 
     allowed = [
@@ -1250,7 +1248,7 @@ async def update_classroom(classroom_id: str, update_data: dict, current_user = 
         if not update["subject"]:
             raise HTTPException(status_code=400, detail="Classroom subject is required")
 
-        duplicate_subject = db.classrooms.find_one({
+        duplicate_subject = await db.classrooms.find_one({
             "_id": {"$ne": classroom_oid},
             "teacher_id": teacher_oid,
             "subject": {"$regex": _subject_regex(update["subject"]), "$options": "i"},
@@ -1263,7 +1261,7 @@ async def update_classroom(classroom_id: str, update_data: dict, current_user = 
 
     update["updated_date"] = datetime.utcnow()
 
-    result = db.classrooms.update_one({"_id": classroom_oid}, {"$set": update})
+    result = await db.classrooms.update_one({"_id": classroom_oid}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Classroom not found")
     return {"message": "Updated"}
@@ -1299,7 +1297,7 @@ async def auto_generate_modules_from_resources(
         )
     
     # Check if user is the classroom teacher or admin
-    if role == "teacher" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the classroom teacher can generate modules"
@@ -1310,7 +1308,7 @@ async def auto_generate_modules_from_resources(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
     
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.auto_generate_modules_from_resources(
         classroom_id,
         force_regenerate=force_regenerate
@@ -1346,7 +1344,7 @@ async def get_classroom_modules(
     db = get_db()
     rbac = RBACService(db)
     
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -1357,7 +1355,7 @@ async def get_classroom_modules(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
     
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     
     # Include progress for students viewing their own progress
     show_progress = include_progress and current_user.get("role", "").lower() == "student"
@@ -1389,13 +1387,13 @@ async def create_learning_module(
             detail="Only teachers can create modules",
         )
 
-    if role == "teacher" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the classroom teacher can create modules",
         )
 
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.create_module(
         classroom_id=classroom_id,
         name=payload.name,
@@ -1426,13 +1424,13 @@ async def reorder_classroom_modules(
             detail="Only teachers can reorder modules",
         )
 
-    if role == "teacher" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the classroom teacher can reorder modules",
         )
 
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.reorder_modules(classroom_id, payload.module_ids)
 
     if result.get("status") == "error":
@@ -1450,13 +1448,13 @@ async def get_approved_resources_for_module_assignment(
     db = get_db()
     rbac = RBACService(db)
 
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom",
         )
 
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.get_approved_resources_for_module_assignment(classroom_id)
 
     if result.get("status") == "error":
@@ -1483,13 +1481,13 @@ async def assign_resources_to_module(
             detail="Only teachers can assign resources to modules",
         )
 
-    if role == "teacher" and not rbac.is_teacher(current_user["user_id"], classroom_id):
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the classroom teacher can assign resources",
         )
 
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.add_resources_to_module(
         classroom_id=classroom_id,
         module_id=module_id,
@@ -1517,7 +1515,7 @@ async def get_module_details(
     db = get_db()
     rbac = RBACService(db)
     
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -1529,7 +1527,7 @@ async def get_module_details(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom or module id")
     
-    module = db.learning_modules.find_one({
+    module = await db.learning_modules.find_one({
         "_id": module_oid,
         "classroom_id": classroom_oid
     })
@@ -1584,7 +1582,7 @@ async def get_module_progress(
     rbac = RBACService(db)
     role = normalize_user_role(current_user.get("role"))
     
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -1613,7 +1611,7 @@ async def get_module_progress(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid student id")
     
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     progress = module_service.get_module_progress(target_student_oid, module_oid)
     
     return {
@@ -1649,7 +1647,7 @@ async def track_resource_engagement(
     db = get_db()
     rbac = RBACService(db)
     
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -1662,7 +1660,7 @@ async def track_resource_engagement(
         raise HTTPException(status_code=400, detail="Invalid classroom or module id")
     
     # Verify module exists in classroom
-    module = db.learning_modules.find_one({
+    module = await db.learning_modules.find_one({
         "_id": module_oid,
         "classroom_id": classroom_oid
     })
@@ -1680,7 +1678,7 @@ async def track_resource_engagement(
     if not resource_exists:
         raise HTTPException(status_code=404, detail="Resource not found in this module")
     
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.track_resource_engagement(
         current_user["user_id"],
         resource_id,
@@ -1714,7 +1712,7 @@ async def get_module_resource_analytics(
             detail="Only teachers can view module analytics"
         )
     
-    if not rbac.is_classroom_member(current_user["user_id"], classroom_id):
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a member of this classroom"
@@ -1726,7 +1724,7 @@ async def get_module_resource_analytics(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom or module id")
     
-    module_service = LearningModuleService(db)
+    module_service = LearningModuleService(get_sync_db())
     result = module_service.get_module_resource_analytics(classroom_id, module_id)
     
     return result
