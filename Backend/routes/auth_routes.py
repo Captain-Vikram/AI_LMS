@@ -6,7 +6,7 @@ import hashlib
 import jwt
 from pymongo.errors import DuplicateKeyError
 from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
-from database import get_db
+from database_async import get_db
 from models.user_models import UserRegistration, UserLogin
 from jwt_config import settings
 from functions.utils import get_current_user, normalize_user_role
@@ -83,8 +83,9 @@ async def register(user: UserRegistration):
 
     normalized_role = normalize_user_role(user.role if hasattr(user, 'role') else None)
     
-    # Check if user already exists
-    if users_collection.find_one({"email": user.email}):
+    # Check if user already exists (ASYNC)
+    existing_user = await users_collection.find_one({"email": user.email})
+    if existing_user:
         raise HTTPException(status_code=400, detail="User already exists")
     
     # Create user data
@@ -102,11 +103,11 @@ async def register(user: UserRegistration):
         "assessment_complete": False,
     }
     
-    # Insert user and get the ID
-    user_result = users_collection.insert_one(user_data)
+    # Insert user and get the ID (ASYNC)
+    user_result = await users_collection.insert_one(user_data)
     user_id = user_result.inserted_id
     
-    # Create profile data if first_name is provided
+    # Create profile data if first_name is provided (ASYNC)
     if hasattr(user, 'first_name') and user.first_name:
         profile_data = {
             "user_id": user_id,
@@ -115,7 +116,7 @@ async def register(user: UserRegistration):
             "location": user.location if hasattr(user, 'location') else None,
             "role": normalized_role,
         }
-        profiles_collection.insert_one(profile_data)
+        await profiles_collection.insert_one(profile_data)
     
     # Generate JWT token (include role + classroom roles)
     classroom_roles_map = _get_user_classroom_roles_map(user_id)
@@ -160,11 +161,11 @@ async def update_onboarding_status(
         from bson import ObjectId
         user_id = ObjectId(user_id)
         
-        # Update the user's onboarding status
+        # Update the user's onboarding status (ASYNC)
         db = get_db()
         users_collection = db.users
         
-        update_result = users_collection.update_one(
+        update_result = await users_collection.update_one(
             {"_id": user_id},
             {"$set": {"onboarding_complete": status.get("onboarding_complete", True)}}
         )
@@ -182,24 +183,27 @@ async def login(credentials: UserLogin):
     db = get_db()
     users_collection = db.users
     hashed_pw = hash_password(credentials.password)
-    user = users_collection.find_one({"email": credentials.email, "password_hash": hashed_pw})
+    
+    # Find user by email and password (ASYNC)
+    user = await users_collection.find_one({"email": credentials.email, "password_hash": hashed_pw})
     
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     normalized_role = normalize_user_role(user.get("role"))
     if user.get("role") != normalized_role:
-        users_collection.update_one({"_id": user["_id"]}, {"$set": {"role": normalized_role}})
+        # Update role if needed (ASYNC)
+        await users_collection.update_one({"_id": user["_id"]}, {"$set": {"role": normalized_role}})
         user["role"] = normalized_role
     
-    # Update the last_login timestamp
+    # Update the last_login timestamp (ASYNC)
     current_login_time = datetime.utcnow()
-    users_collection.update_one(
+    await users_collection.update_one(
         {"_id": user["_id"]}, {"$set": {"last_login": current_login_time}}
     )
 
-    # Track login events for weekly activity and streak analytics
-    db.login_logs.insert_one({
+    # Track login events for weekly activity and streak analytics (ASYNC)
+    await db.login_logs.insert_one({
         "user_id": user["_id"],
         "login_time": current_login_time,
     })
@@ -235,7 +239,7 @@ async def set_active_classroom(classroom_id: str, current_user = Depends(get_cur
     db = get_db()
     try:
         from bson import ObjectId
-        class_obj = db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+        class_obj = await db.classrooms.find_one({"_id": ObjectId(classroom_id)})
     except Exception:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
@@ -289,12 +293,12 @@ async def get_user_profile(authorization: str = Header(None)):
         users_collection = db.users
         profiles_collection = db.user_profiles
         
-        # First try to get from profiles collection for richer data
-        user_profile = profiles_collection.find_one({"user_id": user_id_obj})
+        # First try to get from profiles collection for richer data (ASYNC)
+        user_profile = await profiles_collection.find_one({"user_id": user_id_obj})
         
-        # If no profile exists, get basic data from users collection
+        # If no profile exists, get basic data from users collection (ASYNC)
         if not user_profile:
-            user = users_collection.find_one({"_id": user_id_obj})
+            user = await users_collection.find_one({"_id": user_id_obj})
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
                 
@@ -312,8 +316,8 @@ async def get_user_profile(authorization: str = Header(None)):
                 "assessmentComplete": user.get("assessment_complete", False)
             }
         
-        # Return enriched profile data
-        user = users_collection.find_one({"_id": user_id_obj})
+        # Return enriched profile data (ASYNC)
+        user = await users_collection.find_one({"_id": user_id_obj})
         
         return {
             "id": user_id,
@@ -349,12 +353,12 @@ async def get_user_status(authorization: str = Header(None)):
 
     try:
         db = get_db()
-        user = db.users.find_one({"_id": user_object_id})
+        user = await db.users.find_one({"_id": user_object_id})
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        latest_assessment = db.skill_assessment_results.find_one(
+        latest_assessment = await db.skill_assessment_results.find_one(
             {"user_id": user_object_id},
             sort=[("timestamp", -1)],
         )
@@ -403,11 +407,11 @@ async def update_assessment_status(
         from bson import ObjectId
         user_id = ObjectId(user_id)
         
-        # Update the user's assessment status
+        # Update the user's assessment status (ASYNC)
         db = get_db()
         users_collection = db.users
         
-        update_result = users_collection.update_one(
+        update_result = await users_collection.update_one(
             {"_id": user_id},
             {"$set": {"assessment_complete": status.get("assessment_complete", True)}}
         )
@@ -430,10 +434,10 @@ async def get_login_activity(authorization: str = Header(None)):
     today = datetime.utcnow()
     past_week = today - timedelta(days=7)
 
-    login_logs = list(db.login_logs.find({
+    login_logs = await db.login_logs.find({
         "user_id": ObjectId(user_id),
         "login_time": {"$gte": past_week}
-    }).sort("login_time", -1))
+    }).sort("login_time", -1).to_list(None)
 
     weekday_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     response_order = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]

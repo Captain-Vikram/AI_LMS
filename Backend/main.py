@@ -22,6 +22,7 @@ from routes.announcements_routes import router as announcements_router
 from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
 from functions.service_health import get_dependency_health_snapshot
+from database_async import init_db, disconnect_from_mongo
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -45,6 +46,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Async database lifecycle events
+@app.on_event("startup")
+async def startup_db():
+    """Initialize async database connection on app startup"""
+    print("🚀 Initializing async database connection...")
+    await init_db()
+    print("✅ Database initialized and ready for async operations")
+
+
+@app.on_event("shutdown")
+async def shutdown_db():
+    """Close async database connection on app shutdown"""
+    print("🛑 Shutting down database connection...")
+    await disconnect_from_mongo()
+    print("✅ Database connection closed")
+
 
 # Include routers
 app.include_router(mcq_router)
