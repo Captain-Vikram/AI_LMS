@@ -5,12 +5,14 @@ import { useForm } from "react-hook-form";
 import { useMutation } from "@tanstack/react-query";
 import { IoLockClosed } from "react-icons/io5";
 import IconsCarousel from "../components/IconsCarousel";
+import { useBackground } from "../context/BackgroundContext";
 import apiClient from "../services/apiClient";
 import { API_ENDPOINTS } from "../config/api";
 
 const Login = () => {
   const navigate = useNavigate();
   const [loginError, setLoginError] = useState("");
+  const { backgroundColor } = useBackground();
 
   const {
     register,
@@ -81,19 +83,17 @@ const Login = () => {
   };
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center px-4 py-12 pt-28">
+    <section className="relative min-h-screen flex items-center justify-center px-4 py-12 pt-28 overflow-hidden">
       {/* Background Icon Carousel */}
-      <div className="absolute inset-0 overflow-hidden">
-        <IconsCarousel
-          backgroundColor="rgba(17, 24, 39, 0.8)"
-          iconColor="gray-500/30"
-        />
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
-      </div>
+      <motion.div className="absolute inset-0" style={{ backgroundColor }}>
+        <IconsCarousel />
+      </motion.div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_22%,rgba(34,211,238,0.12),transparent_36%),radial-gradient(circle_at_82%_64%,rgba(79,140,255,0.18),transparent_44%),linear-gradient(120deg,rgba(7,11,23,0.2),rgba(7,11,23,0.76))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_52%,rgba(4,8,18,0.62)_100%)]" />
 
       <div className="w-full max-w-sm relative z-10">
         <motion.div
-          className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-6 shadow-xl"
+          className="bg-[var(--color-surface)] backdrop-blur-xl border border-[var(--color-surface-border)] rounded-3xl p-6 shadow-[var(--shadow-xl)]"
           initial="initial"
           animate="animate"
           exit="exit"
@@ -102,7 +102,7 @@ const Login = () => {
         >
           {/* Logo and title */}
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+            <div className="w-14 h-14 bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_0_30px_rgba(34,211,238,0.18)]">
               <IoLockClosed className="text-white text-xl" />
             </div>
             <h1 className="text-2xl font-bold text-white">Welcome Back</h1>
@@ -121,16 +121,16 @@ const Login = () => {
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-gray-300 mb-1"
+                className="block text-sm font-medium text-[var(--color-text-muted)] mb-1"
               >
                 Email address
               </label>
               <input
                 type="email"
                 id="email"
-                className={`w-full px-4 py-2.5 bg-gray-700/50 border ${
+                className={`w-full px-4 py-2.5 bg-[rgba(8,14,28,0.72)] border ${
                   errors.email ? "border-red-500" : "border-gray-600"
-                } text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                } text-white rounded-xl focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent outline-none transition-all`}
                 placeholder="you@example.com"
                 {...register("email", {
                   required: "Email is required",
@@ -152,13 +152,13 @@ const Login = () => {
               <div className="flex justify-between items-center mb-1">
                 <label
                   htmlFor="password"
-                  className="block text-sm font-medium text-gray-300"
+                  className="block text-sm font-medium text-[var(--color-text-muted)]"
                 >
                   Password
                 </label>
                 <Link
                   to="/forgot-password"
-                  className="text-xs text-blue-400 hover:text-blue-300"
+                  className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-2)]"
                 >
                   Forgot password?
                 </Link>
@@ -166,9 +166,9 @@ const Login = () => {
               <input
                 type="password"
                 id="password"
-                className={`w-full px-4 py-2.5 bg-gray-700/50 border ${
+                className={`w-full px-4 py-2.5 bg-[rgba(8,14,28,0.72)] border ${
                   errors.password ? "border-red-500" : "border-gray-600"
-                } text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                } text-white rounded-xl focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent outline-none transition-all`}
                 placeholder="••••••••"
                 {...register("password", {
                   required: "Password is required",
@@ -190,17 +190,17 @@ const Login = () => {
               <input
                 id="remember"
                 type="checkbox"
-                className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                className="w-4 h-4 text-[var(--color-accent)] bg-[rgba(8,14,28,0.72)] border-[var(--color-surface-border)] rounded focus:ring-[var(--color-accent)]"
                 {...register("remember")}
               />
-              <label htmlFor="remember" className="ml-2 text-sm text-gray-300">
+              <label htmlFor="remember" className="ml-2 text-sm text-[var(--color-text-muted)]">
                 Remember me
               </label>
             </div>
 
             {/* Error message */}
             {loginError && (
-              <div className="bg-red-900/30 border border-red-800 text-red-300 px-3 py-2 rounded-md text-sm">
+              <div className="bg-red-900/30 border border-red-800 text-red-300 px-3 py-2 rounded-xl text-sm">
                 {loginError}
               </div>
             )}
@@ -209,7 +209,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loginMutation.isPending}
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-blue-600 text-white font-medium rounded-lg hover:from-purple-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all duration-300 flex justify-center items-center"
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] text-slate-950 font-semibold rounded-xl hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] transition-all duration-300 flex justify-center items-center shadow-[0_20px_40px_rgba(34,211,238,0.18)]"
             >
               {loginMutation.isPending ? (
                 <svg
@@ -239,11 +239,11 @@ const Login = () => {
 
           {/* Register link */}
           <div className="mt-5 text-center">
-            <p className="text-gray-400 text-xs">
+            <p className="text-[var(--color-text-muted)] text-xs">
               Don't have an account?{" "}
               <Link
                 to="/register"
-                className="text-blue-400 hover:text-blue-300 font-medium"
+                className="text-[var(--color-accent)] hover:text-[var(--color-accent-2)] font-medium"
               >
                 Sign up
               </Link>

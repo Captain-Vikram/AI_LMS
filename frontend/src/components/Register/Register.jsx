@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query'; 
 import { IoLockClosed } from 'react-icons/io5';
 import IconsCarousel from '../IconsCarousel';
+import { useBackground } from '../../context/BackgroundContext';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 
@@ -17,6 +18,7 @@ const Register = () => {
   const [step, setStep] = useState(1);
   const [registrationError, setRegistrationError] = useState('');
   const navigate = useNavigate();
+  const { backgroundColor } = useBackground();
   
   // React Hook Form setup for step 1
   const { 
@@ -111,26 +113,27 @@ const Register = () => {
   };
 
   return (
-    <section className="relative min-h-screen flex items-center justify-center px-4 py-12 pt-28">
+    <section className="relative min-h-screen flex items-center justify-center px-4 py-12 pt-28 overflow-hidden">
       {/* Background Icon Carousel */}
-      <div className="absolute inset-0 overflow-hidden">
-        <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
-      </div>
+      <motion.div className="absolute inset-0" style={{ backgroundColor }}>
+        <IconsCarousel />
+      </motion.div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_22%,rgba(34,211,238,0.12),transparent_36%),radial-gradient(circle_at_82%_64%,rgba(79,140,255,0.18),transparent_44%),linear-gradient(120deg,rgba(7,11,23,0.2),rgba(7,11,23,0.76))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_52%,rgba(4,8,18,0.62)_100%)]" />
 
       <div className="w-full max-w-sm relative z-10">
         <motion.div 
-          className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-6 shadow-xl"
+          className="bg-[var(--color-surface)] backdrop-blur-xl border border-[var(--color-surface-border)] rounded-3xl p-6 shadow-[var(--shadow-xl)]"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
           {/* Logo and title */}
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+            <div className="w-14 h-14 bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] rounded-full flex items-center justify-center mx-auto mb-3 shadow-[0_0_30px_rgba(34,211,238,0.18)]">
               <IoLockClosed className="text-white text-xl" />
             </div>
             <h1 className="text-2xl font-bold text-white">Create Account</h1>
-            <p className="text-gray-400 mt-1 text-sm">Start your learning journey with us</p>
+            <p className="text-[var(--color-text-muted)] mt-1 text-sm">Start your learning journey with us</p>
           </div>
 
           {/* Progress steps */}
@@ -169,9 +172,9 @@ const Register = () => {
 
           {/* Login link */}
           <div className="mt-5 text-center">
-            <p className="text-gray-400 text-xs">
+            <p className="text-[var(--color-text-muted)] text-xs">
               Already have an account?{' '}
-              <Link to="/login" className="text-blue-400 hover:text-blue-300 font-medium">
+              <Link to="/login" className="text-[var(--color-accent)] hover:text-[var(--color-accent-2)] font-medium">
                 Log in
               </Link>
             </p>

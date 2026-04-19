@@ -1,7 +1,7 @@
 const PasswordStrength = ({ strength }) => {
     return (
       <div className="mt-1">
-        <div className="flex h-1 rounded-full overflow-hidden bg-gray-700">
+        <div className="flex h-1 rounded-full overflow-hidden bg-[rgba(8,14,28,0.72)]">
           <div 
             className={`${
               strength <= 1 ? 'bg-red-500' : 
@@ -11,7 +11,7 @@ const PasswordStrength = ({ strength }) => {
             style={{ width: `${(strength + 1) * 20}%` }}
           />
         </div>
-        <p className="text-xs text-gray-400 mt-0.5">
+        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
           {strength === 0 && 'Very weak'}
           {strength === 1 && 'Weak'}
           {strength === 2 && 'Fair'}

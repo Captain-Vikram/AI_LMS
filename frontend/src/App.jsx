@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Home from "./components/Home";
 import Navbar from "./components/Navbar";
 import Features from "./components/Features";
+import Contact from "./components/Contact";
 import { BackgroundProvider } from "./context/BackgroundContext";
 import Register from "./components/Register/Register";
 import Login from "./components/Login";
@@ -129,7 +130,7 @@ const App = () => {
             <Route
               path="/"
               element={
-                <main className="overflow-hidden relative">
+                <main className="relative">
                   <div className="relative flex flex-col">
                     <Home />
                     <Features />
@@ -138,6 +139,7 @@ const App = () => {
               }
             />
             <Route path="/features" element={<Features />} />
+            <Route path="/contact" element={<Contact />} />
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signout" element={<Signout />} />
