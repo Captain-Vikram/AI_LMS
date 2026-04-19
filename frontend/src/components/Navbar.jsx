@@ -11,6 +11,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   // Check if user is logged in
   const isLoggedIn = localStorage.getItem('isLoggedIn');
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Navigation items with scroll functionality for Features
   const navItems = [
@@ -73,7 +74,24 @@ const Navbar = () => {
               </RouterLink>
             </motion.div>
 
-            {/* Desktop Navigation */}
+            {/* Mobile toggle + Desktop Navigation */}
+            <div className="flex items-center md:hidden">
+              <button
+                aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+                aria-expanded={mobileOpen}
+                onClick={() => setMobileOpen((s) => !s)}
+                className="inline-flex items-center justify-center rounded-md p-2 bg-white/5 hover:bg-white/8 text-white"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  {mobileOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+            </div>
+
             <div className="hidden md:flex space-x-10 items-center">
               {navItems.map((item, index) => (
                 <motion.div
@@ -136,6 +154,41 @@ const Navbar = () => {
                 </RouterLink>
               )}
             </div>
+
+            {/* Mobile menu panel */}
+            <AnimatePresence>
+              {mobileOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="absolute left-0 right-0 top-full mt-3 z-50 md:hidden"
+                >
+                  <div className="mx-3 rounded-xl border border-white/10 bg-slate-900/80 p-4 shadow-lg">
+                    <nav className="flex flex-col gap-2">
+                      {navItems.map((item) => (
+                        <RouterLink
+                          key={item.name}
+                          to={item.to}
+                          onClick={(e) => { handleNavigation(item, e); setMobileOpen(false); }}
+                          className="block rounded-md px-3 py-2 text-sm font-medium text-white/90 hover:bg-white/5"
+                        >
+                          {item.name}
+                        </RouterLink>
+                      ))}
+
+                      <div className="mt-2">
+                        {isLoggedIn ? (
+                          <RouterLink to="/signout" onClick={() => setMobileOpen(false)} className="block rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-center font-semibold text-slate-950">Sign Out</RouterLink>
+                        ) : (
+                          <RouterLink to="/login" onClick={() => setMobileOpen(false)} className="block rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-center font-semibold text-slate-950">Login</RouterLink>
+                        )}
+                      </div>
+                    </nav>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
     </motion.nav>
