@@ -24,26 +24,27 @@ const Navbar = () => {
   const handleNavigation = (item, e) => {
     if (item.isScroll) {
       e.preventDefault();
+      const scrollToFeatures = () => {
+        const element = document.getElementById('features');
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      };
+
       if (window.location.pathname !== '/') {
         navigate('/');
-        setTimeout(() => {
-          const element = document.getElementById(item.name.toLowerCase());
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 100);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(scrollToFeatures);
+        });
       } else {
-        const element = document.getElementById(item.name.toLowerCase());
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth' });
-        }
+        scrollToFeatures();
       }
     }
   };
 
   return (
     <motion.nav
-      className="fixed top-0 w-full z-50"
+      className="fixed top-4 w-full z-50 px-4 lg:px-6 pointer-events-none"
       initial="hidden"
       animate="visible"
       variants={navbarVariants}
@@ -51,9 +52,11 @@ const Navbar = () => {
         transform: isVisible ? "none" : "translateY(-100%)",
       }}
     >
-      <div className="backdrop-blur-md bg-black/80 shadow-lg">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-16 md:h-20">
+      <div className="relative mx-auto w-full max-w-[1240px] pointer-events-auto">
+        <div className="absolute inset-0 rounded-full bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0.02))] opacity-30" />
+        <div className="absolute -inset-[1px] rounded-full bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.28),transparent_45%)] opacity-40" />
+
+        <div className="relative flex items-center justify-between h-16 md:h-[74px] px-6 md:px-9 rounded-full border border-white/20 bg-[linear-gradient(140deg,rgba(13,24,46,0.86),rgba(8,17,34,0.7))] backdrop-blur-2xl shadow-[0_16px_38px_rgba(3,8,20,0.52)]">
             {/* Logo */}
             <motion.div 
               className="flex items-center"
@@ -64,14 +67,14 @@ const Navbar = () => {
                 to="/"
                 className="flex items-center cursor-pointer"
               >
-                <span className="text-white font-bold text-2xl md:text-3xl tracking-tighter">
-                  <span className="text-primary">Skill</span>Master
+                <span className="text-[var(--color-text)] font-bold text-2xl md:text-3xl tracking-tighter">
+                  <span className="text-[var(--color-accent)]">Skill</span>Master
                 </span>
               </RouterLink>
             </motion.div>
 
             {/* Desktop Navigation */}
-            <div className="hidden md:flex space-x-8 items-center">
+            <div className="hidden md:flex space-x-10 items-center">
               {navItems.map((item, index) => (
                 <motion.div
                   key={item.name}
@@ -85,7 +88,7 @@ const Navbar = () => {
                 >
                   <RouterLink
                     to={item.to}
-                    className="text-white hover:text-primary text-lg font-medium cursor-pointer transition-colors py-1 px-1"
+                    className="text-[var(--color-text-muted)] hover:text-white text-[1.02rem] font-medium cursor-pointer transition-colors py-1 px-1"
                     onClick={(e) => handleNavigation(item, e)}
                   >
                     {item.name}
@@ -94,7 +97,7 @@ const Navbar = () => {
                   <AnimatePresence>
                     {hoveredItem === item.name && (
                       <motion.div
-                        className="absolute left-0 bottom-0 h-0.5 bg-white"
+                        className="absolute left-0 bottom-0 h-0.5 bg-[var(--color-accent)]"
                         layoutId="navUnderline"
                         initial={{ width: 0 }}
                         animate={{ 
@@ -110,8 +113,8 @@ const Navbar = () => {
               { isLoggedIn ? (
                 <RouterLink to="/signout">
                   <motion.button
-                    className="bg-primary text-white px-6 py-1.5 rounded-lg text-lg font-medium ml-4 border-2 cursor-pointer"
-                    whileHover={{ color: "#000", backgroundColor: "#fff" }}
+                    className="bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-2))] text-slate-950 px-6 py-2 rounded-full text-lg font-semibold ml-4 border border-white/25 cursor-pointer shadow-[0_12px_28px_rgba(34,211,238,0.28)]"
+                    whileHover={{ color: "#fff", backgroundColor: "#4f8cff" }}
                     whileTap={{ scale: 0.95 }}
                     transition={{ duration: 0.1 }}
                     variants={childVariants}
@@ -122,8 +125,8 @@ const Navbar = () => {
               ) : (
                 <RouterLink to="/login">
                   <motion.button
-                    className="bg-primary text-white px-6 py-1.5 rounded-lg text-lg font-medium ml-4 border-2 cursor-pointer"
-                    whileHover={{ color: "#000", backgroundColor: "#fff" }}
+                    className="bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-2))] text-slate-950 px-6 py-2 rounded-full text-lg font-semibold ml-4 border border-white/25 cursor-pointer shadow-[0_12px_28px_rgba(34,211,238,0.28)]"
+                    whileHover={{ color: "#fff", backgroundColor: "#4f8cff" }}
                     whileTap={{ scale: 0.95 }}
                     transition={{ duration: 0.1 }}
                     variants={childVariants}
@@ -135,7 +138,6 @@ const Navbar = () => {
             </div>
           </div>
         </div>
-      </div>
     </motion.nav>
   );
 };

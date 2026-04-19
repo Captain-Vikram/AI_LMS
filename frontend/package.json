@@ -18,6 +18,7 @@
     "chart.js": "^4.4.8",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.4.10",
+    "gsap": "^3.15.0",
     "lottie-react": "^2.4.1",
     "postcss": "^8.5.3",
     "react": "^19.0.0",

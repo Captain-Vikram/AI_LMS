@@ -1,1 +1,27 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+
+:root {
+	--color-bg: #070b17;
+	--color-surface: rgba(10, 18, 34, 0.72);
+	--color-surface-strong: rgba(8, 14, 28, 0.9);
+	--color-surface-border: rgba(87, 133, 255, 0.3);
+	--color-text: #eef3ff;
+	--color-text-muted: rgba(226, 235, 255, 0.68);
+	--color-accent: #22d3ee;
+	--color-accent-2: #4f8cff;
+	--color-accent-soft: rgba(34, 211, 238, 0.12);
+	--shadow-xl: 0 24px 55px rgba(3, 8, 20, 0.55);
+}
+
+html,
+body,
+#root {
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: "Outfit", "Segoe UI", sans-serif;
+}
+
+body {
+	letter-spacing: 0.01em;
+}

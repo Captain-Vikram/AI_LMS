@@ -7,13 +7,14 @@ const FlashlightEffect = ({ mousePosition, spotlightSize }) => {
       style={{
         background: `radial-gradient(
           circle ${spotlightSize}px at ${mousePosition.x}px ${mousePosition.y}px,
-          transparent 0%,
-          rgba(40, 40, 50, 0.40) 70%,
-          rgba(35, 35, 45, 0.55) 90%,
-          rgba(30, 30, 40, 0.65) 100%
+          rgba(255,255,255,0.18) 0%,
+          rgba(34,211,238,0.06) 28%,
+          rgba(15,25,40,0.28) 60%,
+          rgba(8,12,20,0.6) 100%
         )`,
-        mixBlendMode: "multiply",
-        zIndex: 20
+        mixBlendMode: "screen",
+        zIndex: 60,
+        transition: "background 180ms ease"
       }}
     ></div>
   );
