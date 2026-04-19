@@ -54,6 +54,17 @@ Common values used by backend code:
 - `LMSTUDIO_MODEL` (optional)
 - `LMSTUDIO_API_KEY` or `LMSTUDIO_API_TOKEN` (optional for LM Studio features)
 
+Portable RAG integration values (new):
+
+- `PORTABLE_DATA_DIR` (default `./data/portable_rag`)
+- `DEFAULT_CHAT_PROVIDER` (`local`, `lmstudio`, `gemini`)
+- `DEFAULT_EMBEDDING_PROVIDER` (`local`, `lmstudio`, `gemini`)
+- `LMSTUDIO_BASE_URL` (OpenAI-compatible endpoint, usually `http://localhost:1234/v1`)
+- `LMSTUDIO_CHAT_MODEL` (`auto` recommended)
+- `LMSTUDIO_EMBEDDING_MODEL` (`auto` recommended)
+- `GOOGLE_API_KEY` (only when Gemini is used)
+- `WHISPER_MODEL_SIZE` and `TTS_LANGUAGE` for speech endpoints
+
 Frontend API base URL (optional):
 
 - `VITE_API_URL` (default `http://localhost:8000`)
@@ -63,6 +74,34 @@ Frontend API base URL (optional):
 - Backend entrypoint: `Backend/main.py`
 - Frontend API config: `frontend/src/config/api.js`
 - Primary route modules: `Backend/routes/`
+- Portable RAG module: `handoff_fastapi/portable_rag_backend/`
+
+## Portable RAG in Current Backend
+
+The portable RAG backend is mounted under:
+
+- `GET /api/portable-rag/health`
+- `POST /api/portable-rag/vector-db/init`
+- `GET /api/portable-rag/vector-db/stats`
+- `POST /api/portable-rag/sources/*`
+- `POST /api/portable-rag/chat/sessions/*`
+
+Startup sequence for first-time setup:
+
+1. Start MongoDB (`quasar-mongo`) and your FastAPI backend.
+2. Ensure `PORTABLE_DATA_DIR` points to persistent storage.
+3. Create a notebook with `POST /api/portable-rag/notebooks`.
+4. Add sources (`/sources/text`, `/sources/url`, `/sources/file`).
+5. Initialize vectors with `POST /api/portable-rag/vector-db/init`.
+6. Optionally rebuild vectors with `POST /api/portable-rag/vector-db/rebuild` after source changes.
+
+Storage model (important):
+
+- MongoDB remains your system-of-record for existing app entities.
+- Portable RAG metadata is stored in SQLite under `PORTABLE_DATA_DIR`.
+- Portable RAG embeddings are stored in Chroma under `PORTABLE_DATA_DIR/vector_store`.
+
+No mandatory transfer from vector DB to MongoDB is required for this integration. If you want mirrored analytics in MongoDB, add a dedicated sync job instead of replacing Chroma.
 
 ## Docker Setup (Database)
 
@@ -104,6 +143,8 @@ Then run:
 ```powershell
 docker-compose up -d
 ```
+
+Note: If another container already binds host port `8000` (for example `open-notebook-surrealdb-1`), your FastAPI backend cannot bind the same port. Stop or remap that container before running backend on `:8000`.
 
 **Default connection string** (if not using auth):
 

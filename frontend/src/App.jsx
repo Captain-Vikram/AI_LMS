@@ -218,6 +218,14 @@ const App = () => {
               }
             />
             <Route
+              path="/classroom/:id/resources"
+              element={
+                <UserProgressRoute>
+                  <LearningModulesPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
               path="/classroom/:id/personal-resources"
               element={
                 <UserProgressRoute>

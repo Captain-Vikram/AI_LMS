@@ -20,7 +20,7 @@ npm run build
 
 Set `VITE_API_URL` if you want a non-default backend URL.
 
-Default: `http://localhost:8000`
+Default: `http://127.0.0.1:8000`
 
 ## Main Documentation
 

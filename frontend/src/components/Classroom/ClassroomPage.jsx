@@ -15,6 +15,7 @@ import {
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
+import { canManageClassroom } from '../../utils/classroomRoles';
 
 /* ─── Tiny helpers ─────────────────────────────────────────────── */
 
@@ -98,7 +99,7 @@ const ClassroomPage = () => {
   const navigate = useNavigate();
 
   const userRole = (localStorage.getItem('userRole') || 'student').toLowerCase();
-  const canManage = userRole === 'teacher' || userRole === 'admin';
+  const canManage = canManageClassroom(userRole);
 
   /* fetch */
   useEffect(() => {

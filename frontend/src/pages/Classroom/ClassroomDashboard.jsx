@@ -14,6 +14,7 @@ import ActivityFeed from '../../components/Classroom/ActivityFeed';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import { normalizeClassroomRole } from '../../utils/classroomRoles';
 import {
   IoBarChartOutline,
   IoBookOutline,
@@ -108,10 +109,13 @@ const Bar = ({ label, icon: Icon, pct, from, to }) => (
 const ClassroomDashboard = () => {
   const { id: classroomId } = useParams();
   const navigate = useNavigate();
-
-  const sessionRole = (localStorage.getItem('userRole') || 'student').toLowerCase();
-  const normRole = sessionRole === 'admin' ? 'teacher' : sessionRole;
-  const [userRole, setUserRole] = useState(['teacher','student'].includes(normRole) ? normRole : 'student');
+  const sessionRole = localStorage.getItem('userRole') || 'student';
+  const normalizedSessionRole = normalizeClassroomRole(sessionRole);
+  const [userRole, setUserRole] = useState(
+    normalizedSessionRole === 'teacher' || normalizedSessionRole === 'admin'
+      ? 'teacher'
+      : 'student'
+  );
   const [studentClassrooms, setStudentClassrooms] = useState([]);
   const [studentClassProgress, setStudentClassProgress] = useState({});
   const [classContextLoading, setClassContextLoading] = useState(false);
@@ -124,8 +128,20 @@ const ClassroomDashboard = () => {
   const { modules, loading: modLoad } = useLearningModules(classroomId);
 
   useEffect(() => {
-    if (!dashboard) return;
-    if (['teacher','student'].includes(normRole)) { setUserRole(normRole); return; }
+    if (!dashboard) {
+      return;
+    }
+
+    if (normalizedSessionRole === 'teacher' || normalizedSessionRole === 'admin') {
+      setUserRole('teacher');
+      return;
+    }
+
+    if (normalizedSessionRole === 'student') {
+      setUserRole('student');
+      return;
+    }
+
     setUserRole('student_count' in dashboard ? 'teacher' : 'student');
   }, [dashboard, normRole]);
 
