@@ -218,7 +218,23 @@ const App = () => {
               }
             />
             <Route
+              path="/classroom/:id/resources"
+              element={
+                <UserProgressRoute>
+                  <LearningModulesPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
               path="/classroom/:id/personal-resources"
+              element={
+                <UserProgressRoute>
+                  <StudentPersonalResourcesPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/classroom/:id/personal-resources/notebook/:notebookId"
               element={
                 <UserProgressRoute>
                   <StudentPersonalResourcesPage />

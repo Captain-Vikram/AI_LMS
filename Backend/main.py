@@ -1,5 +1,9 @@
 import os
+import sys
 import uuid
+from importlib import import_module
+from pathlib import Path
+from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -23,6 +27,23 @@ from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo
+
+# Add handoff_fastapi to import path so portable_rag_backend can be mounted directly.
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
+HANDOFF_FASTAPI_CANDIDATES = [
+    BACKEND_DIR / "handoff_fastapi",
+    PROJECT_ROOT / "handoff_fastapi",
+]
+for handoff_fastapi_dir in HANDOFF_FASTAPI_CANDIDATES:
+    if handoff_fastapi_dir.exists() and str(handoff_fastapi_dir) not in sys.path:
+        sys.path.insert(0, str(handoff_fastapi_dir))
+        break
+
+include_portable_rag_backend = getattr(
+    import_module("portable_rag_backend.integration"),
+    "include_portable_rag_backend",
+)
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -83,8 +104,11 @@ app.include_router(user_router)
 app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
 
+# Mount portable RAG backend endpoints under a dedicated API prefix.
+portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
 
-def _classify_unhandled_exception(exc: Exception):
+
+def _classify_unhandled_exception(exc: Exception) -> tuple[int, dict[str, Any]]:
     message = str(exc)
     lowered = message.lower()
 
@@ -199,6 +223,12 @@ async def root():
 
             # User milestones endpoints
             "/api/user/milestones",
+
+            # Portable RAG endpoints
+            "/api/portable-rag/health",
+            "/api/portable-rag/vector-db/init",
+            "/api/portable-rag/models",
+
             "/health/dependencies",
         ]
     }

@@ -49,9 +49,7 @@ Prefix: `/api/auth`
 
 Prefix: `/api/onboarding`
 
-- `POST /save`
 - `GET /status`
-- `GET /user-skills`
 - `POST /teacher/setup`
 - `POST /student/join`
 - `GET /teacher/pathway/{classroom_id}` (accessible by classroom teacher/co-teacher and admins)
@@ -63,6 +61,7 @@ Prefix: `/api/classroom`
 - `GET /` (list classrooms)
 - `POST /create`
 - `GET /{classroom_id}`
+- `PUT /{classroom_id}`
 - `GET /find`
 - `POST /{classroom_id}/join`
 - `GET /my/enrollments`
@@ -72,6 +71,11 @@ Prefix: `/api/classroom`
 
 - `GET /{classroom_id}/resources`
 - `PATCH /{classroom_id}/resources/{resource_id}/approval`
+
+### Activity and Grading Signals
+
+- `GET /{classroom_id}/activity-feed`
+- `GET /{classroom_id}/pending-grading-count`
 
 ### Enrollment and Groups
 
@@ -117,6 +121,28 @@ Stability update (2026-04-18):
 
 - Module generation/list/progress/analytics endpoint flows were revalidated and now return expected `2xx/4xx` responses with no observed `5xx` during full API sweep.
 
+## Student Progress
+
+Prefix: `/api/student`
+
+- `GET /progress/{module_id}`
+- `GET /progress/resources/unlocked`
+
+## Module Assessment
+
+Prefix: `/api/module-assessment`
+
+- `POST /draft-generate`
+- `GET /module/{module_id}/latest`
+- `GET /{assessment_id}`
+- `PATCH /{assessment_id}`
+- `POST /{assessment_id}/publish`
+- `POST /submission/start`
+- `POST /submission/{submission_id}/submit`
+- `GET /submission/{submission_id}`
+- `PATCH /submission/{submission_id}/grade`
+- `GET /pending-grades/{classroom_id}`
+
 ## Analytics
 
 Prefix: `/api/analytics`
@@ -145,13 +171,14 @@ Prefix: `/api/youtube`
 - `POST /get_videos`
 - `GET /search`
 
-### YouTube Q&A (RAG)
+### Resource Q&A (RAG)
 
-Prefix: `/api/youtube-qa`
+Prefix: `/api/resource`
 
-- `POST /process`
+- `GET /summary/get-or-create`
+- `POST /qa/ask`
 - `POST /ask`
-- `GET /transcript/{video_id}`
+- `GET /chat-history/{resource_id}/{student_id}`
 
 ### YouTube Quiz
 
@@ -159,15 +186,81 @@ Prefix: `/api/youtube-quiz`
 
 - `POST /generate`
 - `POST /submit`
-- `GET /status/{quiz_id}`
-- `POST /topics`
-- `POST /comprehensive`
 
 ### Deep Research
 
 Prefix: `/api/deepresearch`
 
 - `POST /recommendations`
+
+## Portable RAG Backend
+
+Prefix: `/api/portable-rag`
+
+### Service and Models
+
+- `GET /health`
+- `GET /models`
+
+### Notebooks
+
+- `POST /notebooks`
+- `GET /notebooks`
+- `GET /notebooks/{notebook_id}`
+- `DELETE /notebooks/{notebook_id}`
+- `POST /notebooks/{notebook_id}/sources`
+- `DELETE /notebooks/{notebook_id}/sources/{source_id}`
+- `GET /notebooks/{notebook_id}/audio-overview`
+- `POST /notebooks/{notebook_id}/audio-overview`
+
+### Notes
+
+- `GET /notebooks/{notebook_id}/notes`
+- `POST /notebooks/{notebook_id}/notes`
+- `PATCH /notes/{note_id}`
+- `DELETE /notes/{note_id}`
+
+### Prompt Templates
+
+- `GET /prompts`
+- `GET /prompts/{name}`
+- `PUT /prompts/{name}`
+- `POST /prompts/bootstrap-defaults`
+
+### Sources and Ingestion
+
+- `GET /resources/stats`
+- `POST /sources/text`
+- `POST /sources/text/async`
+- `POST /sources/url`
+- `POST /sources/url/async`
+- `POST /sources/file`
+- `POST /sources/file/async`
+- `GET /sources`
+- `GET /sources/{source_id}`
+- `DELETE /sources/{source_id}`
+
+### Vector DB and Search
+
+- `POST /vector-db/init`
+- `GET /vector-db/stats`
+- `POST /vector-db/rebuild`
+- `POST /vector-db/rebuild/async`
+- `POST /search`
+
+### Chat Sessions
+
+- `POST /chat/sessions`
+- `GET /chat/sessions`
+- `GET /chat/sessions/{session_id}`
+- `POST /chat/sessions/{session_id}/messages`
+
+### Jobs and Speech
+
+- `GET /jobs`
+- `GET /jobs/{job_id}`
+- `POST /speech/transcribe`
+- `POST /speech/synthesize`
 
 ## Gamification and User
 
@@ -197,7 +290,7 @@ Prefix: `/api/user`
 - The API supports concurrent requests - send multiple requests simultaneously for optimal performance.
 - Database operations use Motor (async MongoDB driver) for non-blocking I/O.
 - External API calls (LLM, YouTube, etc.) use httpx for async operations with automatic fallback support.
-- OpenAPI validation snapshot (2026-04-18): `87` operations tested, `0` responses with `5xx` status codes.
+- Route inventory snapshot (2026-04-19): `127` `/api/*` operations currently registered in the FastAPI app.
 
 ## Async Capabilities
 
