@@ -143,7 +143,7 @@ const ClassroomDashboard = () => {
     }
 
     setUserRole('student_count' in dashboard ? 'teacher' : 'student');
-  }, [dashboard, normRole]);
+  }, [dashboard, normalizedSessionRole]);
 
   useEffect(() => { if (dashboard && userRole === 'student') fetchMyProgress(); }, [dashboard, userRole, fetchMyProgress]);
 
