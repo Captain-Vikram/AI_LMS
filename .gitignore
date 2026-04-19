@@ -17,3 +17,6 @@ mongo-data/
 __pycache__/
 .pytest_cache/
 *.pyc
+Backend/data/portable_rag/
+Backend/data/portable_rag/**
+handoff_fastapi/

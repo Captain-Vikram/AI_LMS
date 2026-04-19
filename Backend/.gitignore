@@ -4,3 +4,5 @@ venv
 __pycache__/
 models/__pycache__/
 routes/__pycache__/
+data/portable_rag/
+data/portable_rag/**

@@ -14,6 +14,7 @@ import ActivityFeed from '../../components/Classroom/ActivityFeed';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import { normalizeClassroomRole } from '../../utils/classroomRoles';
 import {
   IoBarChartOutline,
   IoBookOutline,
@@ -66,11 +67,11 @@ const normalizeEnrollmentList = (response) => {
 const ClassroomDashboard = () => {
   const { id: classroomId } = useParams();
   const navigate = useNavigate();
-  const sessionRole = (localStorage.getItem('userRole') || 'student').toLowerCase();
-  const normalizedSessionRole = sessionRole === 'admin' ? 'teacher' : sessionRole;
+  const sessionRole = localStorage.getItem('userRole') || 'student';
+  const normalizedSessionRole = normalizeClassroomRole(sessionRole);
   const [userRole, setUserRole] = useState(
-    normalizedSessionRole === 'teacher' || normalizedSessionRole === 'student'
-      ? normalizedSessionRole
+    normalizedSessionRole === 'teacher' || normalizedSessionRole === 'admin'
+      ? 'teacher'
       : 'student'
   );
   const [studentClassrooms, setStudentClassrooms] = useState([]);
@@ -103,8 +104,13 @@ const ClassroomDashboard = () => {
       return;
     }
 
-    if (normalizedSessionRole === 'teacher' || normalizedSessionRole === 'student') {
-      setUserRole(normalizedSessionRole);
+    if (normalizedSessionRole === 'teacher' || normalizedSessionRole === 'admin') {
+      setUserRole('teacher');
+      return;
+    }
+
+    if (normalizedSessionRole === 'student') {
+      setUserRole('student');
       return;
     }
 
