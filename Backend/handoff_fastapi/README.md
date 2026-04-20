@@ -1,62 +1,51 @@
 # Portable RAG Backend Module
 
-This folder is a plug-and-play backend module extracted for integration into an existing FastAPI project.
+This folder contains the portable RAG backend that can be mounted into an existing FastAPI app.
 
 ## Included Features
 
-- RAG chat sessions with retrieval over indexed source chunks.
-- Source extraction and ingestion from:
+- Notebook-oriented RAG chat sessions over indexed source chunks.
+- Source ingestion from:
   - raw text,
   - URL pages,
   - uploaded files (txt, md, csv, pdf, docx, audio/video via STT).
-- Model handling restricted to:
-  - local LLMs (Ollama),
-  - Gemini API.
-- Embeddings restricted to:
-  - local sentence-transformer embeddings,
-  - Gemini embeddings.
+- Provider support for chat/embeddings:
+  - local (Ollama),
+  - LM Studio (OpenAI-compatible /v1 API),
+  - Gemini.
 - Speech tooling:
-  - STT via `faster-whisper`,
-  - TTS via `gTTS`.
-- Vector search using local Chroma persistence.
-- Metadata persistence using local SQLite.
-- Lightweight persisted background jobs for non-blocking ingestion.
-- Custom prompt templates for chat-system behavior.
-- Prompt bootstrap endpoint for recommended defaults.
-- Notes and insights persistence linked to notebooks/sources.
-- Audio overview workflow with background generation and status retrieval.
-- Podcast generation handoff endpoint with remote API forwarding or local fallback.
-- Notebook/source linking lifecycle (link, unlink, notebook delete with safe source retention).
-- Resource guardrails (upload size limits, extension validation, source limits).
-- Explicit vector DB init/stats/rebuild APIs (sync + async).
+  - STT via faster-whisper,
+  - optional Deepgram STT fallback/provider,
+  - TTS via gTTS.
+- Local Chroma vector persistence.
+- Local SQLite metadata persistence.
+- In-process persisted background jobs.
+- Prompt templates, notes, audio overview, and podcast handoff routes.
 
 ## Folder Layout
 
-- portable_rag_backend/config.py: settings and path resolution.
-- portable_rag_backend/bootstrap.py: creates all module services.
-- portable_rag_backend/integration.py: mount helpers for your FastAPI app.
-- portable_rag_backend/api/router.py: backend API endpoints.
-- portable_rag_backend/providers/: local/Gemini model and speech adapters.
-- portable_rag_backend/services/: source, chat, and model orchestration.
-- portable_rag_backend/storage/: SQLite metadata and Chroma vector persistence.
-- portable_rag_backend/utils/: text chunking and extraction helpers.
+- portable_rag_backend/config.py: settings and environment variable mappings.
+- portable_rag_backend/bootstrap.py: service wiring.
+- portable_rag_backend/integration.py: mount helpers for host FastAPI app.
+- portable_rag_backend/api/router.py: endpoint definitions.
+- portable_rag_backend/providers/: LLM, embeddings, speech adapters.
+- portable_rag_backend/services/: source/chat/model orchestration.
+- portable_rag_backend/storage/: SQLite metadata and Chroma vector storage.
+- portable_rag_backend/utils/: extractors and chunking utilities.
 
-## Quick Start
+## Quick Start (This Repository)
 
-1. Install dependencies:
-
-```bash
-pip install -r portable_backend_module/handoff_fastapi/requirements.txt
-```
-
-2. Create your env file using the sample:
+1. Install dependencies from repo root:
 
 ```bash
-copy portable_backend_module/handoff_fastapi/.env.example .env
+pip install -r Backend/handoff_fastapi/requirements.txt
 ```
 
-Optional: set `REMOTE_API_BASE_URL` (for example `http://localhost:5055/api`) to forward
-`/rag/podcasts/generate` and `/rag/podcasts/jobs/{job_id}` to a full Open Notebook API.
+2. Copy sample env and edit values:
+
+```bash
+copy Backend/handoff_fastapi/.env.example .env
+```
 
 3. Mount into your FastAPI app:
 
@@ -68,142 +57,46 @@ app = FastAPI()
 include_portable_rag_backend(app, prefix="/rag")
 ```
 
-4. Run your app as usual.
+4. Run your host app.
 
-For production-style integration with existing FastAPI + MongoDB systems, see:
-`INTEGRATION_FASTAPI_MONGODB.md`
+For full integration details with Mongo-backed host systems, see `INTEGRATION_FASTAPI_MONGODB.md`.
 
-# Portable RAG Backend Module
+## Key Environment Variables
 
-This folder is a plug-and-play backend module extracted for integration into an existing FastAPI project.
+- `PORTABLE_DATA_DIR`
+- `DEFAULT_CHAT_PROVIDER`, `DEFAULT_EMBEDDING_PROVIDER`
+- `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_EMBEDDING_MODEL`
+- `LMSTUDIO_BASE_URL`, `LMSTUDIO_API_KEY`, `LMSTUDIO_CHAT_MODEL`, `LMSTUDIO_EMBEDDING_MODEL`
+- `GOOGLE_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL`
+- `REMOTE_API_BASE_URL` (optional podcast forwarding)
 
-## Included Features
+Speech variables:
 
-- RAG chat sessions with retrieval over indexed source chunks.
-- Source extraction and ingestion from:
-  - raw text,
-  - URL pages,
-  - uploaded files (txt, md, csv, pdf, docx, audio/video via STT).
-- Model handling restricted to:
-  - local LLMs (Ollama),
-  - Gemini API.
-- Embeddings restricted to:
-  - local sentence-transformer embeddings,
-  - Gemini embeddings.
-- Speech tooling:
-  - STT via `faster-whisper`,
-  - TTS via `gTTS`.
-- Vector search using local Chroma persistence.
-- Metadata persistence using local SQLite.
-- Lightweight persisted background jobs for non-blocking ingestion.
-- Custom prompt templates for chat-system behavior.
-- Prompt bootstrap endpoint for recommended defaults.
-- Notes and insights persistence linked to notebooks/sources.
-- Audio overview workflow with background generation and status retrieval.
-- Podcast generation handoff endpoint with remote API forwarding or local fallback.
-- Notebook/source linking lifecycle (link, unlink, notebook delete with safe source retention).
-- Resource guardrails (upload size limits, extension validation, source limits).
-- Explicit vector DB init/stats/rebuild APIs (sync + async).
+- `STT_PROVIDER`: `auto`, `whisper`, or `deepgram`
+- `DEEPGRAM_API_KEY`
+- `DEEPGRAM_STT_MODEL` (default `nova-3`)
+- `DEEPGRAM_BASE_URL` (default `https://api.deepgram.com/v1`)
+- `WHISPER_MODEL_SIZE`
+- `TTS_LANGUAGE`
 
-## Folder Layout
-
-- portable_rag_backend/config.py: settings and path resolution.
-- portable_rag_backend/bootstrap.py: creates all module services.
-- portable_rag_backend/integration.py: mount helpers for your FastAPI app.
-- portable_rag_backend/api/router.py: backend API endpoints.
-- portable_rag_backend/providers/: local/Gemini model and speech adapters.
-- portable_rag_backend/services/: source, chat, and model orchestration.
-- portable_rag_backend/storage/: SQLite metadata and Chroma vector persistence.
-- portable_rag_backend/utils/: text chunking and extraction helpers.
-
-## Quick Start
-
-1. Install dependencies:
-
-```bash
-pip install -r portable_backend_module/requirements.txt
-```
-
-2. Create your env file using the sample:
-
-```bash
-copy portable_backend_module/.env.example .env
-```
-
-Optional: set `REMOTE_API_BASE_URL` (for example `http://localhost:5055/api`) to forward
-`/rag/podcasts/generate` and `/rag/podcasts/jobs/{job_id}` to a full Open Notebook API.
-
-3. Mount into your FastAPI app:
-
-```python
-from fastapi import FastAPI
-from portable_rag_backend.integration import include_portable_rag_backend
-
-app = FastAPI()
-include_portable_rag_backend(app, prefix="/rag")
-```
-
-4. Run your app as usual.
-
-For production-style integration with existing FastAPI + MongoDB systems, see:
-`INTEGRATION_FASTAPI_MONGODB.md`
+`STT_PROVIDER=auto` tries Whisper first, then Deepgram when configured.
 
 ## API Surface
 
-Full endpoint matrix with request/response schemas:
-`API_REFERENCE.md`
+See `API_REFERENCE.md` for full endpoint matrix and schema details.
 
-- `GET /rag/health`
-- `POST /rag/notebooks`
-- `GET /rag/notebooks`
-- `GET /rag/notebooks/{notebook_id}`
-- `DELETE /rag/notebooks/{notebook_id}`
-- `POST /rag/notebooks/{notebook_id}/sources`
-- `DELETE /rag/notebooks/{notebook_id}/sources/{source_id}`
-- `GET /rag/notebooks/{notebook_id}/notes`
-- `POST /rag/notebooks/{notebook_id}/notes`
-- `PATCH /rag/notes/{note_id}`
-- `DELETE /rag/notes/{note_id}`
-- `POST /rag/notebooks/{notebook_id}/audio-overview`
-- `GET /rag/notebooks/{notebook_id}/audio-overview`
-- `POST /rag/podcasts/generate`
-- `GET /rag/podcasts/jobs/{job_id}`
-- `GET /rag/prompts`
-- `GET /rag/prompts/{name}`
-- `PUT /rag/prompts/{name}`
-- `POST /rag/prompts/bootstrap-defaults`
-- `GET /rag/resources/stats`
-- `POST /rag/sources/text`
-- `POST /rag/sources/text/async`
-- `POST /rag/sources/url`
-- `POST /rag/sources/url/async`
-- `POST /rag/sources/file`
-- `POST /rag/sources/file/async`
-- `GET /rag/sources`
-- `GET /rag/sources/{source_id}`
-- `DELETE /rag/sources/{source_id}`
-- `POST /rag/vector-db/init`
-- `GET /rag/vector-db/stats`
-- `POST /rag/vector-db/rebuild`
-- `POST /rag/vector-db/rebuild/async`
-- `POST /rag/search`
-- `POST /rag/chat/sessions`
-- `GET /rag/chat/sessions`
-- `GET /rag/chat/sessions/{session_id}`
-- `POST /rag/chat/sessions/{session_id}/messages`
-- `GET /rag/models`
-- `GET /rag/jobs`
-- `GET /rag/jobs/{job_id}`
-- `POST /rag/speech/transcribe`
-- `POST /rag/speech/synthesize`
+Core groups when mounted at `/rag`:
 
-If you are building a frontend integration, start with:
-
-1. `API_REFERENCE.md` for method/path/body/response mapping.
-2. Host app `/openapi.json` for generated machine-readable schema.
+- Health and models
+- Notebooks and notebook-source links
+- Notes and prompts
+- Sources and vector DB
+- Search and chat sessions
+- Jobs and speech endpoints
+- Audio overview and podcast generation/status
 
 ## Notes
 
-- This module is intentionally self-contained and does not depend on SurrealDB.
-- It is designed for easy adoption inside an existing backend; mount and use.
-- For production workloads, add auth, rate limiting, and request size limits in your host app.
+- This module remains storage-independent from host Mongo entities.
+- Host apps should apply auth/rate limiting to mounted routes.
+- For multi-replica production deployments, consider externalizing job execution.

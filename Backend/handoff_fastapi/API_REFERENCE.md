@@ -86,9 +86,15 @@ Mounted prefix defaults to `/rag`.
 - POST `/rag/speech/transcribe`
 - POST `/rag/speech/synthesize`
 
+Speech provider behavior:
+
+- STT provider is controlled by `STT_PROVIDER` (`auto`, `whisper`, `deepgram`).
+- `auto` tries `faster-whisper` first, then Deepgram when `DEEPGRAM_API_KEY` is configured.
+- TTS uses `gTTS`.
+
 # Portable RAG Export API Reference
 
-This document describes the API exported by `portable_backend_module/handoff_fastapi` when mounted into a host FastAPI app.
+This document describes the API exported by `Backend/handoff_fastapi` when mounted into a host FastAPI app.
 
 Source of truth:
 

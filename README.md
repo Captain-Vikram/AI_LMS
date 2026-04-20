@@ -78,7 +78,7 @@ Frontend API base URL (optional):
 - Backend entrypoint: `Backend/main.py`
 - Frontend API config: `frontend/src/config/api.js`
 - Primary route modules: `Backend/routes/`
-- Portable RAG module: `handoff_fastapi/portable_rag_backend/`
+- Portable RAG module: `Backend/handoff_fastapi/portable_rag_backend/`
 
 ## Portable RAG in Current Backend
 

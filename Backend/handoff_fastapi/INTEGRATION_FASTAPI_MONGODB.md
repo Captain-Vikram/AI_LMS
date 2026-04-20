@@ -18,7 +18,7 @@ No MongoDB schema changes are required for basic integration.
 Install the module dependencies into the same virtual environment as your FastAPI app.
 
 ```bash
-pip install -r portable_backend_module/handoff_fastapi/requirements.txt
+pip install -r Backend/handoff_fastapi/requirements.txt
 ```
 
 Dependencies included by this module:
@@ -41,6 +41,8 @@ Dependencies included by this module:
 - `gTTS`
 - `sentence-transformers`
 - `uvicorn`
+
+Deepgram STT fallback uses `httpx` and does not require a separate Deepgram SDK package.
 
 ## 3. System-Level Dependencies
 
@@ -110,6 +112,10 @@ GEMINI_EMBEDDING_MODEL=text-embedding-004
 REMOTE_API_BASE_URL=http://localhost:5055/api
 
 # Speech
+STT_PROVIDER=auto  # whisper | deepgram | auto
+DEEPGRAM_API_KEY=
+DEEPGRAM_STT_MODEL=nova-3
+DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
 WHISPER_MODEL_SIZE=base
 TTS_LANGUAGE=en
 
@@ -148,7 +154,7 @@ Note about LM Studio native `/api/v1/*`: this handoff backend currently integrat
 
 ### 5.1 Add module import path
 
-Ensure your app can import the package from `portable_backend_module/handoff_fastapi`.
+Ensure your app can import the package from `Backend/handoff_fastapi` (or the equivalent path in your host workspace).
 
 ### 5.2 Mount the portable routes
 
@@ -241,14 +247,15 @@ After integration, verify:
 Install dependencies in the active virtual environment:
 
 ```bash
-pip install -r portable_backend_module/handoff_fastapi/requirements.txt
+pip install -r Backend/handoff_fastapi/requirements.txt
 ```
 
 ### 9.2 Empty audio or transcription failures
 
 - Confirm `ffmpeg` is installed and reachable.
 - Validate supported file extensions.
-- Check `WHISPER_MODEL_SIZE` and CPU resources.
+- If Whisper fails or model download is unavailable, set `STT_PROVIDER=deepgram` and configure `DEEPGRAM_API_KEY`.
+- For mixed mode, use `STT_PROVIDER=auto` (Whisper first, Deepgram fallback).
 
 ### 9.3 Upload rejected or source too large
 
