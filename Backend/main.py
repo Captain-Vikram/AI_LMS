@@ -14,6 +14,7 @@ from routes.auth_routes import router as auth_router
 from routes.onboarding_routes import router as onboarding_router
 from routes.youtube_education import router as youtube_router
 from routes.youtube_quiz_routes import router as youtube_quiz_router
+from routes.studio_routes import router as studio_router
 from routes.gamification_routes import router as gamification_router
 from routes.deepsearch import router as deepsearch_router
 from routes.rag_route import router as rag_router
@@ -96,6 +97,7 @@ app.include_router(dashboard_router)
 app.include_router(announcements_router)
 app.include_router(youtube_router)
 app.include_router(youtube_quiz_router)
+app.include_router(studio_router)
 app.include_router(gamification_router)
 app.include_router(deepsearch_router)
 app.include_router(rag_router)
@@ -221,6 +223,11 @@ async def root():
             # Analytics endpoints
             "/api/analytics/dashboard",
 
+            # Studio orchestration endpoints
+            "/api/studio/generate",
+            "/api/studio/summary",
+            "/api/studio/quiz",
+
             # User milestones endpoints
             "/api/user/milestones",
 
@@ -228,6 +235,8 @@ async def root():
             "/api/portable-rag/health",
             "/api/portable-rag/vector-db/init",
             "/api/portable-rag/models",
+            "/api/portable-rag/podcasts/generate",
+            "/api/portable-rag/podcasts/jobs/{job_id}",
 
             "/health/dependencies",
         ]

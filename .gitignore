@@ -19,4 +19,5 @@ __pycache__/
 *.pyc
 Backend/data/portable_rag/
 Backend/data/portable_rag/**
-handoff_fastapi/
+/handoff_fastapi/
+/data/

@@ -143,7 +143,7 @@ def main():
     print_summary()
     
     print(f"End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{Colors.CYAN}View detailed reports in Backend/scripts/:{{Colors.END}")
+    print(f"{Colors.CYAN}View detailed reports in Backend/scripts/:{Colors.END}")
     print(f"  • test_env_apis_report.json")
     print(f"  • endpoint_discovery_report.json")
     print(f"  • functional_test_report.json")

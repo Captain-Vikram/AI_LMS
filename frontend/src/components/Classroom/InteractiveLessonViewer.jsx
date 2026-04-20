@@ -57,10 +57,20 @@ const extractYouTubeId = (url) => {
   return match && match[2].length === 11 ? match[2] : null;
 };
 
-const toPercent = (value) => {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return 0;
-  return numeric <= 1 ? Math.round(numeric * 100) : Math.round(numeric);
+const normalizePodcastJob = (payload) => {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return {
+    id: String(source.job_id || source.id || "").trim(),
+    status: String(source.status || "").trim().toLowerCase(),
+    message: String(source.message || "").trim(),
+    result:
+      source.result && typeof source.result === "object"
+        ? source.result
+        : source.result
+          ? { value: source.result }
+          : null,
+    error: String(source.error || "").trim(),
+  };
 };
 
 const InteractiveLessonViewer = () => {
@@ -88,6 +98,14 @@ const InteractiveLessonViewer = () => {
 
   const [infoMessage, setInfoMessage] = useState("");
 
+  const [podcastEpisodeName, setPodcastEpisodeName] = useState("");
+  const [podcastEpisodeProfile, setPodcastEpisodeProfile] = useState("default");
+  const [podcastSpeakerProfile, setPodcastSpeakerProfile] = useState("default");
+  const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState("");
+  const [podcastSubmitting, setPodcastSubmitting] = useState(false);
+  const [podcastRefreshing, setPodcastRefreshing] = useState(false);
+  const [podcastJob, setPodcastJob] = useState(null);
+
   const videoUrl = useMemo(
     () => normalizeResourceUrl(resource?.url || resource?.youtube_url || ""),
     [resource]
@@ -102,6 +120,16 @@ const InteractiveLessonViewer = () => {
     if (status === "locked") return "Locked";
     return "Not Started";
   }, [resourceProgress]);
+
+  const podcastJobId = useMemo(
+    () => String(podcastJob?.id || "").trim(),
+    [podcastJob?.id]
+  );
+
+  const isPodcastRunning = useMemo(() => {
+    const status = String(podcastJob?.status || "").toLowerCase();
+    return ["queued", "running", "submitted", "pending"].includes(status);
+  }, [podcastJob?.status]);
 
   const loadProgress = async (targetStudentId, selectedResourceId) => {
     if (!targetStudentId || !moduleId || !classroomId) return;
@@ -199,6 +227,64 @@ const InteractiveLessonViewer = () => {
     };
   }, [classroomId, moduleId, resourceId]);
 
+  useEffect(() => {
+    if (!podcastJobId || !isPodcastRunning) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const statusResponse = await apiClient.get(
+          `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
+            podcastJobId
+          )}`
+        );
+
+        if (!isCancelled) {
+          setPodcastJob(normalizePodcastJob(statusResponse));
+        }
+      } catch {
+        // Keep auto-polling silent. Manual refresh shows explicit failures.
+      }
+    }, 5000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(timer);
+    };
+  }, [podcastJobId, isPodcastRunning]);
+
+  const buildPodcastContent = () => {
+    const blocks = [];
+
+    const summaryText = String(summary || "").trim();
+    if (summaryText) {
+      blocks.push(`Summary:\n${summaryText}`);
+    }
+
+    const descriptionText = String(resource?.description || resource?.content || "").trim();
+    if (descriptionText) {
+      blocks.push(`Lesson Details:\n${descriptionText}`);
+    }
+
+    if (videoUrl) {
+      blocks.push(`Source URL:\n${videoUrl}`);
+    }
+
+    if (!blocks.length) {
+      blocks.push(`Lesson title: ${resource?.title || "Untitled lesson"}`);
+    }
+
+    return blocks.join("\n\n");
+  };
+
+  const toQuizSession = (response) => ({
+    quizAttemptId: response?.quiz_attempt_id,
+    questions: Array.isArray(response?.questions) ? response.questions : [],
+    totalPoints: Number(response?.total_points || 0),
+  });
+
   const handleSummary = async () => {
     if (!resourceId || !videoUrl) return;
 
@@ -206,14 +292,30 @@ const InteractiveLessonViewer = () => {
     setInfoMessage("");
 
     try {
-      const response = await apiClient.get(
-        `/api/resource/summary/get-or-create?resource_id=${encodeURIComponent(
-          resourceId
-        )}&resource_url=${encodeURIComponent(videoUrl)}`
-      );
+      let response;
+      let sourceLabel = "studio";
+
+      try {
+        response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
+          type: "summary",
+          resource_id: resourceId,
+          resource_url: videoUrl,
+          force_refresh: false,
+        });
+      } catch {
+        sourceLabel = "resource endpoint";
+        response = await apiClient.get(
+          `${API_ENDPOINTS.RESOURCE_SUMMARY_GET_OR_CREATE}?resource_id=${encodeURIComponent(
+            resourceId
+          )}&resource_url=${encodeURIComponent(videoUrl)}`
+        );
+      }
 
       setSummary(response?.summary || "Summary unavailable.");
-      setInfoMessage(response?.is_cached ? "Loaded cached summary." : "Generated new summary.");
+      const cacheMessage = response?.is_cached
+        ? "Loaded cached summary."
+        : "Generated new summary.";
+      setInfoMessage(`${cacheMessage} (${sourceLabel})`);
     } catch (err) {
       setInfoMessage(err?.message || "Failed to generate summary");
     } finally {
@@ -253,21 +355,94 @@ const InteractiveLessonViewer = () => {
     setInfoMessage("");
 
     try {
-      const response = await apiClient.post(API_ENDPOINTS.YOUTUBE_QUIZ_GENERATE, {
-        youtube_url: videoUrl,
-        resource_id: resourceId,
-        module_id: moduleId,
-        classroom_id: classroomId,
-        student_id: studentId,
-      });
+      let response;
+      let sourceLabel = "studio";
 
-      setQuizSession({
-        quizAttemptId: response?.quiz_attempt_id,
-        questions: Array.isArray(response?.questions) ? response.questions : [],
-        totalPoints: Number(response?.total_points || 0),
-      });
+      try {
+        response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
+          type: "quiz",
+          resource_url: videoUrl,
+          resource_id: resourceId,
+          module_id: moduleId,
+          classroom_id: classroomId,
+          student_id: studentId,
+        });
+      } catch {
+        sourceLabel = "quiz endpoint";
+        response = await apiClient.post(API_ENDPOINTS.YOUTUBE_QUIZ_GENERATE, {
+          youtube_url: videoUrl,
+          resource_id: resourceId,
+          module_id: moduleId,
+          classroom_id: classroomId,
+          student_id: studentId,
+        });
+      }
+
+      setQuizSession(toQuizSession(response));
+      setInfoMessage(`Quiz generated via ${sourceLabel}.`);
     } catch (err) {
       setInfoMessage(err?.message || "Unable to generate quiz");
+    }
+  };
+
+  const handleGeneratePodcast = async () => {
+    if (!resource || !videoUrl) return;
+
+    setPodcastSubmitting(true);
+    setInfoMessage("");
+
+    try {
+      const episodeName =
+        String(podcastEpisodeName || "").trim() ||
+        `${resource?.title || "Lesson"} Audio Overview`;
+
+      const response = await apiClient.post(
+        API_ENDPOINTS.PORTABLE_RAG_PODCAST_GENERATE,
+        {
+          episode_profile: String(podcastEpisodeProfile || "default").trim() || "default",
+          speaker_profile: String(podcastSpeakerProfile || "default").trim() || "default",
+          episode_name: episodeName,
+          content: buildPodcastContent(),
+          briefing_suffix: String(podcastBriefingSuffix || "").trim() || undefined,
+        }
+      );
+
+      const normalizedJob = normalizePodcastJob(response);
+      setPodcastJob(normalizedJob);
+      setInfoMessage(
+        normalizedJob.id
+          ? `Podcast job submitted: ${normalizedJob.id}`
+          : response?.message || "Podcast job submitted."
+      );
+    } catch (err) {
+      setInfoMessage(err?.message || "Unable to generate podcast");
+    } finally {
+      setPodcastSubmitting(false);
+    }
+  };
+
+  const handleRefreshPodcastStatus = async () => {
+    if (!podcastJobId) {
+      setInfoMessage("Generate a podcast first to check status.");
+      return;
+    }
+
+    setPodcastRefreshing(true);
+    setInfoMessage("");
+
+    try {
+      const response = await apiClient.get(
+        `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
+          podcastJobId
+        )}`
+      );
+      const normalizedJob = normalizePodcastJob(response);
+      setPodcastJob(normalizedJob);
+      setInfoMessage(`Podcast job status: ${normalizedJob.status || "unknown"}.`);
+    } catch (err) {
+      setInfoMessage(err?.message || "Unable to fetch podcast status");
+    } finally {
+      setPodcastRefreshing(false);
     }
   };
 
@@ -382,7 +557,7 @@ const InteractiveLessonViewer = () => {
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
               >
                 {summaryLoading ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
-                {summaryLoading ? "Generating Summary..." : "Generate Summary"}
+                {summaryLoading ? "Generating Summary..." : "Generate Summary (Studio)"}
               </button>
 
               <button
@@ -392,7 +567,7 @@ const InteractiveLessonViewer = () => {
                 className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60"
               >
                 <IoHelpCircleOutline />
-                Take Test
+                Take Test (Studio)
               </button>
             </div>
 
@@ -401,6 +576,99 @@ const InteractiveLessonViewer = () => {
                 <p className="text-sm text-blue-100">{summary}</p>
               </div>
             )}
+
+            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/10 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-violet-100">
+                  Podcast Generator (Portable RAG)
+                </h3>
+                {isPodcastRunning && (
+                  <span className="text-xs text-violet-200">Auto-refreshing every 5s</span>
+                )}
+              </div>
+
+              <p className="mt-1 text-xs text-violet-200/90">
+                Creates a podcast-style audio overview job from this lesson.
+              </p>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <input
+                  value={podcastEpisodeName}
+                  onChange={(event) => setPodcastEpisodeName(event.target.value)}
+                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
+                  placeholder="Episode name (optional)"
+                />
+                <input
+                  value={podcastEpisodeProfile}
+                  onChange={(event) => setPodcastEpisodeProfile(event.target.value)}
+                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
+                  placeholder="Episode profile (default)"
+                />
+                <input
+                  value={podcastSpeakerProfile}
+                  onChange={(event) => setPodcastSpeakerProfile(event.target.value)}
+                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
+                  placeholder="Speaker profile (default)"
+                />
+                <input
+                  value={podcastBriefingSuffix}
+                  onChange={(event) => setPodcastBriefingSuffix(event.target.value)}
+                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
+                  placeholder="Briefing suffix (optional)"
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleGeneratePodcast}
+                  disabled={podcastSubmitting || !videoUrl}
+                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+                >
+                  {podcastSubmitting ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
+                  {podcastSubmitting ? "Submitting Podcast Job..." : "Generate Podcast"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRefreshPodcastStatus}
+                  disabled={podcastRefreshing || !podcastJobId}
+                  className="inline-flex items-center gap-2 rounded-lg bg-violet-900/60 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-800/70 disabled:opacity-60"
+                >
+                  {podcastRefreshing ? <IoRefreshOutline className="animate-spin" /> : <IoRefreshOutline />}
+                  Refresh Job Status
+                </button>
+              </div>
+
+              {podcastJob && (
+                <div className="mt-3 rounded-lg border border-violet-400/25 bg-black/30 p-3 text-xs text-violet-100">
+                  <p>
+                    <span className="font-semibold text-violet-200">Job ID:</span>{" "}
+                    {podcastJob.id || "Not provided"}
+                  </p>
+                  <p className="mt-1">
+                    <span className="font-semibold text-violet-200">Status:</span>{" "}
+                    {podcastJob.status || "unknown"}
+                  </p>
+                  {podcastJob.message && (
+                    <p className="mt-1">
+                      <span className="font-semibold text-violet-200">Message:</span>{" "}
+                      {podcastJob.message}
+                    </p>
+                  )}
+                  {podcastJob.error && (
+                    <p className="mt-1 text-rose-200">
+                      <span className="font-semibold text-rose-100">Error:</span> {podcastJob.error}
+                    </p>
+                  )}
+                  {podcastJob.result && (
+                    <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-violet-400/20 bg-gray-950/70 p-2 text-[11px] text-violet-100">
+                      {JSON.stringify(podcastJob.result, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

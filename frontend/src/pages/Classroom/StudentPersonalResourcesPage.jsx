@@ -9,7 +9,6 @@ import {
   IoDocumentTextOutline,
   IoLinkOutline,
   IoMapOutline,
-  IoSearchOutline,
   IoSparklesOutline,
   IoTrashOutline,
 } from 'react-icons/io5';
@@ -56,6 +55,73 @@ const normalizeMessages = (messages) => {
     .filter((message) => message.content);
 };
 
+const extractJsonObject = (rawText) => {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return null;
+  }
+
+  const sanitized = rawText
+    .trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(sanitized);
+  } catch {
+    const start = sanitized.indexOf('{');
+    const end = sanitized.lastIndexOf('}');
+    if (start < 0 || end <= start) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(sanitized.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizeGeneratedQuiz = (payload) => {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  if (!rawQuestions.length) {
+    return null;
+  }
+
+  const questions = rawQuestions.map((question, index) => {
+    const resolvedQuestion = question?.question || question?.question_text || `Question ${index + 1}`;
+    const options = Array.isArray(question?.options) ? question.options : [];
+    const resolvedType = question?.type || (options.length ? 'mcq' : 'short_answer');
+
+    return {
+      id: question?.id || `q-${index + 1}`,
+      type: resolvedType,
+      question: resolvedQuestion,
+      options,
+      answer: question?.answer || question?.correct_answer || '',
+      explanation: question?.explanation || question?.rationale || '',
+    };
+  });
+
+  return {
+    title: payload.title || 'Generated Quiz',
+    instructions: payload.instructions || 'Review each question and validate with your notes.',
+    questions,
+  };
+};
+
+const toSafeFileName = (value) => {
+  const raw = String(value || 'report').trim().toLowerCase();
+  const cleaned = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return cleaned || 'report';
+};
+
 const StudentPersonalResourcesPage = () => {
   const navigate = useNavigate();
   const { id: classroomId, notebookId } = useParams();
@@ -85,13 +151,23 @@ const StudentPersonalResourcesPage = () => {
   const [sourceActionLoading, setSourceActionLoading] = useState(false);
   const [sourceActionError, setSourceActionError] = useState('');
 
-  const [health, setHealth] = useState(null);
-  const [models, setModels] = useState(null);
-  const [vectorStats, setVectorStats] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [studioMessage, setStudioMessage] = useState('');
+
+  const [podcastEpisodeName, setPodcastEpisodeName] = useState('');
+  const [podcastLoading, setPodcastLoading] = useState(false);
+  const [podcastJob, setPodcastJob] = useState(null);
+
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [generatedQuiz, setGeneratedQuiz] = useState(null);
+  const [generatedQuizRaw, setGeneratedQuizRaw] = useState('');
+
+  const [reportTopic, setReportTopic] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportText, setReportText] = useState('');
+
+  const [audioBriefing, setAudioBriefing] = useState('');
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioOverview, setAudioOverview] = useState(null);
 
   const isWorkspace = Boolean(notebookId);
 
@@ -128,15 +204,6 @@ const StudentPersonalResourcesPage = () => {
     }
   };
 
-  const refreshVectorStats = async () => {
-    try {
-      const stats = await apiClient.get(portablePath('/vector-db/stats'));
-      setVectorStats(stats);
-    } catch {
-      setVectorStats(null);
-    }
-  };
-
   const ensureChatSession = async (currentNotebookId) => {
     const sessions = await apiClient.get(
       portablePath(`/chat/sessions?notebook_id=${currentNotebookId}`)
@@ -158,17 +225,13 @@ const StudentPersonalResourcesPage = () => {
     setChatError('');
 
     try {
-      const [detailResult, sourcesResult, healthResult, modelsResult] = await Promise.all([
+      const [detailResult, sourcesResult] = await Promise.all([
         apiClient.get(portablePath(`/notebooks/${currentNotebookId}`)),
         apiClient.get(portablePath(`/sources?notebook_id=${currentNotebookId}`)),
-        apiClient.get(portablePath('/health')),
-        apiClient.get(portablePath('/models')),
       ]);
 
       setNotebookDetail(detailResult);
       setSources(Array.isArray(sourcesResult) ? sourcesResult : []);
-      setHealth(healthResult);
-      setModels(modelsResult);
 
       const activeSession = await ensureChatSession(currentNotebookId);
       setChatSessionId(activeSession.id);
@@ -177,8 +240,6 @@ const StudentPersonalResourcesPage = () => {
         portablePath(`/chat/sessions/${activeSession.id}`)
       );
       setChatMessages(normalizeMessages(sessionDetail?.messages));
-
-      await refreshVectorStats();
     } catch (error) {
       setWorkspaceError(error.message || 'Failed to load personal workspace');
     } finally {
@@ -262,7 +323,6 @@ const StudentPersonalResourcesPage = () => {
       setSourceTitle('');
       setSourceText('');
       await refreshSources();
-      await refreshVectorStats();
     } catch (error) {
       setSourceActionError(error.message || 'Failed to add text source');
     } finally {
@@ -289,7 +349,6 @@ const StudentPersonalResourcesPage = () => {
 
       setSourceUrl('');
       await refreshSources();
-      await refreshVectorStats();
     } catch (error) {
       setSourceActionError(error.message || 'Failed to add URL source');
     } finally {
@@ -316,7 +375,6 @@ const StudentPersonalResourcesPage = () => {
       await apiClient.post(portablePath('/sources/file'), form);
       setSourceFile(null);
       await refreshSources();
-      await refreshVectorStats();
     } catch (error) {
       setSourceActionError(error.message || 'Failed to upload source file');
     } finally {
@@ -331,7 +389,6 @@ const StudentPersonalResourcesPage = () => {
     try {
       await apiClient.delete(portablePath(`/sources/${sourceId}`));
       await refreshSources();
-      await refreshVectorStats();
     } catch (error) {
       setSourceActionError(error.message || 'Failed to remove source');
     } finally {
@@ -388,40 +445,281 @@ const StudentPersonalResourcesPage = () => {
     }
   };
 
-  const runSearch = async () => {
-    if (!searchQuery.trim() || !notebookId) {
+  const sendStudioPrompt = async (message, retrievalK = 12) => {
+    if (!notebookId) {
+      throw new Error('Open a notebook workspace first.');
+    }
+
+    let activeSessionId = chatSessionId;
+
+    if (!activeSessionId) {
+      const session = await ensureChatSession(notebookId);
+      activeSessionId = session?.id;
+      if (activeSessionId) {
+        setChatSessionId(activeSessionId);
+      }
+    }
+
+    if (!activeSessionId) {
+      throw new Error('Unable to create Studio chat session.');
+    }
+
+    const response = await apiClient.post(
+      portablePath(`/chat/sessions/${activeSessionId}/messages`),
+      {
+        message,
+        retrieval_k: retrievalK,
+        temperature: 0.2,
+      }
+    );
+
+    return response?.answer || '';
+  };
+
+  const generatePodcast = async () => {
+    if (!notebookId) {
       return;
     }
 
-    setSearchLoading(true);
+    setPodcastLoading(true);
     setStudioMessage('');
 
     try {
-      const response = await apiClient.post(portablePath('/search'), {
+      const episodeName =
+        podcastEpisodeName.trim() || `${notebookDetail?.name || 'Notebook'} Podcast`;
+
+      const response = await apiClient.post(portablePath('/podcasts/generate'), {
+        episode_profile: 'default',
+        speaker_profile: 'default',
+        episode_name: episodeName,
         notebook_id: notebookId,
-        query: searchQuery.trim(),
-        k: 5,
       });
 
-      setSearchResults(Array.isArray(response?.results) ? response.results : []);
+      const generatedJobId = String(response?.job_id || '').trim();
+      setPodcastJob({
+        job_id: generatedJobId,
+        status: response?.status || 'queued',
+        message: response?.message || '',
+        result: null,
+        error: '',
+      });
+
+      setStudioMessage(
+        generatedJobId
+          ? `Podcast generation queued: ${generatedJobId}`
+          : 'Podcast generation requested.'
+      );
     } catch (error) {
-      setStudioMessage(error.message || 'Search failed');
-      setSearchResults([]);
+      setStudioMessage(error.message || 'Podcast generation failed');
     } finally {
-      setSearchLoading(false);
+      setPodcastLoading(false);
     }
   };
 
-  const initializeVectorDb = async () => {
+  const refreshPodcastJob = async () => {
+    const currentJobId = String(podcastJob?.job_id || '').trim();
+    if (!currentJobId) {
+      setStudioMessage('Generate a podcast first to track job status.');
+      return;
+    }
+
+    setPodcastLoading(true);
     setStudioMessage('');
+
     try {
-      const initialized = await apiClient.post(portablePath('/vector-db/init'), {});
-      setVectorStats(initialized);
-      setStudioMessage('Vector DB initialized for current data.');
+      const status = await apiClient.get(portablePath(`/podcasts/jobs/${currentJobId}`));
+      const resolvedJobId = String(status?.id || currentJobId).trim();
+
+      setPodcastJob((previous) => ({
+        ...(previous || {}),
+        job_id: resolvedJobId,
+        status: status?.status || previous?.status || 'unknown',
+        result: status?.result || null,
+        error: status?.error || '',
+      }));
+
+      setStudioMessage(`Podcast job status: ${status?.status || 'unknown'}`);
     } catch (error) {
-      setStudioMessage(error.message || 'Vector initialization failed');
+      setStudioMessage(error.message || 'Unable to fetch podcast job status');
+    } finally {
+      setPodcastLoading(false);
     }
   };
+
+  const generateCombinedQuiz = async () => {
+    if (!notebookId) {
+      return;
+    }
+
+    setQuizLoading(true);
+    setStudioMessage('');
+    setGeneratedQuiz(null);
+    setGeneratedQuizRaw('');
+
+    try {
+      const prompt = [
+        'Generate a comprehensive quiz using all available sources in this notebook, including YouTube-derived content if present.',
+        'Return ONLY strict JSON with this shape:',
+        '{',
+        '  "title": "string",',
+        '  "instructions": "string",',
+        '  "questions": [',
+        '    {"id":"q1","type":"mcq|short_answer","question":"string","options":["A","B"],"answer":"string","explanation":"string"}',
+        '  ]',
+        '}',
+        'Include 8 questions with a mix of mcq and short_answer.',
+      ].join('\n');
+
+      const answer = await sendStudioPrompt(prompt, 24);
+      setGeneratedQuizRaw(answer);
+
+      const parsed = normalizeGeneratedQuiz(extractJsonObject(answer));
+      if (parsed) {
+        setGeneratedQuiz(parsed);
+        setStudioMessage('Quiz generated from all notebook sources.');
+      } else {
+        setStudioMessage('Quiz generated, but response was not strict JSON. Raw output is shown.');
+      }
+    } catch (error) {
+      setStudioMessage(error.message || 'Quiz generation failed');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  const generateTopicReport = async () => {
+    const topic = reportTopic.trim();
+    if (!topic) {
+      setStudioMessage('Enter a topic to generate report.');
+      return;
+    }
+
+    setReportLoading(true);
+    setStudioMessage('');
+    setReportText('');
+
+    try {
+      const prompt = [
+        `Create a detailed study report about: ${topic}`,
+        'Use only the notebook sources retrieved via RAG context.',
+        'Structure:',
+        '1) Overview',
+        '2) Key Concepts',
+        '3) Important Facts',
+        '4) Practical Takeaways',
+        '5) Quick Revision Checklist',
+        'Write clear plain text suitable for exporting to a .txt document.',
+      ].join('\n');
+
+      const report = await sendStudioPrompt(prompt, 20);
+      setReportText(report || 'No report generated.');
+      setStudioMessage('Topic report generated. Use download to save .txt file.');
+    } catch (error) {
+      setStudioMessage(error.message || 'Report generation failed');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const downloadTopicReport = () => {
+    if (!reportText.trim()) {
+      setStudioMessage('Generate a report before downloading.');
+      return;
+    }
+
+    const fileName = `${toSafeFileName(reportTopic || notebookDetail?.name || 'study-report')}.txt`;
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const refreshAudioOverview = async ({ silent = false } = {}) => {
+    if (!notebookId) {
+      return;
+    }
+
+    if (!silent) {
+      setAudioLoading(true);
+      setStudioMessage('');
+    }
+
+    try {
+      const overview = await apiClient.get(
+        portablePath(`/notebooks/${notebookId}/audio-overview`)
+      );
+      setAudioOverview(overview);
+
+      if (!silent) {
+        setStudioMessage(`Audio podcast status: ${overview?.status || 'unknown'}`);
+      }
+    } catch (error) {
+      if (!silent) {
+        setStudioMessage(error.message || 'Unable to fetch audio podcast status');
+      }
+    } finally {
+      if (!silent) {
+        setAudioLoading(false);
+      }
+    }
+  };
+
+  const generateAudioPodcast = async () => {
+    if (!notebookId) {
+      return;
+    }
+
+    setAudioLoading(true);
+    setStudioMessage('');
+
+    try {
+      const payload = audioBriefing.trim()
+        ? { briefing: audioBriefing.trim() }
+        : {};
+
+      const response = await apiClient.post(
+        portablePath(`/notebooks/${notebookId}/audio-overview`),
+        payload
+      );
+
+      setAudioOverview((previous) => ({
+        ...(previous || {}),
+        notebook_id: notebookId,
+        job_id: response?.job_id,
+        status: response?.status || 'queued',
+      }));
+
+      setStudioMessage(
+        response?.job_id
+          ? `Audio podcast job queued: ${response.job_id}`
+          : 'Audio podcast generation requested.'
+      );
+
+      await refreshAudioOverview({ silent: true });
+    } catch (error) {
+      setStudioMessage(error.message || 'Audio podcast generation failed');
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const status = String(audioOverview?.status || '').toLowerCase();
+    if (!isWorkspace || !notebookId || !['queued', 'running'].includes(status)) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      refreshAudioOverview({ silent: true });
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [audioOverview?.status, isWorkspace, notebookId]);
 
   if (!isWorkspace) {
     return (
@@ -756,67 +1054,144 @@ const StudentPersonalResourcesPage = () => {
 
               <div className="mt-3 space-y-3 text-xs">
                 <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Storage</p>
-                  <p className="mt-1 text-gray-100">{health?.storage?.sqlite || 'Unknown'}</p>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Vector Docs</p>
-                  <p className="mt-1 text-gray-100">{vectorStats?.vector_documents_count ?? 'n/a'}</p>
-                  <button
-                    type="button"
-                    onClick={initializeVectorDb}
-                    className="mt-2 rounded-lg border border-cyan-400/40 px-2.5 py-1 text-[11px] text-cyan-200 hover:bg-cyan-500/10"
-                  >
-                    Initialize Vector DB
-                  </button>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Default Chat Provider</p>
-                  <p className="mt-1 text-gray-100">{models?.default_chat_provider || 'unknown'}</p>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Semantic Search</p>
+                  <p className="text-gray-300">1. Podcast Generation</p>
+                  <input
+                    value={podcastEpisodeName}
+                    onChange={(event) => setPodcastEpisodeName(event.target.value)}
+                    placeholder="Episode name (optional)"
+                    className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100"
+                  />
                   <div className="mt-2 flex gap-1.5">
-                    <input
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search notes"
-                      className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100"
-                    />
                     <button
                       type="button"
-                      onClick={runSearch}
-                      disabled={searchLoading}
-                      className="rounded-lg bg-gray-700 px-2 py-1.5 text-xs text-white hover:bg-gray-600"
+                      onClick={generatePodcast}
+                      disabled={podcastLoading}
+                      className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs text-white hover:bg-violet-500 disabled:opacity-70"
                     >
-                      <IoSearchOutline />
+                      {podcastLoading ? 'Working...' : 'Generate'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={refreshPodcastJob}
+                      disabled={podcastLoading || !podcastJob?.job_id}
+                      className="rounded-lg border border-violet-400/40 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-500/10 disabled:opacity-60"
+                    >
+                      Refresh Job
+                    </button>
+                  </div>
+                  {podcastJob && (
+                    <p className="mt-2 text-[11px] text-gray-300">
+                      Job: {podcastJob.job_id || 'n/a'} • Status: {podcastJob.status || 'unknown'}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
+                  <p className="text-gray-300">2. Quiz Generation (All Sources)</p>
+                  <button
+                    type="button"
+                    onClick={generateCombinedQuiz}
+                    disabled={quizLoading}
+                    className="mt-2 rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs text-white hover:bg-cyan-500 disabled:opacity-70"
+                  >
+                    {quizLoading ? 'Generating...' : 'Generate Quiz'}
+                  </button>
+
+                  {generatedQuiz && (
+                    <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
+                      <p className="text-[11px] font-medium text-cyan-100">{generatedQuiz.title}</p>
+                      {generatedQuiz.questions.slice(0, 4).map((question, index) => (
+                        <div key={question.id || `preview-${index}`} className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5">
+                          <p className="text-[11px] text-gray-200">Q{index + 1}. {question.question}</p>
+                          {question.answer && (
+                            <p className="mt-0.5 text-[11px] text-gray-400">Answer: {question.answer}</p>
+                          )}
+                        </div>
+                      ))}
+                      {generatedQuiz.questions.length > 4 && (
+                        <p className="text-[11px] text-gray-500">
+                          +{generatedQuiz.questions.length - 4} more question(s) generated.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {!generatedQuiz && generatedQuizRaw && (
+                    <pre className="mt-2 max-h-32 overflow-auto rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300">
+                      {generatedQuizRaw}
+                    </pre>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
+                  <p className="text-gray-300">3. Topic Report (.txt)</p>
+                  <input
+                    value={reportTopic}
+                    onChange={(event) => setReportTopic(event.target.value)}
+                    placeholder="Enter report topic"
+                    className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100"
+                  />
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={generateTopicReport}
+                      disabled={reportLoading}
+                      className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-70"
+                    >
+                      {reportLoading ? 'Generating...' : 'Generate Report'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadTopicReport}
+                      disabled={!reportText.trim()}
+                      className="rounded-lg border border-emerald-400/40 px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-60"
+                    >
+                      Download .txt
+                    </button>
+                  </div>
+                  {reportText && (
+                    <pre className="mt-2 max-h-32 overflow-auto rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-300">
+                      {reportText}
+                    </pre>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
+                  <p className="text-gray-300">4. Audio Podcast</p>
+                  <input
+                    value={audioBriefing}
+                    onChange={(event) => setAudioBriefing(event.target.value)}
+                    placeholder="Optional briefing for audio"
+                    className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100"
+                  />
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={generateAudioPodcast}
+                      disabled={audioLoading}
+                      className="rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs text-white hover:bg-amber-500 disabled:opacity-70"
+                    >
+                      {audioLoading ? 'Working...' : 'Generate Audio'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => refreshAudioOverview()}
+                      disabled={audioLoading}
+                      className="rounded-lg border border-amber-400/40 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-60"
+                    >
+                      Refresh Status
                     </button>
                   </div>
 
-                  <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
-                    {searchResults.map((result, index) => (
-                      <div key={`${result.source_id}-${index}`} className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5">
-                        <p className="text-[11px] text-gray-200">{result.title || result.source_id}</p>
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-400">
-                          {result.snippet || result.content || 'No snippet'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                  {audioOverview && (
+                    <p className="mt-2 text-[11px] text-gray-300">
+                      Job: {audioOverview.job_id || 'n/a'} • Status: {audioOverview.status || 'unknown'}
+                      {audioOverview.audio_path ? ` • Output: ${audioOverview.audio_path}` : ''}
+                    </p>
+                  )}
                 </div>
 
                 {studioMessage && <p className="text-[11px] text-amber-200">{studioMessage}</p>}
-
-                <button
-                  type="button"
-                  onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500"
-                >
-                  <IoBookOutline /> Classroom Modules
-                </button>
               </div>
             </section>
           </div>
