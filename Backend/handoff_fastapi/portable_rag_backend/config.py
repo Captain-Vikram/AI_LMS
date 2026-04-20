@@ -91,6 +91,26 @@ class PortableRAGSettings(BaseSettings):
         ),
     )
 
+    stt_provider: Literal["whisper", "deepgram", "auto"] = Field(
+        default="auto",
+        description=(
+            "Speech-to-text provider selection. "
+            "'auto' tries Whisper first, then Deepgram when configured."
+        ),
+    )
+    deepgram_api_key: str | None = Field(
+        default=None,
+        description="Deepgram API key used for STT fallback.",
+    )
+    deepgram_stt_model: str = Field(
+        default="nova-3",
+        description="Deepgram STT model identifier.",
+    )
+    deepgram_base_url: str = Field(
+        default="https://api.deepgram.com/v1",
+        description="Deepgram API base URL for STT requests.",
+    )
+
     whisper_model_size: str = Field(default="base")
     tts_language: str = Field(default="en")
 

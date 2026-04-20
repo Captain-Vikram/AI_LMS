@@ -63,6 +63,10 @@ Portable RAG integration values (new):
 - `LMSTUDIO_CHAT_MODEL` (`auto` recommended)
 - `LMSTUDIO_EMBEDDING_MODEL` (`auto` recommended)
 - `GOOGLE_API_KEY` (only when Gemini is used)
+- `STT_PROVIDER` (`auto`, `whisper`, `deepgram`; `auto` is recommended)
+- `DEEPGRAM_API_KEY` (required only when using Deepgram STT directly or as fallback)
+- `DEEPGRAM_STT_MODEL` (default `nova-3`)
+- `DEEPGRAM_BASE_URL` (default `https://api.deepgram.com/v1`)
 - `WHISPER_MODEL_SIZE` and `TTS_LANGUAGE` for speech endpoints
 
 Frontend API base URL (optional):

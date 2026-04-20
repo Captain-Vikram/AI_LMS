@@ -28,7 +28,10 @@ class ModelService:
                 "api_key_configured": bool(self.settings.google_api_key),
             },
             "speech": {
+                "stt_provider": self.settings.stt_provider,
                 "stt_model": self.settings.whisper_model_size,
+                "deepgram_stt_model": self.settings.deepgram_stt_model,
+                "deepgram_api_key_configured": bool(self.settings.deepgram_api_key),
                 "tts_language": self.settings.tts_language,
             },
         }

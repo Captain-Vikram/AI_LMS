@@ -286,7 +286,7 @@ class ModelInfoResponse(BaseModel):
     local: dict[str, str]
     lmstudio: dict[str, str | bool]
     gemini: dict[str, str | bool]
-    speech: dict[str, str]
+    speech: dict[str, str | bool]
 
 
 class TranscribeResponse(BaseModel):

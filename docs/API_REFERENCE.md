@@ -262,6 +262,14 @@ Prefix: `/api/portable-rag`
 - `POST /speech/transcribe`
 - `POST /speech/synthesize`
 
+Speech behavior notes:
+
+- `POST /api/portable-rag/speech/transcribe` uses `STT_PROVIDER`:
+  - `whisper`: local `faster-whisper` only.
+  - `deepgram`: Deepgram only.
+  - `auto`: Whisper first, then Deepgram fallback when configured.
+- `POST /api/portable-rag/speech/synthesize` uses `gTTS`.
+
 ## Gamification and User
 
 ### Gamification
@@ -352,7 +360,6 @@ Many endpoints perform parallel database queries and API calls, resulting in fas
 ```env
 # MongoDB
 MONGO_URI=mongodb://localhost:27017/quasar
-MONGO_SERVER_SELECTION_TIMEOUT_MS=5000
 
 # LLM (Local)
 LMSTUDIO_URL=http://127.0.0.1:1234
@@ -361,12 +368,27 @@ LMSTUDIO_TIMEOUT_SECONDS=120
 
 # LLM (Cloud Fallback)
 ENABLE_CLOUD_LLM_FALLBACK=true
-LLM_FALLBACK_PROVIDER=google  # or groq
+LLM_FALLBACK_PROVIDER=gemini  # legacy adapters may also use google/groq
+LLM_FALLBACK_MODEL=gemini-1.5-flash
 GOOGLE_API_KEY=your_key_here
 GROQ_API_KEY=your_key_here
 
+# Portable RAG providers
+DEFAULT_CHAT_PROVIDER=lmstudio
+DEFAULT_EMBEDDING_PROVIDER=lmstudio
+LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1
+LMSTUDIO_CHAT_MODEL=auto
+LMSTUDIO_EMBEDDING_MODEL=auto
+
+# Speech (Portable RAG)
+STT_PROVIDER=auto  # whisper | deepgram | auto
+DEEPGRAM_API_KEY=
+DEEPGRAM_STT_MODEL=nova-3
+DEEPGRAM_BASE_URL=https://api.deepgram.com/v1
+WHISPER_MODEL_SIZE=base
+TTS_LANGUAGE=en
+
 # JWT
 SECRET_KEY=your_secret_key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
+JWT_ALGORITHM=HS256
 ```
