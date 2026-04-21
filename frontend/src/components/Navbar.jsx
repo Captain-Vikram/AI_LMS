@@ -45,6 +45,7 @@ const Navbar = () => {
 
   return (
     <motion.nav
+      data-app-navbar="true"
       className="fixed top-4 w-full z-50 px-4 lg:px-6 pointer-events-none"
       initial="hidden"
       animate="visible"

@@ -5,7 +5,6 @@ import {
   IoArrowBackOutline,
   IoBookOutline,
   IoCloudUploadOutline,
-  IoConstructOutline,
   IoDocumentTextOutline,
   IoLinkOutline,
   IoMapOutline,
@@ -21,6 +20,25 @@ import apiClient from '../../services/apiClient';
 
 const PORTABLE_RAG_PREFIX = '/api/portable-rag';
 const portablePath = (path) => `${PORTABLE_RAG_PREFIX}${path}`;
+const DEFAULT_WORKSPACE_SHELL_OFFSET_PX = 160;
+const WORKSPACE_SHELL_TOP_PADDING_PX = 112;
+const WORKSPACE_SHELL_BOTTOM_PADDING_PX = 48;
+const NAVBAR_SELECTOR = '[data-app-navbar="true"]';
+
+const getWorkspaceShellOffsetPx = () => {
+  if (typeof window === 'undefined') return DEFAULT_WORKSPACE_SHELL_OFFSET_PX;
+
+  const navbar = document.querySelector(NAVBAR_SELECTOR);
+  if (!navbar) {
+    return WORKSPACE_SHELL_TOP_PADDING_PX + WORKSPACE_SHELL_BOTTOM_PADDING_PX;
+  }
+
+  const navbarRect = navbar.getBoundingClientRect();
+  const navbarBottom = Math.ceil(navbarRect.top + navbarRect.height);
+  const topOffsetPx = Math.max(WORKSPACE_SHELL_TOP_PADDING_PX, navbarBottom);
+
+  return Math.ceil(topOffsetPx + WORKSPACE_SHELL_BOTTOM_PADDING_PX);
+};
 
 const normalizeMessages = (messages) => {
   if (!Array.isArray(messages)) return [];
@@ -34,6 +52,65 @@ const normalizeMessages = (messages) => {
       return { id: message?.id || `msg-${index}`, role: role === 'assistant' ? 'assistant' : 'user', content };
     })
     .filter((m) => m.content);
+};
+
+const extractJsonObject = (rawText) => {
+  if (typeof rawText !== 'string' || !rawText.trim()) return null;
+
+  const sanitized = rawText
+    .trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(sanitized);
+  } catch {
+    const start = sanitized.indexOf('{');
+    const end = sanitized.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+
+    try {
+      return JSON.parse(sanitized.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizeGeneratedQuiz = (payload) => {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : [];
+  if (!rawQuestions.length) return null;
+
+  const questions = rawQuestions.map((question, index) => {
+    const resolvedQuestion = question?.question || question?.question_text || `Question ${index + 1}`;
+    const options = Array.isArray(question?.options) ? question.options : [];
+    const resolvedType = question?.type || (options.length ? 'mcq' : 'short_answer');
+
+    return {
+      id: question?.id || `q-${index + 1}`,
+      type: resolvedType,
+      question: resolvedQuestion,
+      options,
+      answer: question?.answer || question?.correct_answer || '',
+      explanation: question?.explanation || question?.rationale || '',
+    };
+  });
+
+  return {
+    title: payload.title || 'Generated Quiz',
+    instructions: payload.instructions || 'Review each question and validate with your notes.',
+    questions,
+  };
+};
+
+const toSafeFileName = (value) => {
+  const raw = String(value || 'report').trim().toLowerCase();
+  const cleaned = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return cleaned || 'report';
 };
 
 /* ─────────────────────────────────────────────────────────────
@@ -67,6 +144,12 @@ const Styles = () => (
       background: var(--ink);
       color: var(--text);
       min-height: 100vh;
+    }
+
+    .nb-root.nb-root-workspace {
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
     }
 
     /* ── Card ── */
@@ -320,6 +403,31 @@ const Styles = () => (
     .nb-scroll::-webkit-scrollbar { width: 4px; }
     .nb-scroll::-webkit-scrollbar-track { background: transparent; }
     .nb-scroll::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+
+    .nb-workspace-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(220px, 260px);
+      overflow: hidden;
+    }
+
+    @media (max-width: 1200px) {
+      .nb-workspace-grid {
+        grid-template-columns: 240px minmax(0, 1fr);
+      }
+      .nb-studio-pane {
+        display: none !important;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .nb-workspace-grid {
+        grid-template-columns: 1fr;
+      }
+      .nb-sources-pane {
+        display: none !important;
+      }
+    }
   `}</style>
 );
 
@@ -332,8 +440,9 @@ const DashboardView = ({
   creatingNotebook, createNotebook, deleteNotebook, refreshNotebooks,
   classroomId, navigate,
 }) => (
-  <div className="nb-root" style={{ padding: '28px 24px', maxWidth: 1200, margin: '0 auto' }}>
-    <Styles />
+  <GlassDashboardShell withPanel={false} contentClassName="max-w-[1240px]">
+    <div className="nb-root" style={{ padding: '16px 8px 10px', maxWidth: 1200, margin: '0 auto' }}>
+      <Styles />
 
     {/* Hero */}
     <div className="nb-hero nb-animate" style={{ marginBottom: 28 }}>
@@ -388,15 +497,18 @@ const DashboardView = ({
           </p>
         )}
 
-        {/* Info banner */}
+        {/* Current access */}
         <div style={{ marginTop: 22, padding: '14px 16px', borderRadius: 12, background: 'rgba(108,143,255,0.06)', border: '1px solid rgba(108,143,255,0.15)' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <IoConstructOutline style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
-            <div>
-              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', marginBottom: 4 }}>Lightweight Build</p>
+            <IoBookOutline style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', marginBottom: 4 }}>Current Access</p>
               <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
-                Source ingestion · chat sessions · vector retrieval · semantic search.
+                Teacher-assigned modules, quizzes, and classroom progression remain available in the Modules section.
               </p>
+              <button className="nb-btn nb-btn-ghost nb-btn-sm" style={{ marginTop: 10 }} onClick={() => navigate(`/classroom/${classroomId}/modules`)}>
+                <IoBookOutline /> Open Classroom Modules
+              </button>
             </div>
           </div>
         </div>
@@ -410,9 +522,6 @@ const DashboardView = ({
             Refresh
           </button>
         </div>
-      </GlassDashboardShell>
-    );
-  }
 
         {dashboardLoading ? (
           <div style={{ color: 'var(--muted)', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Loading…</div>
@@ -458,7 +567,8 @@ const DashboardView = ({
         )}
       </div>
     </div>
-  </div>
+    </div>
+  </GlassDashboardShell>
 );
 
 /* ─────────────────────────────────────────────────────────────
@@ -470,17 +580,50 @@ const WorkspaceView = ({
   sourceTitle, setSourceTitle, sourceText, setSourceText, sourceUrl, setSourceUrl,
   sourceFile, setSourceFile, sourceActionLoading, addTextSource, addUrlSource, addFileSource, removeSource,
   health, models, vectorStats, searchQuery, setSearchQuery, searchResults, searchLoading, studioMessage,
+  podcastEpisodeName, setPodcastEpisodeName, podcastLoading, podcastJob, generatePodcast, refreshPodcastJob,
+  quizLoading, generatedQuiz, generatedQuizRaw, generateCombinedQuiz,
+  reportTopic, setReportTopic, reportLoading, reportText, generateTopicReport, downloadTopicReport,
+  audioBriefing, setAudioBriefing, audioLoading, audioOverview, generateAudioPodcast, refreshAudioOverview,
   runSearch, initializeVectorDb, refreshWorkspace, notebookId, classroomId, navigate,
 }) => {
   const chatEndRef = useRef(null);
   const [activeAddTab, setActiveAddTab] = useState('text');
+  const [activeStudioPanel, setActiveStudioPanel] = useState('search');
+  const [workspaceShellOffsetPx, setWorkspaceShellOffsetPx] = useState(() => getWorkspaceShellOffsetPx());
+
+  useEffect(() => {
+    const updateWorkspaceShellOffset = () => {
+      setWorkspaceShellOffsetPx(getWorkspaceShellOffsetPx());
+    };
+
+    updateWorkspaceShellOffset();
+    window.addEventListener('resize', updateWorkspaceShellOffset);
+
+    return () => {
+      window.removeEventListener('resize', updateWorkspaceShellOffset);
+    };
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, sendingChat]);
 
   return (
-    <div className="nb-root" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <GlassDashboardShell withPanel={false} contentClassName="max-w-[1540px]">
+      <div
+        className="nb-root nb-root-workspace"
+        style={{
+          height: `calc(100dvh - ${workspaceShellOffsetPx}px)`,
+          maxHeight: `calc(100dvh - ${workspaceShellOffsetPx}px)`,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          background: 'var(--card)',
+        }}
+      >
       <Styles />
 
       {/* Top bar */}
@@ -493,6 +636,7 @@ const WorkspaceView = ({
         justifyContent: 'space-between',
         flexShrink: 0,
         gap: 12,
+        flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)}>
@@ -500,7 +644,7 @@ const WorkspaceView = ({
           </button>
           <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
           <div>
-            <span className="nb-badge nb-badge-accent" style={{ marginBottom: 2 }}><IoSparklesOutline /> Workspace</span>
+            {/* <span className="nb-badge nb-badge-accent" style={{ marginBottom: 2 }}><IoSparklesOutline /> Workspace</span> */}
             <p style={{ fontFamily: 'Instrument Serif', fontSize: 17, color: 'var(--text)', marginTop: 1 }}>
               {notebookDetail?.name || '—'}
             </p>
@@ -529,10 +673,10 @@ const WorkspaceView = ({
           Loading workspace…
         </div>
       ) : (
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 260px', overflow: 'hidden' }}>
+        <div className="nb-workspace-grid">
 
           {/* ── LEFT: Sources ── */}
-          <div style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="nb-sources-pane" style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                 <IoDocumentTextOutline style={{ color: 'var(--accent)' }} />
@@ -591,7 +735,7 @@ const WorkspaceView = ({
             </div>
 
             {/* Sources list */}
-            <div className="nb-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+            <div style={{ flex: 1, overflow: 'hidden', padding: '12px 18px' }}>
               {sources.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--muted)', fontSize: 12 }}>
                   <IoLayersOutline style={{ fontSize: 24, marginBottom: 8, display: 'block', margin: '0 auto 8px' }} />
@@ -679,7 +823,7 @@ const WorkspaceView = ({
           </div>
 
           {/* ── RIGHT: Studio ── */}
-          <div className="nb-scroll" style={{ borderLeft: '1px solid var(--border)', overflowY: 'auto', padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="nb-studio-pane" style={{ borderLeft: '1px solid var(--border)', overflow: 'hidden', padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)' }}>Studio</p>
 
             <div className="nb-stat">
@@ -703,32 +847,167 @@ const WorkspaceView = ({
             <div className="nb-divider" />
 
             <div>
-              <p className="nb-section-title">Semantic Search</p>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  className="nb-input"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search notes…"
-                  onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-                  style={{ flex: 1 }}
-                />
-                <button className="nb-btn nb-btn-ghost" style={{ padding: '9px 12px', flexShrink: 0 }} onClick={runSearch} disabled={searchLoading}>
-                  <IoSearchOutline />
-                </button>
-              </div>
-
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {searchResults.map((r, i) => (
-                  <div key={`${r.source_id}-${i}`} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>{r.title || r.source_id}</p>
-                    <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.55,
-                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {r.snippet || r.content || 'No snippet'}
-                    </p>
-                  </div>
+              <p className="nb-section-title">Workspace Tools</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {[
+                  { id: 'search', label: 'Search' },
+                  { id: 'quiz', label: 'Quiz' },
+                  { id: 'report', label: 'Report' },
+                  { id: 'podcast', label: 'Podcast' },
+                  { id: 'audio', label: 'Audio' },
+                ].map((tool) => (
+                  <button
+                    key={tool.id}
+                    className="nb-btn nb-btn-sm"
+                    style={{
+                      padding: '5px 9px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      border: '1px solid var(--border)',
+                      background: activeStudioPanel === tool.id ? 'rgba(108,143,255,0.14)' : 'var(--surface)',
+                      color: activeStudioPanel === tool.id ? 'var(--accent)' : 'var(--text-dim)',
+                    }}
+                    onClick={() => setActiveStudioPanel(tool.id)}
+                  >
+                    {tool.label}
+                  </button>
                 ))}
               </div>
+
+              {activeStudioPanel === 'search' && (
+                <div className="nb-stat">
+                  <p className="nb-stat-label">Semantic Search</p>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <input
+                      className="nb-input"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search notes…"
+                      onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+                      style={{ flex: 1, fontSize: 12 }}
+                    />
+                    <button className="nb-btn nb-btn-ghost" style={{ padding: '9px 12px', flexShrink: 0 }} onClick={runSearch} disabled={searchLoading}>
+                      <IoSearchOutline />
+                    </button>
+                  </div>
+                  {searchResults.slice(0, 2).map((r, i) => (
+                    <div key={`${r.source_id}-${i}`} style={{ marginTop: 8, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+                      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>{r.title || r.source_id}</p>
+                      <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5,
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {r.snippet || r.content || 'No snippet'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeStudioPanel === 'quiz' && (
+                <div className="nb-stat">
+                  <p className="nb-stat-label">Quiz Generation</p>
+                  <button className="nb-btn nb-btn-primary nb-btn-sm" style={{ marginTop: 8 }} onClick={generateCombinedQuiz} disabled={quizLoading}>
+                    {quizLoading ? 'Generating…' : 'Generate Quiz'}
+                  </button>
+                  {generatedQuiz && (
+                    <div style={{ marginTop: 8 }}>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{generatedQuiz.title}</p>
+                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                        {generatedQuiz.questions.length} questions generated.
+                      </p>
+                      {generatedQuiz.questions[0] && (
+                        <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6,
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {generatedQuiz.questions[0].question}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {!generatedQuiz && generatedQuizRaw && (
+                    <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                      Quiz generated in raw format. Ask again for structured JSON if needed.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {activeStudioPanel === 'report' && (
+                <div className="nb-stat">
+                  <p className="nb-stat-label">Topic Report</p>
+                  <input
+                    className="nb-input"
+                    value={reportTopic}
+                    onChange={(e) => setReportTopic(e.target.value)}
+                    placeholder="Enter report topic"
+                    style={{ marginTop: 8, fontSize: 12 }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button className="nb-btn nb-btn-primary nb-btn-sm" onClick={generateTopicReport} disabled={reportLoading}>
+                      {reportLoading ? 'Generating…' : 'Generate'}
+                    </button>
+                    <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={downloadTopicReport} disabled={!reportText.trim()}>
+                      Download .txt
+                    </button>
+                  </div>
+                  {reportText && (
+                    <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)',
+                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {reportText}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {activeStudioPanel === 'podcast' && (
+                <div className="nb-stat">
+                  <p className="nb-stat-label">Podcast Generation</p>
+                  <input
+                    className="nb-input"
+                    value={podcastEpisodeName}
+                    onChange={(e) => setPodcastEpisodeName(e.target.value)}
+                    placeholder="Episode name (optional)"
+                    style={{ marginTop: 8, fontSize: 12 }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button className="nb-btn nb-btn-primary nb-btn-sm" onClick={generatePodcast} disabled={podcastLoading}>
+                      {podcastLoading ? 'Working…' : 'Generate'}
+                    </button>
+                    <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={refreshPodcastJob} disabled={podcastLoading || !podcastJob?.job_id}>
+                      Refresh
+                    </button>
+                  </div>
+                  {podcastJob && (
+                    <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                      Job: {podcastJob.job_id || 'n/a'} · Status: {podcastJob.status || 'unknown'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {activeStudioPanel === 'audio' && (
+                <div className="nb-stat">
+                  <p className="nb-stat-label">Audio Podcast</p>
+                  <input
+                    className="nb-input"
+                    value={audioBriefing}
+                    onChange={(e) => setAudioBriefing(e.target.value)}
+                    placeholder="Optional briefing for audio"
+                    style={{ marginTop: 8, fontSize: 12 }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    <button className="nb-btn nb-btn-primary nb-btn-sm" onClick={generateAudioPodcast} disabled={audioLoading}>
+                      {audioLoading ? 'Working…' : 'Generate Audio'}
+                    </button>
+                    <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => refreshAudioOverview()} disabled={audioLoading}>
+                      Refresh
+                    </button>
+                  </div>
+                  {audioOverview && (
+                    <p style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+                      Status: {audioOverview.status || 'unknown'}{audioOverview.audio_path ? ' · Ready' : ''}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {studioMessage && (
@@ -739,7 +1018,8 @@ const WorkspaceView = ({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </GlassDashboardShell>
   );
 };
 
@@ -782,6 +1062,22 @@ const StudentPersonalResourcesPage = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [studioMessage, setStudioMessage] = useState('');
+
+  const [podcastEpisodeName, setPodcastEpisodeName] = useState('');
+  const [podcastLoading, setPodcastLoading] = useState(false);
+  const [podcastJob, setPodcastJob] = useState(null);
+
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [generatedQuiz, setGeneratedQuiz] = useState(null);
+  const [generatedQuizRaw, setGeneratedQuizRaw] = useState('');
+
+  const [reportTopic, setReportTopic] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportText, setReportText] = useState('');
+
+  const [audioBriefing, setAudioBriefing] = useState('');
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioOverview, setAudioOverview] = useState(null);
 
   const isWorkspace = Boolean(notebookId);
 
@@ -908,6 +1204,235 @@ const StudentPersonalResourcesPage = () => {
     finally { setSendingChat(false); }
   };
 
+  const sendStudioPrompt = async (message, retrievalK = 12) => {
+    if (!notebookId) throw new Error('Open a notebook workspace first.');
+
+    let activeSessionId = chatSessionId;
+
+    if (!activeSessionId) {
+      const session = await ensureChatSession(notebookId);
+      activeSessionId = session?.id;
+      if (activeSessionId) setChatSessionId(activeSessionId);
+    }
+
+    if (!activeSessionId) throw new Error('Unable to create Studio chat session.');
+
+    const response = await apiClient.post(portablePath(`/chat/sessions/${activeSessionId}/messages`), {
+      message,
+      retrieval_k: retrievalK,
+      temperature: 0.2,
+    });
+
+    return response?.answer || '';
+  };
+
+  const generatePodcast = async () => {
+    if (!notebookId) return;
+
+    setPodcastLoading(true);
+    setStudioMessage('');
+
+    try {
+      const episodeName = podcastEpisodeName.trim() || `${notebookDetail?.name || 'Notebook'} Podcast`;
+
+      const response = await apiClient.post(portablePath('/podcasts/generate'), {
+        episode_profile: 'default',
+        speaker_profile: 'default',
+        episode_name: episodeName,
+        notebook_id: notebookId,
+      });
+
+      const generatedJobId = String(response?.job_id || '').trim();
+      setPodcastJob({
+        job_id: generatedJobId,
+        status: response?.status || 'queued',
+        message: response?.message || '',
+        result: null,
+        error: '',
+      });
+
+      setStudioMessage(generatedJobId ? `Podcast generation queued: ${generatedJobId}` : 'Podcast generation requested.');
+    } catch (e) {
+      setStudioMessage(e.message || 'Podcast generation failed');
+    } finally {
+      setPodcastLoading(false);
+    }
+  };
+
+  const refreshPodcastJob = async () => {
+    const currentJobId = String(podcastJob?.job_id || '').trim();
+    if (!currentJobId) {
+      setStudioMessage('Generate a podcast first to track job status.');
+      return;
+    }
+
+    setPodcastLoading(true);
+    setStudioMessage('');
+
+    try {
+      const status = await apiClient.get(portablePath(`/podcasts/jobs/${currentJobId}`));
+      const resolvedJobId = String(status?.id || currentJobId).trim();
+
+      setPodcastJob((previous) => ({
+        ...(previous || {}),
+        job_id: resolvedJobId,
+        status: status?.status || previous?.status || 'unknown',
+        result: status?.result || null,
+        error: status?.error || '',
+      }));
+
+      setStudioMessage(`Podcast job status: ${status?.status || 'unknown'}`);
+    } catch (e) {
+      setStudioMessage(e.message || 'Unable to fetch podcast job status');
+    } finally {
+      setPodcastLoading(false);
+    }
+  };
+
+  const generateCombinedQuiz = async () => {
+    if (!notebookId) return;
+
+    setQuizLoading(true);
+    setStudioMessage('');
+    setGeneratedQuiz(null);
+    setGeneratedQuizRaw('');
+
+    try {
+      const prompt = [
+        'Generate a comprehensive quiz using all available sources in this notebook, including YouTube-derived content if present.',
+        'Return ONLY strict JSON with this shape:',
+        '{',
+        '  "title": "string",',
+        '  "instructions": "string",',
+        '  "questions": [',
+        '    {"id":"q1","type":"mcq|short_answer","question":"string","options":["A","B"],"answer":"string","explanation":"string"}',
+        '  ]',
+        '}',
+        'Include 8 questions with a mix of mcq and short_answer.',
+      ].join('\n');
+
+      const answer = await sendStudioPrompt(prompt, 24);
+      setGeneratedQuizRaw(answer);
+
+      const parsed = normalizeGeneratedQuiz(extractJsonObject(answer));
+      if (parsed) {
+        setGeneratedQuiz(parsed);
+        setStudioMessage('Quiz generated from all notebook sources.');
+      } else {
+        setStudioMessage('Quiz generated, but response was not strict JSON. Raw output is shown.');
+      }
+    } catch (e) {
+      setStudioMessage(e.message || 'Quiz generation failed');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  const generateTopicReport = async () => {
+    const topic = reportTopic.trim();
+    if (!topic) {
+      setStudioMessage('Enter a topic to generate report.');
+      return;
+    }
+
+    setReportLoading(true);
+    setStudioMessage('');
+    setReportText('');
+
+    try {
+      const prompt = [
+        `Create a detailed study report about: ${topic}`,
+        'Use only the notebook sources retrieved via RAG context.',
+        'Structure:',
+        '1) Overview',
+        '2) Key Concepts',
+        '3) Important Facts',
+        '4) Practical Takeaways',
+        '5) Quick Revision Checklist',
+        'Write clear plain text suitable for exporting to a .txt document.',
+      ].join('\n');
+
+      const report = await sendStudioPrompt(prompt, 20);
+      setReportText(report || 'No report generated.');
+      setStudioMessage('Topic report generated. Use download to save .txt file.');
+    } catch (e) {
+      setStudioMessage(e.message || 'Report generation failed');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const downloadTopicReport = () => {
+    if (!reportText.trim()) {
+      setStudioMessage('Generate a report before downloading.');
+      return;
+    }
+
+    const fileName = `${toSafeFileName(reportTopic || notebookDetail?.name || 'study-report')}.txt`;
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const refreshAudioOverview = async ({ silent = false } = {}) => {
+    if (!notebookId) return;
+
+    if (!silent) {
+      setAudioLoading(true);
+      setStudioMessage('');
+    }
+
+    try {
+      const overview = await apiClient.get(portablePath(`/notebooks/${notebookId}/audio-overview`));
+      setAudioOverview(overview);
+
+      if (!silent) {
+        setStudioMessage(`Audio podcast status: ${overview?.status || 'unknown'}`);
+      }
+    } catch (e) {
+      if (!silent) {
+        setStudioMessage(e.message || 'Unable to fetch audio podcast status');
+      }
+    } finally {
+      if (!silent) {
+        setAudioLoading(false);
+      }
+    }
+  };
+
+  const generateAudioPodcast = async () => {
+    if (!notebookId) return;
+
+    setAudioLoading(true);
+    setStudioMessage('');
+
+    try {
+      const payload = audioBriefing.trim() ? { briefing: audioBriefing.trim() } : {};
+
+      const response = await apiClient.post(portablePath(`/notebooks/${notebookId}/audio-overview`), payload);
+
+      setAudioOverview((previous) => ({
+        ...(previous || {}),
+        notebook_id: notebookId,
+        job_id: response?.job_id,
+        status: response?.status || 'queued',
+      }));
+
+      setStudioMessage(response?.job_id ? `Audio podcast job queued: ${response.job_id}` : 'Audio podcast generation requested.');
+      await refreshAudioOverview({ silent: true });
+    } catch (e) {
+      setStudioMessage(e.message || 'Audio podcast generation failed');
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
   const runSearch = async () => {
     if (!searchQuery.trim() || !notebookId) return;
     setSearchLoading(true); setStudioMessage('');
@@ -923,6 +1448,17 @@ const StudentPersonalResourcesPage = () => {
     try { const init = await apiClient.post(portablePath('/vector-db/init'), {}); setVectorStats(init); setStudioMessage('Vector DB initialized.'); }
     catch (e) { setStudioMessage(e.message || 'Init failed'); }
   };
+
+  useEffect(() => {
+    const status = String(audioOverview?.status || '').toLowerCase();
+    if (!isWorkspace || !notebookId || !['queued', 'running'].includes(status)) return undefined;
+
+    const timer = setInterval(() => {
+      refreshAudioOverview({ silent: true });
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [audioOverview?.status, isWorkspace, notebookId]);
 
   if (!isWorkspace) {
     return (
@@ -953,6 +1489,17 @@ const StudentPersonalResourcesPage = () => {
       health={health} models={models} vectorStats={vectorStats}
       searchQuery={searchQuery} setSearchQuery={setSearchQuery}
       searchResults={searchResults} searchLoading={searchLoading} studioMessage={studioMessage}
+      podcastEpisodeName={podcastEpisodeName} setPodcastEpisodeName={setPodcastEpisodeName}
+      podcastLoading={podcastLoading} podcastJob={podcastJob}
+      generatePodcast={generatePodcast} refreshPodcastJob={refreshPodcastJob}
+      quizLoading={quizLoading} generatedQuiz={generatedQuiz}
+      generatedQuizRaw={generatedQuizRaw} generateCombinedQuiz={generateCombinedQuiz}
+      reportTopic={reportTopic} setReportTopic={setReportTopic}
+      reportLoading={reportLoading} reportText={reportText}
+      generateTopicReport={generateTopicReport} downloadTopicReport={downloadTopicReport}
+      audioBriefing={audioBriefing} setAudioBriefing={setAudioBriefing}
+      audioLoading={audioLoading} audioOverview={audioOverview}
+      generateAudioPodcast={generateAudioPodcast} refreshAudioOverview={refreshAudioOverview}
       runSearch={runSearch} initializeVectorDb={initializeVectorDb}
       refreshWorkspace={refreshWorkspace} notebookId={notebookId} classroomId={classroomId} navigate={navigate}
     />

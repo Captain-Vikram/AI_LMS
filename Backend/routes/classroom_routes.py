@@ -410,13 +410,21 @@ def _normalize_url(url_value) -> str:
     return text if re.match(r"^https?://", text, flags=re.IGNORECASE) else ""
 
 
-def _resource_from_playlist(skill: str, concept: str, url: str, source: str, approval_status: str) -> Dict[str, Any]:
+def _resource_from_playlist(
+    skill: str,
+    concept: str,
+    url: str,
+    source: str,
+    approval_status: str,
+    thumbnail_url: Optional[str] = None,
+) -> Dict[str, Any]:
     now = datetime.utcnow()
     return {
         "resource_id": secrets.token_hex(12),
         "title": concept or f"{skill} video",
         "description": f"AI-suggested video for {skill}.",
         "url": _normalize_url(url),
+        "thumbnail_url": _normalize_url(thumbnail_url) if thumbnail_url else None,
         "resource_type": "youtube",
         "skill": skill,
         "source": source,
@@ -474,6 +482,7 @@ def _build_resources_from_outputs(
                 url=_normalize_url(item.get("youtube_link")),
                 source=source,
                 approval_status=approval_status,
+                thumbnail_url=str(item.get("thumbnail_url") or ""),
             )
             resources.append(resource)
 

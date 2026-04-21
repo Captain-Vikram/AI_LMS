@@ -109,9 +109,6 @@ app.include_router(module_assessment_router)
 app.include_router(skill_pathway_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
-portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
-
-# Mount portable RAG backend endpoints under a dedicated API prefix.
 portable_rag_backend = None
 if include_portable_rag_backend is not None:
     portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")

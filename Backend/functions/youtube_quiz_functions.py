@@ -445,8 +445,8 @@ class YouTubeQuizGenerator:
         result = {
             "video_id": video_id,
             "video_url": video_url,
-                "metadata": metadata,
-                "thumbnail_url": youtube_thumbnail_url_from_video_id(video_id),
+            "metadata": metadata,
+            "thumbnail_url": youtube_thumbnail_url_from_video_id(video_id),
             "questions": quiz["questions"]
         }
 

@@ -1,44 +1,79 @@
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-// Charts (lightweight) - install with: npm install recharts
+import { Link, useNavigate, useParams } from "react-router-dom";
+import IconsCarousel from "./IconsCarousel";
+import UserSkills from "./UserSkills";
+import AssessmentHistoryChart from "./AssessmentHistoryChart";
+import SkillRadarChart from "./SkillRadarChart";
+import XPProgressBar from "./XPProgressBar";
+import BadgeCollection from "./BadgeCollection";
+import AchievementNotification from "./AchievementNotification";
+import apiClient from "../services/apiClient";
+import { API_ENDPOINTS } from "../config/api";
+// Import icons
 import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  BarChart,
-  Bar,
-} from "recharts";
-import {
-  IoRocketOutline,
+  IoBarChartOutline,
+  IoTimeOutline,
   IoTrophyOutline,
+  IoRocketOutline,
+  IoCalendarOutline,
+  IoFlameOutline,
+  IoCheckmarkCircleOutline,
   IoBookOutline,
+  IoArrowForwardOutline,
+  IoGridOutline,
+  IoAlertCircleOutline,
+  IoPlayCircleOutline,
+  IoLayersOutline,
+  IoRefreshOutline,
+  IoFlashOutline,
 } from "react-icons/io5";
 
 const Dashboard = () => {
   const { id: focusedPathwayId } = useParams();
   const navigate = useNavigate();
-  const [userData, setUserData] = useState({ firstName: "Learner" });
+  const codingLabUrl = import.meta.env.VITE_CODING_URL || "http://localhost:8502/";
+  const [userData, setUserData] = useState({});
   const [assessmentResults, setAssessmentResults] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [myPathways, setMyPathways] = useState([]);
+  const [pathwayStageData, setPathwayStageData] = useState(null);
+  const [pathwayStageLoading, setPathwayStageLoading] = useState(false);
+  const [pathwayActionLoading, setPathwayActionLoading] = useState(false);
+  const [userSkills, setUserSkills] = useState([]);
   const [assessmentHistory, setAssessmentHistory] = useState([]);
   const [analyticsData, setAnalyticsData] = useState({
     learningStreak: 0,
+    totalLearningHours: 0,
     completedModules: 0,
     progressPercentage: 0,
     weeklyActivity: [0, 0, 0, 0, 0, 0, 0],
     upcomingMilestones: [],
     recentAchievements: [],
-    pendingAssignments: 0,
-    classroomCount: 0,
   });
 
-  // Minimal placeholder refresh — replace with real fetch logic if desired
-  const refreshDashboardData = () => {
-    window.location.reload();
+  const [showBadgeCollection, setShowBadgeCollection] = useState(false);
+  const [newAchievement, setNewAchievement] = useState(null);
+  const [userXP, setUserXP] = useState({
+    current: 0,
+    level: 1,
+    levelThreshold: 100,
+    total_earned: 0,
+  });
+
+  const [errorMessages, setErrorMessages] = useState([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const [badges, setBadges] = useState([]);
+  const [achievementQueue, setAchievementQueue] = useState([]);
+
+  const addErrorMessage = (message) => {
+    setErrorMessages((prevMessages) => {
+      if (prevMessages.includes(message)) {
+        return prevMessages;
+      }
+
+      return [...prevMessages, message];
+    });
   };
 
   const clearErrors = () => {
@@ -606,31 +641,65 @@ const Dashboard = () => {
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={refreshDashboardData} className="px-3 py-2 bg-slate-700 text-white rounded">Refresh</button>
-            <Link to="/assessment" className="px-3 py-2 bg-blue-600 text-white rounded">Take Assessment</Link>
-          </div>
-        </div>
 
-        {/* KPI Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-          <div className="p-4 bg-gray-800 rounded-lg border border-white/5">
-            <div className="text-sm text-gray-400">Students</div>
-            <div className="text-2xl font-bold text-white">{analyticsData.classroomCount ?? 0}</div>
+          {errorMessages.length > 0 && (
+            <div className="mb-6 p-4 rounded-xl border border-red-700/50 bg-red-900/30">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <IoAlertCircleOutline className="text-red-300 text-xl mt-0.5" />
+                  <div>
+                    <h3 className="text-red-200 font-medium">
+                      Some dashboard data could not be loaded
+                    </h3>
+                    <p className="text-red-100/90 text-sm mt-1">
+                      {errorMessages.join(" • ")}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={refreshDashboardData}
+                  disabled={isRefreshing}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white text-sm"
+                >
+                  {isRefreshing ? "Retrying..." : "Retry"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-start space-x-2">
+          <button
+            onClick={() => setShowBadgeCollection(true)}
+            className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mt-6"
+          >
+            <IoGridOutline className="mr-2" />
+            View Badge Collection
+          </button>
+
+          <a
+              href={codingLabUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mt-6"
+          >
+            Try out coding!
+          </a>
           </div>
-          <div className="p-4 bg-gray-800 rounded-lg border border-white/5">
-            <div className="text-sm text-gray-400">Assignments Due</div>
-            <div className="text-2xl font-bold text-white">{analyticsData.pendingAssignments ?? 0}</div>
+
+          {showBadgeCollection && (
+              <BadgeCollection
+                  badges={badges}
+                  onClose={() => setShowBadgeCollection(false)}
+              />
+          )}
+
+          <div className="mt-4 mb-8">
+            <XPProgressBar
+              currentXP={userXP.current}
+              levelThreshold={userXP.levelThreshold}
+              level={userXP.level}
+            />
           </div>
-          <div className="p-4 bg-gray-800 rounded-lg border border-white/5">
-            <div className="text-sm text-gray-400">Modules</div>
-            <div className="text-2xl font-bold text-white">{analyticsData.completedModules ?? 0}</div>
-          </div>
-          <div className="p-4 bg-gray-800 rounded-lg border border-white/5">
-            <div className="text-sm text-gray-400">Completion</div>
-            <div className="text-2xl font-bold text-white">{analyticsData.progressPercentage ?? 0}%</div>
-          </div>
-        </div>
 
           {/* Main Content Grid */}
           
@@ -958,64 +1027,445 @@ const Dashboard = () => {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-4">
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="text-sm text-gray-400">Latest Score</div>
-                <div className="text-2xl font-bold text-white">{assessmentResults?.score?.percentage ? `${assessmentResults.score.percentage}%` : 'N/A'}</div>
-              </div>
-              <div className="bg-gray-700 p-3 rounded">
-                <div className="text-sm text-gray-400">Learning Streak</div>
-                <div className="text-2xl font-bold text-white">{analyticsData.learningStreak || 0} days</div>
-              </div>
-            </div>
-          </div>
-
-          <aside className="bg-gray-800 rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-white mb-2">Engagement</h3>
-            <div style={{ height: 180 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weeklyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                  <XAxis dataKey="day" tick={{ fill: '#9ca3af' }} />
-                  <YAxis tick={{ fill: '#9ca3af' }} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#7c3aed" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="mt-4">
-              <h4 className="text-sm text-gray-400">Upcoming Milestone</h4>
-              {analyticsData.upcomingMilestones?.[0] ? (
-                <div className="mt-2 bg-gray-700 p-3 rounded">
-                  <div className="text-white font-medium">{analyticsData.upcomingMilestones[0].name}</div>
-                  <div className="text-sm text-gray-400">Progress: {analyticsData.upcomingMilestones[0].progress}%</div>
+            {/* Second Column - Learning Analytics */}
+            <div className="md:col-span-2 space-y-6">
+              {/* Weekly Progress Card */}
+              <div className="bg-gray-700/50 rounded-xl p-6">
+                <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                  <IoCalendarOutline className="mr-2 text-purple-400" />
+                  Weekly Login Activity
+                </h2>
+                <div className="h-36 flex items-end justify-between">
+                  {loginActivity.map((activity, index) => (
+                    <div
+                      key={index}
+                      className="flex flex-col items-center w-full"
+                    >
+                      <div className="relative w-full flex justify-center">
+                        <div
+                          className={`w-6 ${
+                            activity.count > 0
+                              ? "bg-gradient-to-t from-purple-600 to-blue-500"
+                              : "bg-gray-600/30"
+                          } rounded-t-sm`}
+                          style={{ height: `${activity.percentage}%` }}
+                        ></div>
+                        {activity.count > 0 && (
+                          <div className="absolute -top-6 text-xs font-medium text-blue-300">
+                            {activity.count}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-2">
+                        {activity.day}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="mt-2 text-sm text-gray-400">No upcoming milestones</div>
-              )}
-            </div>
-          </aside>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 bg-gray-800 rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-white mb-2">Activity Feed</h3>
-            <div className="text-sm text-gray-400">Recent activity will appear here.</div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-white mb-2">Achievements</h3>
-            {analyticsData.recentAchievements && analyticsData.recentAchievements.length > 0 ? (
-              analyticsData.recentAchievements.slice(0,3).map((a) => (
-                <div key={a.id} className="mb-2 bg-gray-700 p-2 rounded">
-                  <div className="text-sm text-white font-medium">{a.name}</div>
-                  <div className="text-xs text-gray-400">{a.date}</div>
+                <div className="text-xs text-gray-400 mt-4 text-center">
+                  Recent login: {userData.lastActive || "Today"}
                 </div>
-              ))
-            ) : (
-              <div className="text-sm text-gray-400">No recent achievements</div>
-            )}
+              </div>
+
+              {/* Learning Stats Cards */}
+              <div className="grid grid-cols-3 gap-4">
+                {/* Hours Spent */}
+                <div className="bg-gray-700/50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-gray-300 text-sm">Hours Spent</h3>
+                    <IoTimeOutline className="text-teal-400 text-xl" />
+                  </div>
+                  <p className="text-white text-2xl font-bold">
+                    {analyticsData.totalLearningHours}
+                  </p>
+                </div>
+
+                {/* Completed Modules */}
+                <div className="bg-gray-700/50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-gray-300 text-sm">Modules Done</h3>
+                    <IoCheckmarkCircleOutline className="text-green-400 text-xl" />
+                  </div>
+                  <p className="text-white text-2xl font-bold">
+                    {analyticsData.completedModules}
+                  </p>
+                </div>
+
+                {/* Overall Progress */}
+                <div className="bg-gray-700/50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-gray-300 text-sm">Progress</h3>
+                    <IoRocketOutline className="text-blue-400 text-xl" />
+                  </div>
+                  <div className="flex items-center">
+                    <p className="text-white text-2xl font-bold">
+                      {analyticsData.progressPercentage}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+
+          {/* Add this after the Assessment Summary card if assessmentProgress data exists */}
+          {analyticsData.assessmentProgress && (
+            <div className="mt-6 bg-gray-700/50 rounded-xl p-6">
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                <IoRocketOutline className="mr-2 text-purple-400" />
+                Assessment Progress
+              </h2>
+
+              <div className="space-y-4">
+                {analyticsData.assessmentProgress.levelChange && (
+                  <div className="bg-gray-800/50 p-4 rounded-lg">
+                    <h3 className="text-white font-medium mb-2">
+                      Level Improvement
+                    </h3>
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gray-700/70 py-1 px-3 rounded-lg capitalize">
+                        {
+                          analyticsData.assessmentProgress.levelChange.split(
+                            " → "
+                          )[0]
+                        }
+                      </div>
+                      <IoArrowForwardOutline className="text-purple-400" />
+                      <div className="bg-purple-900/40 border border-purple-500/30 py-1 px-3 rounded-lg capitalize">
+                        {
+                          analyticsData.assessmentProgress.levelChange.split(
+                            " → "
+                          )[1]
+                        }
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-gray-800/50 p-4 rounded-lg">
+                  <h3 className="text-white font-medium mb-2">Score Change</h3>
+                  <div
+                    className={`text-xl font-bold ${
+                      analyticsData.assessmentProgress.scoreChange > 0
+                        ? "text-green-400"
+                        : analyticsData.assessmentProgress.scoreChange < 0
+                        ? "text-red-400"
+                        : "text-gray-300"
+                    }`}
+                  >
+                    {analyticsData.assessmentProgress.scoreChange > 0 && "+"}
+                    {analyticsData.assessmentProgress.scoreChange.toFixed(1)}%
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Since your last assessment on{" "}
+                    {new Date(
+                      analyticsData.assessmentProgress.timestamp
+                    ).toLocaleDateString()}
+                  </p>
+                </div>
+
+                {analyticsData.assessmentProgress.improvedAreas.length > 0 && (
+                  <div className="bg-gray-800/50 p-4 rounded-lg">
+                    <h3 className="text-white font-medium mb-2">
+                      Improved Areas
+                    </h3>
+                    <ul className="space-y-1">
+                      {analyticsData.assessmentProgress.improvedAreas.map(
+                        (area, index) => (
+                          <li key={index} className="flex items-center">
+                            <span className="h-2 w-2 rounded-full bg-green-400 mr-2"></span>
+                            {area}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Assessment History Chart */}
+          {assessmentHistory.length > 1 && (
+            <div className="mt-6 bg-gray-700/50 rounded-xl p-6">
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                <IoBarChartOutline className="mr-2 text-blue-400" />
+                Assessment Progress Over Time
+              </h2>
+
+              <div className="w-full overflow-hidden">
+                <AssessmentHistoryChart assessmentHistory={assessmentHistory} />
+              </div>
+
+              <div className="mt-4 text-center">
+                <p className="text-sm text-gray-400">
+                  {assessmentHistory.length} assessments taken
+                  {assessmentHistory.length > 1 &&
+                    ` · First assessment: ${new Date(
+                      assessmentHistory[assessmentHistory.length - 1].timestamp
+                    ).toLocaleDateString()}`}
+                </p>
+                {assessmentHistory.length >= 3 && (
+                  <p className="text-sm text-gray-400 mt-1">
+                    Average score:{" "}
+                    {(
+                      assessmentHistory.reduce(
+                        (sum, a) => sum + a.score.percentage,
+                        0
+                      ) / assessmentHistory.length
+                    ).toFixed(1)}
+                    %
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {assessmentHistory.length >= 2 && (
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="bg-gray-700/50 rounded-xl p-6">
+                <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                  <IoRocketOutline className="mr-2 text-purple-400" />
+                  Skill Comparison
+                </h2>
+                <div className="w-full overflow-hidden">
+                  <SkillRadarChart assessments={assessmentHistory} />
+                </div>
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Comparing your most recent two assessments
+                </p>
+              </div>
+
+              {/* You could add another visualization or content card here */}
+              <div className="bg-gray-700/50 rounded-xl p-6">
+                <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                  <IoBarChartOutline className="mr-2 text-green-400" />
+                  Assessment Statistics
+                </h2>
+
+                <div className="space-y-4">
+                  <div className="bg-gray-800/50 p-4 rounded-lg">
+                    <h3 className="text-white font-medium mb-2">
+                      Assessment Summary
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-gray-400">
+                          Total Assessments
+                        </p>
+                        <p className="text-xl text-white font-semibold">
+                          {assessmentHistory.length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Best Score</p>
+                        <p className="text-xl text-green-400 font-semibold">
+                          {Math.max(
+                            ...assessmentHistory.map((a) => a.score.percentage)
+                          ).toFixed(0)}
+                          %
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">
+                          Avg. Time Between
+                        </p>
+                        <p className="text-xl text-white font-semibold">
+                          {assessmentHistory.length >= 3
+                            ? Math.round(
+                                (new Date(assessmentHistory[0].timestamp) -
+                                  new Date(
+                                    assessmentHistory[
+                                      assessmentHistory.length - 1
+                                    ].timestamp
+                                  )) /
+                                  (1000 *
+                                    60 *
+                                    60 *
+                                    24 *
+                                    (assessmentHistory.length - 1))
+                              ) + "d"
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Improvement</p>
+                        <p
+                          className={`text-xl font-semibold ${
+                            assessmentHistory[0].score.percentage >
+                            assessmentHistory[assessmentHistory.length - 1]
+                              .score.percentage
+                              ? "text-green-400"
+                              : "text-red-400"
+                          }`}
+                        >
+                          {(
+                            assessmentHistory[0].score.percentage -
+                            assessmentHistory[assessmentHistory.length - 1]
+                              .score.percentage
+                          ).toFixed(1)}
+                          %
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-800/50 p-4 rounded-lg">
+                    <h3 className="text-white font-medium mb-3">
+                      Level Distribution
+                    </h3>
+                    <div className="flex items-center space-x-2">
+                      {["beginner", "intermediate", "advanced"].map((level) => {
+                        const count = assessmentHistory.filter(
+                          (a) => a.assessed_level === level
+                        ).length;
+                        const percentage =
+                          (count / assessmentHistory.length) * 100;
+
+                        return (
+                          <div key={level} className="flex-1">
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-400 capitalize">
+                                {level}
+                              </span>
+                              <span className="text-gray-300">{count}</span>
+                            </div>
+                            <div className="w-full bg-gray-700 rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full ${
+                                  level === "beginner"
+                                    ? "bg-green-500"
+                                    : level === "intermediate"
+                                    ? "bg-blue-500"
+                                    : "bg-purple-500"
+                                }`}
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* More Bento Layout Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            {/* Upcoming Milestones */}
+            <div className="bg-gray-700/50 rounded-xl p-6">
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                <IoRocketOutline className="mr-2 text-blue-400" />
+                Upcoming Milestones
+              </h2>
+              <div className="space-y-4">
+                {analyticsData.upcomingMilestones.length > 0 ? (
+                  analyticsData.upcomingMilestones.map((milestone, index) => (
+                    <div
+                      key={milestone.id || `${milestone.name}-${index}`}
+                      className="bg-gray-800/50 p-4 rounded-lg"
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <h3 className="text-white font-medium">
+                          {milestone.name}
+                        </h3>
+                        <span className="text-blue-400 text-sm">
+                          {milestone.progress}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-700 rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
+                          style={{ width: `${milestone.progress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-gray-800/40 border border-gray-700/60 p-4 rounded-lg text-gray-300 text-sm">
+                    No milestones yet. Create one from your learning path to track progress.
+                  </div>
+                )}
+              </div>
+              <button
+                className="mt-4 w-full py-2 text-center text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors"
+                onClick={() => {}}
+              >
+                View Learning Path
+              </button>
+            </div>
+
+            {/* Recent Achievements */}
+            <div className="bg-gray-700/50 rounded-xl p-6">
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
+                <IoTrophyOutline className="mr-2 text-yellow-400" />
+                Recent Achievements
+              </h2>
+              <div className="space-y-4">
+                {analyticsData.recentAchievements.length > 0 ? (
+                  analyticsData.recentAchievements.map((achievement, index) => (
+                    <div
+                      key={achievement.id || `${achievement.name}-${index}`}
+                      className="bg-gray-800/50 p-4 rounded-lg flex items-start"
+                    >
+                      <div className="bg-yellow-400/20 p-2 rounded-full mr-3">
+                        <IoTrophyOutline className="text-yellow-400 text-xl" />
+                      </div>
+                      <div>
+                        <h3 className="text-white font-medium">
+                          {achievement.name}
+                        </h3>
+                        <p className="text-gray-400 text-sm">
+                          {achievement.description}
+                        </p>
+                        <p className="text-gray-500 text-xs mt-1">
+                          {achievement.date}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-gray-800/40 border border-gray-700/60 p-4 rounded-lg text-gray-300 text-sm">
+                    No recent achievements yet. Keep learning to unlock your first badge.
+                  </div>
+                )}
+              </div>
+              <button
+                className="mt-4 w-full py-2 text-center text-yellow-400 hover:text-white hover:bg-yellow-600 rounded-lg transition-colors"
+                onClick={() => {}}
+              >
+                View All Achievements
+              </button>
+            </div>
+          </div>
+
+          {/* User Skills Section */}
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white flex items-center">
+                <IoBookOutline className="mr-2 text-blue-400" />
+                Your Skills Progress
+              </h2>
+              <Link to="/recommendations">
+                <button className="text-blue-400 hover:text-blue-300 transition-colors">
+                  Improve Skills
+                </button>
+              </Link>
+            </div>
+            <UserSkills
+              skills={userSkills}
+              isLoading={isLoading}
+              error={null}
+            />
+          </div>
+
+          {newAchievement && (
+            <AchievementNotification
+              achievement={newAchievement}
+              onClose={handleAchievementClose}
+            />
+          )}
         </div>
       </div>
     </section>
