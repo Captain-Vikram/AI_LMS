@@ -28,6 +28,13 @@ def extract_video_id(youtube_url):
     return None
 
 
+def youtube_thumbnail_url_from_video_id(video_id: str) -> str:
+    """Return a YouTube thumbnail URL for a given video id (best-effort)."""
+    if not video_id:
+        return ""
+    return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+
+
 def get_transcript(video_id, languages=['en']):
     """
     Get the transcript for a YouTube video.
@@ -438,7 +445,8 @@ class YouTubeQuizGenerator:
         result = {
             "video_id": video_id,
             "video_url": video_url,
-            "metadata": metadata,
+                "metadata": metadata,
+                "thumbnail_url": youtube_thumbnail_url_from_video_id(video_id),
             "questions": quiz["questions"]
         }
 

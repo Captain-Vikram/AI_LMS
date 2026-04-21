@@ -269,22 +269,11 @@ const ClassroomDashboard = () => {
             <Kpi label="Modules"     value={modCount}             accent="border-cyan-500/20 bg-cyan-500/[0.05]" />
             <Kpi label="Completion"  value={`${compRate}%`}       accent="border-violet-500/20 bg-violet-500/[0.05]" />
           </div>
-
-          <ClassroomStats studentCount={totalStudents} assignmentCount={totalAssign} moduleCount={modCount} completionRate={compRate} />
-
           {/* ── BODY GRID ── */}
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <div className="space-y-5 xl:col-span-8">
 
-              <Panel>
-                <SectionLabel right={<span className="rounded-full bg-cyan-500/15 px-2 py-0.5 font-bold text-cyan-400">{totalAnn} live</span>}>
-                  Announcement Studio
-                </SectionLabel>
-                <AnnouncementCreate onSubmit={createAnnouncement} isLoading={annLoad} />
-                <div className="mt-4">
-                  <AnnouncementFeed announcements={announcements} onMarkViewed={markAsViewed} onDelete={deleteAnnouncement} isTeacher loading={annLoad} />
-                </div>
-              </Panel>
+              {/* Announcement Studio removed to simplify the teacher dashboard (removed per request) */}
 
               <Panel>
                 <SectionLabel right={<span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-bold text-emerald-400">{totalSubs} recent</span>}>

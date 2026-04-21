@@ -17,7 +17,9 @@ from services.rbac_service import RBACService
 from services.learning_module_service import LearningModuleService
 from functions.search_doc import generate_skill_resources
 from functions.youtube_education import generate_skill_playlist
+from functions.youtube_quiz_functions import extract_video_id
 from functions.utils import get_current_user, normalize_user_role
+from functions.link_preview import fetch_preview_image
 
 router = APIRouter(prefix="/api/classroom", tags=["classroom"])
 
@@ -124,6 +126,17 @@ def _to_iso(value: Any) -> Any:
 
 def _serialize_resource(resource: Dict[str, Any]) -> Dict[str, Any]:
     module_id = resource.get("module_id")
+    # prefer existing thumbnail fields, otherwise try to derive from URLs
+    thumb = resource.get("thumbnail_url") or resource.get("thumbnail") or None
+    if not thumb:
+        # try to extract a youtube video id and map to youtube static thumbnail
+        try:
+            vid = extract_video_id(str(resource.get("url") or "") ) or extract_video_id(str(resource.get("youtube_link") or ""))
+            if vid:
+                thumb = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+        except Exception:
+            thumb = None
+
     return {
         "resource_id": resource.get("resource_id"),
         "title": resource.get("title", "Untitled Resource"),
@@ -131,6 +144,7 @@ def _serialize_resource(resource: Dict[str, Any]) -> Dict[str, Any]:
         "url": resource.get("url", ""),
         "resource_type": resource.get("resource_type", "article"),
         "skill": resource.get("skill", "General"),
+        "thumbnail_url": thumb,
         "module_id": str(module_id) if module_id else None,
         "module_name": resource.get("module_name"),
         "source": resource.get("source", "ai"),
@@ -140,6 +154,53 @@ def _serialize_resource(resource: Dict[str, Any]) -> Dict[str, Any]:
         "approved_date": _to_iso(resource.get("approved_date")),
         "approved_by": str(resource.get("approved_by")) if resource.get("approved_by") else None,
     }
+
+
+async def _update_thumbnails_for_classroom(db, classroom_oid, resources: list):
+    """Background task: fetch preview images for resources and persist them when found."""
+    if not resources:
+        return
+    try:
+        for res in resources:
+            try:
+                if res.get("thumbnail_url"):
+                    continue
+                url = _normalize_url(res.get("url") or res.get("youtube_link") or "")
+                if not url:
+                    continue
+                img = await fetch_preview_image(url)
+                if img:
+                    await db.classrooms.update_one(
+                        {"_id": classroom_oid, "ai_resources.resource_id": res.get("resource_id")},
+                        {"$set": {"ai_resources.$.thumbnail_url": img}},
+                    )
+            except Exception:
+                continue
+    except Exception:
+        return
+
+
+async def _update_thumbnails_for_generated_personal_resources(db, user_oid, signature: str, resources: list):
+    if not resources:
+        return
+    try:
+        for res in resources:
+            try:
+                if res.get("thumbnail_url"):
+                    continue
+                url = _normalize_url(res.get("url") or res.get("youtube_link") or "")
+                if not url:
+                    continue
+                img = await fetch_preview_image(url)
+                if img:
+                    await db.generated_personal_resources.update_one(
+                        {"user_id": user_oid, "assessment_signature": signature, "resources.resource_id": res.get("resource_id")},
+                        {"$set": {"resources.$.thumbnail_url": img}},
+                    )
+            except Exception:
+                continue
+    except Exception:
+        return
 
 
 def _resource_counts(resources: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -833,6 +894,12 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
             }
         )
 
+    # schedule background thumbnail extraction for AI-generated classroom resources
+    try:
+        asyncio.create_task(_update_thumbnails_for_classroom(db, ObjectId(classroom_id), ai_resources))
+    except Exception:
+        pass
+
     return {
         "classroom_id": classroom_id,
         "enrollment_code": enrollment_code,
@@ -887,6 +954,11 @@ async def get_classroom_resources(
         if not can_manage:
             resources = [item for item in resources if item.get("approval_status") == "approved"]
 
+        try:
+            asyncio.create_task(_update_thumbnails_for_classroom(db, classroom_oid, resources))
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "mode": "class",
@@ -923,6 +995,11 @@ async def get_classroom_resources(
     )
     if cached_doc and isinstance(cached_doc.get("resources"), list):
         cached_resources = [item for item in cached_doc.get("resources", []) if isinstance(item, dict)]
+        try:
+            asyncio.create_task(_update_thumbnails_for_generated_personal_resources(db, user_oid, signature, cached_resources))
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "mode": "personal",
@@ -953,6 +1030,11 @@ async def get_classroom_resources(
         },
         upsert=True,
     )
+
+    try:
+        asyncio.create_task(_update_thumbnails_for_generated_personal_resources(db, user_oid, signature, personal_resources))
+    except Exception:
+        pass
 
     return {
         "status": "success",
