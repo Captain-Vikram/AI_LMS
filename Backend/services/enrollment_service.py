@@ -77,6 +77,10 @@ class EnrollmentService:
         student_oid = ObjectId(student_id)
         classroom_oid = ObjectId(classroom_id)
 
+        student = self.db.users.find_one({"_id": student_oid}, {"classroom_memberships": 1})
+        if not student:
+            raise ValueError("Student not found")
+
         # Verify classroom exists
         classroom = self.db.classrooms.find_one({"_id": classroom_oid})
         if not classroom:
@@ -86,15 +90,16 @@ class EnrollmentService:
         if student_oid in classroom.get("students", []):
             raise ValueError("Student already enrolled in this classroom")
 
-        # If enrollment code required, verify it
-        if classroom.get("enrollment_code") and enrollment_code:
-            if classroom["enrollment_code"] != enrollment_code:
-                raise ValueError("Invalid enrollment code")
+        # If enrollment code required, verify it (case-insensitive).
+        classroom_code = str(classroom.get("enrollment_code") or "").strip()
+        supplied_code = str(enrollment_code or "").strip()
+        if classroom_code and classroom_code.lower() != supplied_code.lower():
+            raise ValueError("Invalid enrollment code")
 
         # Add student to classroom
         self.db.classrooms.update_one(
             {"_id": classroom_oid},
-            {"$push": {"students": student_oid}}
+            {"$addToSet": {"students": student_oid}}
         )
 
         # Add classroom membership to student
@@ -108,10 +113,20 @@ class EnrollmentService:
             "status": EnrollmentStatus.ACTIVE
         }
 
-        self.db.users.update_one(
-            {"_id": student_oid},
-            {"$push": {"classroom_memberships": membership}}
+        memberships = student.get("classroom_memberships", [])
+        if not isinstance(memberships, list):
+            self.db.users.update_one({"_id": student_oid}, {"$set": {"classroom_memberships": []}})
+            memberships = []
+
+        membership_exists = any(
+            isinstance(existing, dict) and str(existing.get("classroom_id")) == str(classroom_oid)
+            for existing in memberships
         )
+        if not membership_exists:
+            self.db.users.update_one(
+                {"_id": student_oid},
+                {"$push": {"classroom_memberships": membership}}
+            )
 
         return {
             "classroom_id": str(classroom_oid),

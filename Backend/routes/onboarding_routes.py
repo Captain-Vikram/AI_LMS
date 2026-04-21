@@ -392,47 +392,84 @@ async def student_join_onboarding(
         raise HTTPException(status_code=400, detail="Enrollment code is required")
 
     db = get_db()
-    classroom = db.classrooms.find_one({"enrollment_code": enrollment_code})
+    classroom = db.classrooms.find_one(
+        {
+            "enrollment_code": {
+                "$regex": f"^{re.escape(enrollment_code)}$",
+                "$options": "i",
+            }
+        }
+    )
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found for this enrollment code")
 
     user_oid = ObjectId(current_user["user_id"])
     classroom_oid = classroom["_id"]
     classroom_id = str(classroom_oid)
+    normalized_role = normalize_user_role(current_user.get("role"))
 
     # Check if user is already a teacher or co-teacher
     is_teacher = user_oid == classroom.get("teacher_id")
     is_co_teacher = current_user["user_id"] in classroom.get("co_teachers", [])
+    join_as_co_teacher = normalized_role in {"teacher", "admin"}
+    membership_role = "teacher" if (is_teacher or is_co_teacher or join_as_co_teacher) else "student"
     
-    # Only add as student if not already a teacher/co-teacher
+    # Teacher/admin joining another teacher's classroom becomes a co-teacher.
+    # Student flow remains unchanged.
     if not (is_teacher or is_co_teacher):
-        db.classrooms.update_one(
-            {"_id": classroom_oid},
-            {"$addToSet": {"students": user_oid}},
-        )
-
-        membership_exists = db.users.find_one(
-            {"_id": user_oid, "classroom_memberships.classroom_id": classroom_id},
-            {"_id": 1},
-        )
-        if not membership_exists:
-            db.users.update_one(
-                {"_id": user_oid},
+        if join_as_co_teacher:
+            db.classrooms.update_one(
+                {"_id": classroom_oid},
                 {
-                    "$push": {
-                        "classroom_memberships": {
-                            "classroom_id": classroom_id,
-                            "role": "student",
-                            "joined_date": datetime.utcnow(),
-                            "is_active": True,
-                            "onboarding_complete": True,
-                            "assessment_complete": True,
-                        }
-                    }
+                    "$addToSet": {"co_teachers": current_user["user_id"]},
+                    "$pull": {"students": user_oid},
                 },
             )
+        else:
+            db.classrooms.update_one(
+                {"_id": classroom_oid},
+                {"$addToSet": {"students": user_oid}},
+            )
 
-    normalized_role = normalize_user_role(current_user.get("role"))
+    user_doc = db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
+    memberships = user_doc.get("classroom_memberships", [])
+    if not isinstance(memberships, list):
+        db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": []}})
+        memberships = []
+
+    membership_index = next(
+        (
+            idx
+            for idx, membership in enumerate(memberships)
+            if isinstance(membership, dict) and str(membership.get("classroom_id")) == classroom_id
+        ),
+        -1,
+    )
+    if membership_index >= 0:
+        memberships[membership_index]["role"] = membership_role
+        memberships[membership_index]["is_active"] = True
+        memberships[membership_index]["onboarding_complete"] = True
+        memberships[membership_index]["assessment_complete"] = True
+        if not memberships[membership_index].get("joined_date"):
+            memberships[membership_index]["joined_date"] = datetime.utcnow()
+        db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": memberships}})
+    else:
+        db.users.update_one(
+            {"_id": user_oid},
+            {
+                "$push": {
+                    "classroom_memberships": {
+                        "classroom_id": classroom_id,
+                        "role": membership_role,
+                        "joined_date": datetime.utcnow(),
+                        "is_active": True,
+                        "onboarding_complete": True,
+                        "assessment_complete": True,
+                    }
+                }
+            },
+        )
+
     role_to_set = "student" if normalized_role not in {"teacher", "admin"} else normalized_role
     db.users.update_one(
         {"_id": user_oid},
@@ -446,61 +483,63 @@ async def student_join_onboarding(
         },
     )
 
-    # Create StudentProgress records for all modules
-    # First resource of first module is unlocked; all others are locked
-    try:
-        modules = list(db.learning_modules.find(
-            {"classroom_id": classroom_oid},
-            sort=[("created_at", 1)]
-        ))
-        
-        for module_idx, module in enumerate(modules):
-            module_oid = module["_id"]
-            module_id_str = str(module_oid)
+    # Create StudentProgress records for student joins only.
+    # Co-teacher joins should not initialize student progress rows.
+    if membership_role == "student":
+        try:
+            modules = list(db.learning_modules.find(
+                {"classroom_id": classroom_oid},
+                sort=[("created_at", 1)]
+            ))
             
-            resources = module.get("resources", [])
-            for resource_idx, resource in enumerate(resources):
-                resource_id = resource.get("id") or str(resource.get("_id", ""))
+            for module_idx, module in enumerate(modules):
+                module_oid = module["_id"]
+                module_id_str = str(module_oid)
                 
-                # First resource of first module is unlocked
-                is_first = (module_idx == 0 and resource_idx == 0)
-                
-                progress_doc = {
-                    "student_id": str(user_oid),
-                    "classroom_id": classroom_id,
-                    "module_id": module_id_str,
-                    "resource_id": resource_id,
-                    "is_unlocked": is_first,
-                    "unlocked_at": datetime.utcnow() if is_first else None,
-                    "tests_taken": 0,
-                    "passed_tests_count": 0,
-                    "failed_tests_count": 0,
-                    "highest_score": None,
-                    "last_test_date": None,
-                    "single_turn_chat_history": [],
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
-                    "last_accessed_at": None,
-                }
-                
-                # Upsert to avoid duplicates if student rejoins
-                db.student_progress.update_one(
-                    {
+                resources = module.get("resources", [])
+                for resource_idx, resource in enumerate(resources):
+                    resource_id = resource.get("id") or str(resource.get("_id", ""))
+                    
+                    # First resource of first module is unlocked
+                    is_first = (module_idx == 0 and resource_idx == 0)
+                    
+                    progress_doc = {
                         "student_id": str(user_oid),
                         "classroom_id": classroom_id,
                         "module_id": module_id_str,
                         "resource_id": resource_id,
-                    },
-                    {"$set": progress_doc},
-                    upsert=True,
-                )
-    except Exception as e:
-        # Log error but don't fail the join request
-        print(f"Warning: Failed to create StudentProgress records: {e}")
+                        "is_unlocked": is_first,
+                        "unlocked_at": datetime.utcnow() if is_first else None,
+                        "tests_taken": 0,
+                        "passed_tests_count": 0,
+                        "failed_tests_count": 0,
+                        "highest_score": None,
+                        "last_test_date": None,
+                        "single_turn_chat_history": [],
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        "last_accessed_at": None,
+                    }
+                    
+                    # Upsert to avoid duplicates if student rejoins
+                    db.student_progress.update_one(
+                        {
+                            "student_id": str(user_oid),
+                            "classroom_id": classroom_id,
+                            "module_id": module_id_str,
+                            "resource_id": resource_id,
+                        },
+                        {"$set": progress_doc},
+                        upsert=True,
+                    )
+        except Exception as e:
+            # Log error but don't fail the join request
+            print(f"Warning: Failed to create StudentProgress records: {e}")
 
     return {
         "status": "success",
         "classroom_id": classroom_id,
+        "joined_role": membership_role,
         "classroom_name": classroom.get("name"),
         "subject": classroom.get("subject"),
         "grade_level": classroom.get("grade_level"),

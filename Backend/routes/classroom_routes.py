@@ -55,6 +55,10 @@ def _subject_regex(subject: str) -> str:
     return rf"^\s*{re.escape(subject.strip())}\s*$"
 
 
+def _normalize_enrollment_code(code: Any) -> str:
+    return str(code or "").strip().lower()
+
+
 def _assessment_signature(payload: Dict[str, Any]) -> str:
     serialized = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -1155,7 +1159,18 @@ async def get_classroom(classroom_id: str, current_user = Depends(get_current_us
 async def find_classroom_by_code(code: str):
     """Find a classroom by enrollment code. Returns basic info if found."""
     db = get_db()
-    classroom = await db.classrooms.find_one({"enrollment_code": code})
+    trimmed_code = str(code or "").strip()
+    if not trimmed_code:
+        raise HTTPException(status_code=400, detail="Enrollment code is required")
+
+    classroom = await db.classrooms.find_one(
+        {
+            "enrollment_code": {
+                "$regex": f"^{re.escape(trimmed_code)}$",
+                "$options": "i",
+            }
+        }
+    )
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
@@ -1175,23 +1190,90 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
     except Exception:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    if not classroom or classroom.get("enrollment_code") != enrollment_code:
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    stored_code = _normalize_enrollment_code(classroom.get("enrollment_code"))
+    supplied_code = _normalize_enrollment_code(enrollment_code)
+    if stored_code != supplied_code:
         raise HTTPException(status_code=404, detail="Classroom not found or invalid code")
 
-    user_oid = ObjectId(current_user["user_id"])
-    if user_oid in classroom.get("students", []):
-        raise HTTPException(status_code=400, detail="Already a member")
+    user_id = str(current_user["user_id"])
+    user_oid = ObjectId(user_id)
+    normalized_role = normalize_user_role(current_user.get("role"))
 
-    # add student
-    await db.classrooms.update_one({"_id": ObjectId(classroom_id)}, {"$push": {"students": user_oid}})
-    await db.users.update_one({"_id": user_oid}, {"$push": {"classroom_memberships": {
+    is_primary_teacher = user_oid == classroom.get("teacher_id")
+    is_co_teacher = user_id in classroom.get("co_teachers", [])
+    is_student = user_oid in classroom.get("students", [])
+
+    if is_primary_teacher:
+        raise HTTPException(status_code=400, detail="You already own this classroom")
+
+    # Teachers/admins joining another teacher's classroom become co-teachers.
+    join_as_co_teacher = normalized_role in {"teacher", "admin"}
+    membership_role = "teacher" if join_as_co_teacher else "student"
+
+    if join_as_co_teacher:
+        if is_co_teacher:
+            raise HTTPException(status_code=400, detail="Already a co-teacher")
+
+        await db.classrooms.update_one(
+            {"_id": ObjectId(classroom_id)},
+            {
+                "$addToSet": {"co_teachers": user_id},
+                "$pull": {"students": user_oid},
+            },
+        )
+    else:
+        if is_student:
+            raise HTTPException(status_code=400, detail="Already a member")
+
+        await db.classrooms.update_one(
+            {"_id": ObjectId(classroom_id)},
+            {"$addToSet": {"students": user_oid}},
+        )
+
+    user_doc = await db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
+    memberships = user_doc.get("classroom_memberships", [])
+    if not isinstance(memberships, list):
+        await db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": []}})
+        memberships = []
+
+    membership_index = next(
+        (
+            idx
+            for idx, membership in enumerate(memberships)
+            if isinstance(membership, dict) and str(membership.get("classroom_id")) == classroom_id
+        ),
+        -1,
+    )
+
+    if membership_index >= 0:
+        memberships[membership_index]["role"] = membership_role
+        memberships[membership_index]["is_active"] = True
+        if not memberships[membership_index].get("joined_date"):
+            memberships[membership_index]["joined_date"] = datetime.utcnow()
+        await db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": memberships}})
+    else:
+        await db.users.update_one(
+            {"_id": user_oid},
+            {
+                "$push": {
+                    "classroom_memberships": {
+                        "classroom_id": classroom_id,
+                        "role": membership_role,
+                        "joined_date": datetime.utcnow(),
+                        "is_active": True,
+                    }
+                }
+            },
+        )
+
+    return {
         "classroom_id": classroom_id,
-        "role": "student",
-        "joined_date": datetime.utcnow(),
-        "is_active": True
-    }}})
-
-    return {"classroom_id": classroom_id, "message": "Joined"}
+        "joined_role": membership_role,
+        "message": "Joined as co-teacher" if join_as_co_teacher else "Joined as student",
+    }
 
 
 @router.put("/{classroom_id}")

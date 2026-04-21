@@ -3,6 +3,7 @@ import sys
 import uuid
 from importlib import import_module
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ from routes.dashboard_routes import router as dashboard_router
 from routes.announcements_routes import router as announcements_router
 from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
+from routes.skill_pathway_routes import router as skill_pathway_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo
 
@@ -53,11 +55,23 @@ load_dotenv(override=True)
 if not os.getenv("LMSTUDIO_URL"):
     print("Info: LMSTUDIO_URL not set. Defaulting to http://127.0.0.1:1234 for local inference.")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize async database connection on app startup and close on shutdown"""
+    print("🚀 Initializing async database connection...")
+    await init_db()
+    print("✅ Database initialized and ready for async operations")
+    yield
+    print("🛑 Shutting down database connection...")
+    await disconnect_from_mongo()
+    print("✅ Database connection closed")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="SkillMaster Assessment API",
     description="API for generating personalized skill assessments and quizzes using local LM Studio inference",
     version="1.1.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -68,23 +82,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# Async database lifecycle events
-@app.on_event("startup")
-async def startup_db():
-    """Initialize async database connection on app startup"""
-    print("🚀 Initializing async database connection...")
-    await init_db()
-    print("✅ Database initialized and ready for async operations")
-
-
-@app.on_event("shutdown")
-async def shutdown_db():
-    """Close async database connection on app shutdown"""
-    print("🛑 Shutting down database connection...")
-    await disconnect_from_mongo()
-    print("✅ Database connection closed")
 
 
 # Include routers
@@ -105,6 +102,7 @@ app.include_router(analytics_router)
 app.include_router(user_router)
 app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
+app.include_router(skill_pathway_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
 portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
