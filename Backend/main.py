@@ -40,10 +40,14 @@ for handoff_fastapi_dir in HANDOFF_FASTAPI_CANDIDATES:
         sys.path.insert(0, str(handoff_fastapi_dir))
         break
 
-include_portable_rag_backend = getattr(
-    import_module("portable_rag_backend.integration"),
-    "include_portable_rag_backend",
-)
+include_portable_rag_backend = None
+try:
+    include_portable_rag_backend = getattr(
+        import_module("portable_rag_backend.integration"),
+        "include_portable_rag_backend",
+    )
+except ModuleNotFoundError:
+    print("Info: portable_rag_backend not found. Skipping portable RAG mount.")
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -105,7 +109,9 @@ app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
-portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
+portable_rag_backend = None
+if include_portable_rag_backend is not None:
+    portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
 
 
 def _classify_unhandled_exception(exc: Exception) -> tuple[int, dict[str, Any]]:

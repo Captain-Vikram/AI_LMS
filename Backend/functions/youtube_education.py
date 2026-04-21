@@ -207,10 +207,24 @@ Use 5 to 8 concise concepts.
                 link = youtube_tool.run(query)
                 if not link:
                     link = _build_youtube_search_link(skill, concept)
-                playlist.append({"concept": concept, "youtube_link": str(link)})
+
+                # Attempt to extract video id and add a thumbnail URL
+                vid = extract_video_id(str(link) or "")
+                thumbnail = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg" if vid else None
+                playlist.append({
+                    "concept": concept,
+                    "youtube_link": str(link),
+                    "video_id": vid,
+                    "thumbnail_url": thumbnail,
+                })
             except Exception as exc:
                 print(f"Error fetching YouTube link for {concept}: {exc}")
-                playlist.append({"concept": concept, "youtube_link": _build_youtube_search_link(skill, concept)})
+                playlist.append({
+                    "concept": concept,
+                    "youtube_link": _build_youtube_search_link(skill, concept),
+                    "video_id": None,
+                    "thumbnail_url": None,
+                })
 
         return playlist
 

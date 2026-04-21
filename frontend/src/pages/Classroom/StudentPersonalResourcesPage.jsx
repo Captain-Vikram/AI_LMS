@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   IoAddOutline,
@@ -12,50 +12,737 @@ import {
   IoSearchOutline,
   IoSparklesOutline,
   IoTrashOutline,
+  IoFlashOutline,
+  IoLayersOutline,
+  IoRocketOutline,
 } from 'react-icons/io5';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
 
 const PORTABLE_RAG_PREFIX = '/api/portable-rag';
-
 const portablePath = (path) => `${PORTABLE_RAG_PREFIX}${path}`;
 
 const normalizeMessages = (messages) => {
-  if (!Array.isArray(messages)) {
-    return [];
-  }
-
+  if (!Array.isArray(messages)) return [];
   return messages
     .map((message, index) => {
       if (typeof message === 'string') {
-        return {
-          id: `msg-${index}`,
-          role: index % 2 === 0 ? 'user' : 'assistant',
-          content: message,
-        };
+        return { id: `msg-${index}`, role: index % 2 === 0 ? 'user' : 'assistant', content: message };
       }
-
-      const role =
-        message?.role ||
-        message?.sender ||
-        (message?.answer ? 'assistant' : 'user');
-
-      const content =
-        message?.content ||
-        message?.message ||
-        message?.answer ||
-        message?.text ||
-        '';
-
-      return {
-        id: message?.id || `msg-${index}`,
-        role: role === 'assistant' ? 'assistant' : 'user',
-        content,
-      };
+      const role = message?.role || message?.sender || (message?.answer ? 'assistant' : 'user');
+      const content = message?.content || message?.message || message?.answer || message?.text || '';
+      return { id: message?.id || `msg-${index}`, role: role === 'assistant' ? 'assistant' : 'user', content };
     })
-    .filter((message) => message.content);
+    .filter((m) => m.content);
 };
 
+/* ─────────────────────────────────────────────────────────────
+   STYLE INJECTION — scoped design tokens + animations
+───────────────────────────────────────────────────────────────*/
+const Styles = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+    :root {
+      --ink:       #0e0f13;
+      --surface:   #13151c;
+      --card:      #181b24;
+      --border:    rgba(255,255,255,0.07);
+      --border-hi: rgba(255,255,255,0.13);
+      --muted:     #5a5f72;
+      --text:      #e4e6f0;
+      --text-dim:  #8b90a8;
+      --accent:    #6c8fff;
+      --accent2:   #a78bfa;
+      --glow:      rgba(108,143,255,0.18);
+      --glow2:     rgba(167,139,250,0.14);
+      --success:   #34d399;
+      --danger:    #f87171;
+    }
+
+    .nb-root * { box-sizing: border-box; }
+
+    .nb-root {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--ink);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Card ── */
+    .nb-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      transition: border-color .2s;
+    }
+    .nb-card:hover { border-color: var(--border-hi); }
+
+    /* ── Inputs ── */
+    .nb-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .nb-input::placeholder { color: var(--muted); }
+    .nb-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--glow);
+    }
+    textarea.nb-input { resize: vertical; }
+
+    /* ── Buttons ── */
+    .nb-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 10px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      padding: 9px 16px;
+      transition: all .18s;
+    }
+    .nb-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .nb-btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      box-shadow: 0 4px 18px var(--glow);
+    }
+    .nb-btn-primary:not(:disabled):hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px var(--glow);
+    }
+
+    .nb-btn-ghost {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .nb-btn-ghost:not(:disabled):hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      border-color: var(--border-hi);
+    }
+
+    .nb-btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid rgba(248,113,113,0.25);
+    }
+    .nb-btn-danger:not(:disabled):hover {
+      background: rgba(248,113,113,0.08);
+    }
+
+    .nb-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+
+    /* ── Badge ── */
+    .nb-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .nb-badge-accent {
+      background: rgba(108,143,255,0.12);
+      color: var(--accent);
+      border: 1px solid rgba(108,143,255,0.22);
+    }
+
+    /* ── Page Header ── */
+    .nb-hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 20px;
+      padding: 36px 40px;
+      background: var(--card);
+      border: 1px solid var(--border);
+    }
+    .nb-hero::before {
+      content:'';
+      position:absolute; inset:0;
+      background: radial-gradient(ellipse 70% 60% at 80% 30%, var(--glow2), transparent 65%),
+                  radial-gradient(ellipse 50% 40% at 20% 70%, var(--glow),  transparent 60%);
+      pointer-events: none;
+    }
+    .nb-hero-title {
+      font-family: 'Instrument Serif', serif;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 400;
+      letter-spacing: -.5px;
+      color: var(--text);
+      line-height: 1.15;
+    }
+    .nb-hero-title em { font-style: italic; color: var(--accent); }
+
+    /* ── Notebook Card ── */
+    .nb-notebook-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      cursor: pointer;
+      transition: all .2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .nb-notebook-card::before {
+      content:'';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .nb-notebook-card:hover {
+      border-color: var(--border-hi);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    }
+    .nb-notebook-card:hover::before { opacity: 1; }
+
+    /* ── Workspace sidebar ── */
+    .nb-ws-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .nb-ws-panel-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nb-ws-panel-body { padding: 16px 20px; flex: 1; overflow: hidden; }
+    .nb-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    /* ── Source pill ── */
+    .nb-source-pill {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      transition: border-color .15s;
+    }
+    .nb-source-pill:hover { border-color: var(--border-hi); }
+
+    /* ── Chat bubbles ── */
+    .nb-bubble {
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-size: 13.5px;
+      line-height: 1.65;
+    }
+    .nb-bubble-user {
+      background: rgba(108,143,255,0.1);
+      border: 1px solid rgba(108,143,255,0.2);
+      color: var(--text);
+      margin-left: auto;
+      max-width: 82%;
+    }
+    .nb-bubble-ai {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      max-width: 92%;
+    }
+    .nb-bubble-ai-accent {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    /* ── Stat box ── */
+    .nb-stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .nb-stat-label { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+    .nb-stat-val { font-size: 15px; font-weight: 600; color: var(--text); }
+
+    /* ── Divider ── */
+    .nb-divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .nb-animate { animation: fadeUp .4s ease both; }
+    .nb-animate-d1 { animation-delay:.07s; }
+    .nb-animate-d2 { animation-delay:.14s; }
+    .nb-animate-d3 { animation-delay:.21s; }
+
+    @keyframes pulse-dot {
+      0%,100% { opacity:1; } 50% { opacity:.3; }
+    }
+    .nb-typing span {
+      display: inline-block;
+      width: 5px; height: 5px;
+      background: var(--accent);
+      border-radius: 50%;
+      margin: 0 2px;
+      animation: pulse-dot 1.2s ease-in-out infinite;
+    }
+    .nb-typing span:nth-child(2) { animation-delay:.2s; }
+    .nb-typing span:nth-child(3) { animation-delay:.4s; }
+
+    /* ── Scrollbar ── */
+    .nb-scroll::-webkit-scrollbar { width: 4px; }
+    .nb-scroll::-webkit-scrollbar-track { background: transparent; }
+    .nb-scroll::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 4px; }
+  `}</style>
+);
+
+/* ─────────────────────────────────────────────────────────────
+   DASHBOARD VIEW
+───────────────────────────────────────────────────────────────*/
+const DashboardView = ({
+  notebooks, sortedNotebooks, dashboardLoading, dashboardError, dashboardInfo,
+  newNotebookName, setNewNotebookName, newNotebookDescription, setNewNotebookDescription,
+  creatingNotebook, createNotebook, deleteNotebook, refreshNotebooks,
+  classroomId, navigate,
+}) => (
+  <div className="nb-root" style={{ padding: '28px 24px', maxWidth: 1200, margin: '0 auto' }}>
+    <Styles />
+
+    {/* Hero */}
+    <div className="nb-hero nb-animate" style={{ marginBottom: 28 }}>
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span className="nb-badge nb-badge-accent"><IoSparklesOutline /> Personal AI Workspace</span>
+        </div>
+        <h1 className="nb-hero-title">Your <em>NotebookLM</em><br />study companion.</h1>
+        <p style={{ marginTop: 12, color: 'var(--text-dim)', fontSize: 14, maxWidth: 480, lineHeight: 1.7 }}>
+          Upload sources, add notes, and have AI-powered conversations grounded in your personal study materials.
+        </p>
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}>
+            <IoArrowBackOutline /> Dashboard
+          </button>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => navigate(`/classroom/${classroomId}/modules`)}>
+            <IoBookOutline /> Classroom Modules
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 20 }}>
+      {/* Create Notebook */}
+      <div className="nb-card nb-animate nb-animate-d1" style={{ padding: 24 }}>
+        <h2 style={{ fontFamily: 'Instrument Serif', fontSize: 20, marginBottom: 6 }}>New Notebook</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 18 }}>
+          Create a private workspace to gather sources and chat.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input
+            className="nb-input"
+            value={newNotebookName}
+            onChange={(e) => setNewNotebookName(e.target.value)}
+            placeholder="Notebook name…"
+            onKeyDown={(e) => e.key === 'Enter' && createNotebook()}
+          />
+          <textarea
+            className="nb-input"
+            rows={3}
+            value={newNotebookDescription}
+            onChange={(e) => setNewNotebookDescription(e.target.value)}
+            placeholder="Description (optional)"
+          />
+          <button className="nb-btn nb-btn-primary" onClick={createNotebook} disabled={creatingNotebook}>
+            <IoAddOutline /> {creatingNotebook ? 'Creating…' : 'Create Notebook'}
+          </button>
+        </div>
+        {(dashboardError || dashboardInfo) && (
+          <p style={{ marginTop: 12, fontSize: 12, color: dashboardError ? 'var(--danger)' : 'var(--success)' }}>
+            {dashboardError || dashboardInfo}
+          </p>
+        )}
+
+        {/* Info banner */}
+        <div style={{ marginTop: 22, padding: '14px 16px', borderRadius: 12, background: 'rgba(108,143,255,0.06)', border: '1px solid rgba(108,143,255,0.15)' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <IoConstructOutline style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', marginBottom: 4 }}>Lightweight Build</p>
+              <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
+                Source ingestion · chat sessions · vector retrieval · semantic search.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notebooks list */}
+      <div className="nb-animate nb-animate-d2">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h2 style={{ fontFamily: 'Instrument Serif', fontSize: 20 }}>Your Notebooks</h2>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={refreshNotebooks} disabled={dashboardLoading}>
+            Refresh
+          </button>
+        </div>
+
+        {dashboardLoading ? (
+          <div style={{ color: 'var(--muted)', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Loading…</div>
+        ) : sortedNotebooks.length === 0 ? (
+          <div style={{ border: '1px dashed var(--border)', borderRadius: 14, padding: '48px 24px', textAlign: 'center' }}>
+            <IoLayersOutline style={{ fontSize: 32, color: 'var(--muted)', marginBottom: 12 }} />
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No notebooks yet — create one to get started.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+            {sortedNotebooks.map((nb, i) => (
+              <div key={nb.id} className="nb-notebook-card" style={{ animationDelay: `${i * 0.06}s` }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, var(--accent), var(--accent2))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <IoBookOutline style={{ color: '#fff', fontSize: 16 }} />
+                  </div>
+                  <button
+                    className="nb-btn nb-btn-sm"
+                    style={{ background: 'transparent', border: 'none', color: 'var(--muted)', padding: '4px 6px' }}
+                    onClick={(e) => { e.stopPropagation(); deleteNotebook(nb.id); }}
+                  >
+                    <IoTrashOutline style={{ fontSize: 14 }} />
+                  </button>
+                </div>
+                <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--text)' }}>{nb.name}</h3>
+                <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.55, marginBottom: 14,
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {nb.description || 'No description'}
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 14 }}>
+                  {new Date(nb.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+                <button
+                  className="nb-btn nb-btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', fontSize: 12 }}
+                  onClick={() => navigate(`/classroom/${classroomId}/personal-resources/notebook/${nb.id}`)}
+                >
+                  <IoRocketOutline /> Open
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+);
+
+/* ─────────────────────────────────────────────────────────────
+   WORKSPACE VIEW
+───────────────────────────────────────────────────────────────*/
+const WorkspaceView = ({
+  notebookDetail, workspaceLoading, workspaceError, chatError, sourceActionError,
+  sources, chatMessages, chatInput, setChatInput, sendingChat, sendMessage,
+  sourceTitle, setSourceTitle, sourceText, setSourceText, sourceUrl, setSourceUrl,
+  sourceFile, setSourceFile, sourceActionLoading, addTextSource, addUrlSource, addFileSource, removeSource,
+  health, models, vectorStats, searchQuery, setSearchQuery, searchResults, searchLoading, studioMessage,
+  runSearch, initializeVectorDb, refreshWorkspace, notebookId, classroomId, navigate,
+}) => {
+  const chatEndRef = useRef(null);
+  const [activeAddTab, setActiveAddTab] = useState('text');
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, sendingChat]);
+
+  return (
+    <div className="nb-root" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Styles />
+
+      {/* Top bar */}
+      <div style={{
+        padding: '12px 20px',
+        background: 'var(--card)',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexShrink: 0,
+        gap: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)}>
+            <IoArrowBackOutline /> Notebooks
+          </button>
+          <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
+          <div>
+            <span className="nb-badge nb-badge-accent" style={{ marginBottom: 2 }}><IoSparklesOutline /> Workspace</span>
+            <p style={{ fontFamily: 'Instrument Serif', fontSize: 17, color: 'var(--text)', marginTop: 1 }}>
+              {notebookDetail?.name || '—'}
+            </p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => refreshWorkspace(notebookId)}>
+            <IoMapOutline /> Refresh
+          </button>
+          <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={() => navigate(`/classroom/${classroomId}/modules`)}>
+            <IoBookOutline /> Modules
+          </button>
+        </div>
+      </div>
+
+      {/* Error strip */}
+      {(workspaceError || chatError || sourceActionError) && (
+        <div style={{ padding: '8px 20px', background: 'rgba(248,113,113,0.08)', borderBottom: '1px solid rgba(248,113,113,0.2)', fontSize: 12, color: 'var(--danger)' }}>
+          {workspaceError || chatError || sourceActionError}
+        </div>
+      )}
+
+      {/* 3-column workspace */}
+      {workspaceLoading ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 13 }}>
+          Loading workspace…
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 260px', overflow: 'hidden' }}>
+
+          {/* ── LEFT: Sources ── */}
+          <div style={{ borderRight: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                <IoDocumentTextOutline style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Sources</span>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)', background: 'var(--surface)', padding: '2px 8px', borderRadius: 20 }}>
+                  {sources.length}
+                </span>
+              </div>
+            </div>
+
+            {/* Add source tabs */}
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 12, background: 'var(--surface)', padding: 3, borderRadius: 10 }}>
+                {['text', 'url', 'file'].map((tab) => (
+                  <button key={tab} onClick={() => setActiveAddTab(tab)} style={{
+                    flex: 1, padding: '5px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 500, fontFamily: 'DM Sans',
+                    background: activeAddTab === tab ? 'var(--card)' : 'transparent',
+                    color: activeAddTab === tab ? 'var(--text)' : 'var(--muted)',
+                    transition: 'all .15s',
+                  }}>
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              <input className="nb-input" value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} placeholder="Title (optional)" style={{ marginBottom: 8 }} />
+
+              {activeAddTab === 'text' && (
+                <>
+                  <textarea className="nb-input" rows={4} value={sourceText} onChange={(e) => setSourceText(e.target.value)} placeholder="Paste notes or text…" style={{ marginBottom: 8 }} />
+                  <button className="nb-btn nb-btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }} onClick={addTextSource} disabled={sourceActionLoading}>
+                    <IoAddOutline /> Add Text
+                  </button>
+                </>
+              )}
+
+              {activeAddTab === 'url' && (
+                <>
+                  <input className="nb-input" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…" style={{ marginBottom: 8 }} />
+                  <button className="nb-btn nb-btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }} onClick={addUrlSource} disabled={sourceActionLoading}>
+                    <IoLinkOutline /> Import URL
+                  </button>
+                </>
+              )}
+
+              {activeAddTab === 'file' && (
+                <>
+                  <div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: '12px', marginBottom: 8, textAlign: 'center' }}>
+                    <input type="file" onChange={(e) => setSourceFile(e.target.files?.[0] || null)} style={{ fontSize: 12, color: 'var(--text-dim)', width: '100%' }} />
+                  </div>
+                  <button className="nb-btn nb-btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }} onClick={addFileSource} disabled={!sourceFile || sourceActionLoading}>
+                    <IoCloudUploadOutline /> Upload File
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Sources list */}
+            <div className="nb-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+              {sources.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--muted)', fontSize: 12 }}>
+                  <IoLayersOutline style={{ fontSize: 24, marginBottom: 8, display: 'block', margin: '0 auto 8px' }} />
+                  No sources yet
+                </div>
+              ) : sources.map((src) => (
+                <div key={src.id} className="nb-source-pill" style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src.title}</p>
+                      <p style={{ fontSize: 11, color: 'var(--muted)' }}>{src.source_type} · {src.chunk_count} chunks</p>
+                    </div>
+                    <button onClick={() => removeSource(src.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 2, flexShrink: 0 }}
+                      title="Remove">
+                      <IoTrashOutline style={{ fontSize: 13 }} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── CENTER: Chat ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--ink)' }}>
+            <div className="nb-scroll" style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {chatMessages.length === 0 ? (
+                <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 360 }}>
+                  <div style={{ width: 52, height: 52, borderRadius: 16, background: 'linear-gradient(135deg, var(--accent), var(--accent2))', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                    <IoSparklesOutline style={{ color: '#fff', fontSize: 22 }} />
+                  </div>
+                  <p style={{ fontFamily: 'Instrument Serif', fontSize: 20, color: 'var(--text)', marginBottom: 8 }}>Start a conversation</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65 }}>
+                    Ask questions about your uploaded sources. The AI will answer using your personal notes.
+                  </p>
+                </div>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    {msg.role === 'assistant' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <div style={{ width: 20, height: 20, borderRadius: 6, background: 'linear-gradient(135deg, var(--accent), var(--accent2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <IoSparklesOutline style={{ color: '#fff', fontSize: 11 }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>AI Assistant</span>
+                      </div>
+                    )}
+                    <div className={`nb-bubble ${msg.role === 'user' ? 'nb-bubble-user' : 'nb-bubble-ai'}`}>
+                      <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
+                      {msg.citationCount > 0 && (
+                        <p style={{ marginTop: 8, fontSize: 11, color: 'var(--accent)' }}>
+                          <IoFlashOutline style={{ verticalAlign: 'middle', marginRight: 3 }} />
+                          {msg.citationCount} source{msg.citationCount > 1 ? 's' : ''} cited
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+              {sendingChat && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 6, background: 'linear-gradient(135deg, var(--accent), var(--accent2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <IoSparklesOutline style={{ color: '#fff', fontSize: 11 }} />
+                  </div>
+                  <div className="nb-typing"><span /><span /><span /></div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input bar */}
+            <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', background: 'var(--card)', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <textarea
+                className="nb-input"
+                rows={1}
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                placeholder="Ask about your sources… (Enter to send)"
+                style={{ flex: 1, resize: 'none', maxHeight: 120 }}
+              />
+              <button className="nb-btn nb-btn-primary" onClick={sendMessage} disabled={sendingChat} style={{ flexShrink: 0, padding: '10px 18px' }}>
+                Send
+              </button>
+            </div>
+          </div>
+
+          {/* ── RIGHT: Studio ── */}
+          <div className="nb-scroll" style={{ borderLeft: '1px solid var(--border)', overflowY: 'auto', padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--muted)' }}>Studio</p>
+
+            <div className="nb-stat">
+              <p className="nb-stat-label">Storage</p>
+              <p className="nb-stat-val" style={{ fontSize: 12 }}>{health?.storage?.sqlite || '—'}</p>
+            </div>
+
+            <div className="nb-stat">
+              <p className="nb-stat-label">Vector Documents</p>
+              <p className="nb-stat-val">{vectorStats?.vector_documents_count ?? '—'}</p>
+              <button className="nb-btn nb-btn-ghost nb-btn-sm" style={{ marginTop: 10, width: '100%', justifyContent: 'center', fontSize: 11 }} onClick={initializeVectorDb}>
+                Initialize Vector DB
+              </button>
+            </div>
+
+            <div className="nb-stat">
+              <p className="nb-stat-label">Chat Provider</p>
+              <p className="nb-stat-val" style={{ fontSize: 12 }}>{models?.default_chat_provider || '—'}</p>
+            </div>
+
+            <div className="nb-divider" />
+
+            <div>
+              <p className="nb-section-title">Semantic Search</p>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  className="nb-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search notes…"
+                  onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+                  style={{ flex: 1 }}
+                />
+                <button className="nb-btn nb-btn-ghost" style={{ padding: '9px 12px', flexShrink: 0 }} onClick={runSearch} disabled={searchLoading}>
+                  <IoSearchOutline />
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {searchResults.map((r, i) => (
+                  <div key={`${r.source_id}-${i}`} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>{r.title || r.source_id}</p>
+                    <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.55,
+                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {r.snippet || r.content || 'No snippet'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {studioMessage && (
+              <p style={{ fontSize: 11, color: 'var(--accent)', background: 'rgba(108,143,255,0.08)', borderRadius: 8, padding: '8px 10px' }}>
+                {studioMessage}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────────────────────
+   MAIN COMPONENT
+───────────────────────────────────────────────────────────────*/
 const StudentPersonalResourcesPage = () => {
   const navigate = useNavigate();
   const { id: classroomId, notebookId } = useParams();
@@ -95,734 +782,177 @@ const StudentPersonalResourcesPage = () => {
 
   const isWorkspace = Boolean(notebookId);
 
-  const sortedNotebooks = useMemo(() => {
-    return [...notebooks].sort((first, second) => {
-      return new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime();
-    });
-  }, [notebooks]);
+  const sortedNotebooks = useMemo(() =>
+    [...notebooks].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)), [notebooks]);
 
   const refreshNotebooks = async () => {
-    setDashboardLoading(true);
-    setDashboardError('');
-
-    try {
-      const items = await apiClient.get(portablePath('/notebooks'));
-      setNotebooks(Array.isArray(items) ? items : []);
-    } catch (error) {
-      setDashboardError(error.message || 'Failed to load notebooks');
-    } finally {
-      setDashboardLoading(false);
-    }
+    setDashboardLoading(true); setDashboardError('');
+    try { const items = await apiClient.get(portablePath('/notebooks')); setNotebooks(Array.isArray(items) ? items : []); }
+    catch (e) { setDashboardError(e.message || 'Failed to load notebooks'); }
+    finally { setDashboardLoading(false); }
   };
 
   const refreshSources = async () => {
-    if (!notebookId) {
-      return;
-    }
-
-    try {
-      const items = await apiClient.get(portablePath(`/sources?notebook_id=${notebookId}`));
-      setSources(Array.isArray(items) ? items : []);
-    } catch {
-      setSources([]);
-    }
+    if (!notebookId) return;
+    try { const items = await apiClient.get(portablePath(`/sources?notebook_id=${notebookId}`)); setSources(Array.isArray(items) ? items : []); }
+    catch { setSources([]); }
   };
 
   const refreshVectorStats = async () => {
-    try {
-      const stats = await apiClient.get(portablePath('/vector-db/stats'));
-      setVectorStats(stats);
-    } catch {
-      setVectorStats(null);
-    }
+    try { setVectorStats(await apiClient.get(portablePath('/vector-db/stats'))); }
+    catch { setVectorStats(null); }
   };
 
-  const ensureChatSession = async (currentNotebookId) => {
-    const sessions = await apiClient.get(
-      portablePath(`/chat/sessions?notebook_id=${currentNotebookId}`)
-    );
-
-    if (Array.isArray(sessions) && sessions.length > 0) {
-      return sessions[0];
-    }
-
-    return apiClient.post(portablePath('/chat/sessions'), {
-      notebook_id: currentNotebookId,
-      title: 'Personal Workspace Chat',
-    });
+  const ensureChatSession = async (id) => {
+    const sessions = await apiClient.get(portablePath(`/chat/sessions?notebook_id=${id}`));
+    if (Array.isArray(sessions) && sessions.length > 0) return sessions[0];
+    return apiClient.post(portablePath('/chat/sessions'), { notebook_id: id, title: 'Personal Workspace Chat' });
   };
 
-  const refreshWorkspace = async (currentNotebookId) => {
-    setWorkspaceLoading(true);
-    setWorkspaceError('');
-    setChatError('');
-
+  const refreshWorkspace = async (id) => {
+    setWorkspaceLoading(true); setWorkspaceError(''); setChatError('');
     try {
-      const [detailResult, sourcesResult, healthResult, modelsResult] = await Promise.all([
-        apiClient.get(portablePath(`/notebooks/${currentNotebookId}`)),
-        apiClient.get(portablePath(`/sources?notebook_id=${currentNotebookId}`)),
+      const [detail, srcs, h, m] = await Promise.all([
+        apiClient.get(portablePath(`/notebooks/${id}`)),
+        apiClient.get(portablePath(`/sources?notebook_id=${id}`)),
         apiClient.get(portablePath('/health')),
         apiClient.get(portablePath('/models')),
       ]);
-
-      setNotebookDetail(detailResult);
-      setSources(Array.isArray(sourcesResult) ? sourcesResult : []);
-      setHealth(healthResult);
-      setModels(modelsResult);
-
-      const activeSession = await ensureChatSession(currentNotebookId);
-      setChatSessionId(activeSession.id);
-
-      const sessionDetail = await apiClient.get(
-        portablePath(`/chat/sessions/${activeSession.id}`)
-      );
+      setNotebookDetail(detail); setSources(Array.isArray(srcs) ? srcs : []); setHealth(h); setModels(m);
+      const session = await ensureChatSession(id);
+      setChatSessionId(session.id);
+      const sessionDetail = await apiClient.get(portablePath(`/chat/sessions/${session.id}`));
       setChatMessages(normalizeMessages(sessionDetail?.messages));
-
       await refreshVectorStats();
-    } catch (error) {
-      setWorkspaceError(error.message || 'Failed to load personal workspace');
-    } finally {
-      setWorkspaceLoading(false);
-    }
+    } catch (e) { setWorkspaceError(e.message || 'Failed to load workspace'); }
+    finally { setWorkspaceLoading(false); }
   };
 
   useEffect(() => {
-    if (!isWorkspace) {
-      refreshNotebooks();
-      return;
-    }
-
+    if (!isWorkspace) { refreshNotebooks(); return; }
     refreshWorkspace(notebookId);
   }, [isWorkspace, notebookId]);
 
   const createNotebook = async () => {
     const name = newNotebookName.trim();
-    if (!name) {
-      setDashboardError('Notebook name is required');
-      return;
-    }
-
-    setCreatingNotebook(true);
-    setDashboardError('');
-    setDashboardInfo('');
-
+    if (!name) { setDashboardError('Notebook name is required'); return; }
+    setCreatingNotebook(true); setDashboardError(''); setDashboardInfo('');
     try {
-      const created = await apiClient.post(portablePath('/notebooks'), {
-        name,
-        description: newNotebookDescription.trim(),
-      });
-
-      setDashboardInfo('Notebook created. Opening workspace...');
-      setNewNotebookName('');
-      setNewNotebookDescription('');
+      const created = await apiClient.post(portablePath('/notebooks'), { name, description: newNotebookDescription.trim() });
+      setDashboardInfo('Opening workspace…'); setNewNotebookName(''); setNewNotebookDescription('');
       navigate(`/classroom/${classroomId}/personal-resources/notebook/${created.id}`);
-    } catch (error) {
-      setDashboardError(error.message || 'Failed to create notebook');
-    } finally {
-      setCreatingNotebook(false);
-    }
+    } catch (e) { setDashboardError(e.message || 'Failed to create notebook'); }
+    finally { setCreatingNotebook(false); }
   };
 
-  const deleteNotebook = async (targetNotebookId) => {
-    const shouldDelete = window.confirm(
-      'Delete this notebook and its personal notes? This cannot be undone.'
-    );
-    if (!shouldDelete) {
-      return;
-    }
-
-    setDashboardError('');
-    setDashboardInfo('');
-    try {
-      await apiClient.delete(portablePath(`/notebooks/${targetNotebookId}`));
-      setDashboardInfo('Notebook deleted successfully.');
-      await refreshNotebooks();
-    } catch (error) {
-      setDashboardError(error.message || 'Failed to delete notebook');
-    }
+  const deleteNotebook = async (id) => {
+    if (!window.confirm('Delete this notebook? This cannot be undone.')) return;
+    setDashboardError(''); setDashboardInfo('');
+    try { await apiClient.delete(portablePath(`/notebooks/${id}`)); setDashboardInfo('Deleted.'); await refreshNotebooks(); }
+    catch (e) { setDashboardError(e.message || 'Failed to delete'); }
   };
 
   const addTextSource = async () => {
-    const content = sourceText.trim();
-    if (!content || !notebookId) {
-      return;
-    }
-
-    setSourceActionLoading(true);
-    setSourceActionError('');
-
+    if (!sourceText.trim() || !notebookId) return;
+    setSourceActionLoading(true); setSourceActionError('');
     try {
-      await apiClient.post(portablePath('/sources/text'), {
-        notebook_id: notebookId,
-        title: sourceTitle.trim() || 'Quick note',
-        content,
-        embed: true,
-      });
-
-      setSourceTitle('');
-      setSourceText('');
-      await refreshSources();
-      await refreshVectorStats();
-    } catch (error) {
-      setSourceActionError(error.message || 'Failed to add text source');
-    } finally {
-      setSourceActionLoading(false);
-    }
+      await apiClient.post(portablePath('/sources/text'), { notebook_id: notebookId, title: sourceTitle.trim() || 'Quick note', content: sourceText.trim(), embed: true });
+      setSourceTitle(''); setSourceText(''); await refreshSources(); await refreshVectorStats();
+    } catch (e) { setSourceActionError(e.message || 'Failed'); }
+    finally { setSourceActionLoading(false); }
   };
 
   const addUrlSource = async () => {
-    const url = sourceUrl.trim();
-    if (!url || !notebookId) {
-      return;
-    }
-
-    setSourceActionLoading(true);
-    setSourceActionError('');
-
+    if (!sourceUrl.trim() || !notebookId) return;
+    setSourceActionLoading(true); setSourceActionError('');
     try {
-      await apiClient.post(portablePath('/sources/url'), {
-        notebook_id: notebookId,
-        url,
-        title: sourceTitle.trim() || null,
-        embed: true,
-      });
-
-      setSourceUrl('');
-      await refreshSources();
-      await refreshVectorStats();
-    } catch (error) {
-      setSourceActionError(error.message || 'Failed to add URL source');
-    } finally {
-      setSourceActionLoading(false);
-    }
+      await apiClient.post(portablePath('/sources/url'), { notebook_id: notebookId, url: sourceUrl.trim(), title: sourceTitle.trim() || null, embed: true });
+      setSourceUrl(''); await refreshSources(); await refreshVectorStats();
+    } catch (e) { setSourceActionError(e.message || 'Failed'); }
+    finally { setSourceActionLoading(false); }
   };
 
   const addFileSource = async () => {
-    if (!sourceFile || !notebookId) {
-      return;
-    }
-
-    setSourceActionLoading(true);
-    setSourceActionError('');
-
+    if (!sourceFile || !notebookId) return;
+    setSourceActionLoading(true); setSourceActionError('');
     try {
       const form = new FormData();
-      form.append('notebook_id', notebookId);
-      form.append('file', sourceFile);
-      if (sourceTitle.trim()) {
-        form.append('title', sourceTitle.trim());
-      }
-
+      form.append('notebook_id', notebookId); form.append('file', sourceFile);
+      if (sourceTitle.trim()) form.append('title', sourceTitle.trim());
       await apiClient.post(portablePath('/sources/file'), form);
-      setSourceFile(null);
-      await refreshSources();
-      await refreshVectorStats();
-    } catch (error) {
-      setSourceActionError(error.message || 'Failed to upload source file');
-    } finally {
-      setSourceActionLoading(false);
-    }
+      setSourceFile(null); await refreshSources(); await refreshVectorStats();
+    } catch (e) { setSourceActionError(e.message || 'Failed'); }
+    finally { setSourceActionLoading(false); }
   };
 
-  const removeSource = async (sourceId) => {
-    setSourceActionLoading(true);
-    setSourceActionError('');
-
-    try {
-      await apiClient.delete(portablePath(`/sources/${sourceId}`));
-      await refreshSources();
-      await refreshVectorStats();
-    } catch (error) {
-      setSourceActionError(error.message || 'Failed to remove source');
-    } finally {
-      setSourceActionLoading(false);
-    }
+  const removeSource = async (id) => {
+    setSourceActionLoading(true); setSourceActionError('');
+    try { await apiClient.delete(portablePath(`/sources/${id}`)); await refreshSources(); await refreshVectorStats(); }
+    catch (e) { setSourceActionError(e.message || 'Failed'); }
+    finally { setSourceActionLoading(false); }
   };
 
   const sendMessage = async () => {
-    if (!chatSessionId || !chatInput.trim()) {
-      return;
-    }
-
-    const message = chatInput.trim();
-    setChatInput('');
-    setChatError('');
-    setSendingChat(true);
-
-    setChatMessages((previous) => [
-      ...previous,
-      {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: message,
-      },
-    ]);
-
+    if (!chatSessionId || !chatInput.trim()) return;
+    const message = chatInput.trim(); setChatInput(''); setChatError(''); setSendingChat(true);
+    setChatMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: message }]);
     try {
-      const response = await apiClient.post(
-        portablePath(`/chat/sessions/${chatSessionId}/messages`),
-        {
-          message,
-          retrieval_k: 6,
-        }
-      );
-
-      const answer = response?.answer || 'No response generated.';
-      const citationCount = Array.isArray(response?.citation_map)
-        ? response.citation_map.length
-        : 0;
-
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: answer,
-          citationCount,
-        },
-      ]);
-    } catch (error) {
-      setChatError(error.message || 'Failed to send chat message');
-    } finally {
-      setSendingChat(false);
-    }
+      const res = await apiClient.post(portablePath(`/chat/sessions/${chatSessionId}/messages`), { message, retrieval_k: 6 });
+      const answer = res?.answer || 'No response generated.';
+      const citationCount = Array.isArray(res?.citation_map) ? res.citation_map.length : 0;
+      setChatMessages((prev) => [...prev, { id: `assistant-${Date.now()}`, role: 'assistant', content: answer, citationCount }]);
+    } catch (e) { setChatError(e.message || 'Failed to send'); }
+    finally { setSendingChat(false); }
   };
 
   const runSearch = async () => {
-    if (!searchQuery.trim() || !notebookId) {
-      return;
-    }
-
-    setSearchLoading(true);
-    setStudioMessage('');
-
+    if (!searchQuery.trim() || !notebookId) return;
+    setSearchLoading(true); setStudioMessage('');
     try {
-      const response = await apiClient.post(portablePath('/search'), {
-        notebook_id: notebookId,
-        query: searchQuery.trim(),
-        k: 5,
-      });
-
-      setSearchResults(Array.isArray(response?.results) ? response.results : []);
-    } catch (error) {
-      setStudioMessage(error.message || 'Search failed');
-      setSearchResults([]);
-    } finally {
-      setSearchLoading(false);
-    }
+      const res = await apiClient.post(portablePath('/search'), { notebook_id: notebookId, query: searchQuery.trim(), k: 5 });
+      setSearchResults(Array.isArray(res?.results) ? res.results : []);
+    } catch (e) { setStudioMessage(e.message || 'Search failed'); setSearchResults([]); }
+    finally { setSearchLoading(false); }
   };
 
   const initializeVectorDb = async () => {
     setStudioMessage('');
-    try {
-      const initialized = await apiClient.post(portablePath('/vector-db/init'), {});
-      setVectorStats(initialized);
-      setStudioMessage('Vector DB initialized for current data.');
-    } catch (error) {
-      setStudioMessage(error.message || 'Vector initialization failed');
-    }
+    try { const init = await apiClient.post(portablePath('/vector-db/init'), {}); setVectorStats(init); setStudioMessage('Vector DB initialized.'); }
+    catch (e) { setStudioMessage(e.message || 'Init failed'); }
   };
 
   if (!isWorkspace) {
     return (
-      <GlassDashboardShell contentClassName="max-w-6xl">
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-slate-900 via-cyan-950/30 to-slate-900 p-6 shadow-2xl">
-            <p className="text-xs uppercase tracking-widest text-cyan-300">Student Personal Resources</p>
-            <h1 className="mt-2 text-3xl font-bold text-gray-100">Personal AI Learning Workspace</h1>
-            <p className="mt-2 text-sm text-gray-300">
-              Build your own private NotebookLM-style space with sources, retrieval chat, and study outputs.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-5 lg:col-span-1">
-              <h2 className="text-lg font-semibold text-gray-100">New Notebook</h2>
-              <p className="mt-1 text-sm text-gray-400">Create a personal workspace notebook.</p>
-
-              <div className="mt-4 space-y-3">
-                <input
-                  value={newNotebookName}
-                  onChange={(event) => setNewNotebookName(event.target.value)}
-                  placeholder="Notebook name"
-                  className="w-full rounded-lg border border-gray-700 bg-gray-950/70 px-3 py-2 text-sm text-gray-100"
-                />
-                <textarea
-                  value={newNotebookDescription}
-                  onChange={(event) => setNewNotebookDescription(event.target.value)}
-                  rows={3}
-                  placeholder="Description (optional)"
-                  className="w-full rounded-lg border border-gray-700 bg-gray-950/70 px-3 py-2 text-sm text-gray-100"
-                />
-                <button
-                  type="button"
-                  onClick={createNotebook}
-                  disabled={creatingNotebook}
-                  className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <IoAddOutline /> {creatingNotebook ? 'Creating...' : 'Create Notebook'}
-                </button>
-              </div>
-
-              {(dashboardError || dashboardInfo) && (
-                <p className={`mt-3 text-xs ${dashboardError ? 'text-rose-300' : 'text-emerald-300'}`}>
-                  {dashboardError || dashboardInfo}
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-5 lg:col-span-2">
-              <div className="flex items-start gap-3">
-                <IoConstructOutline className="mt-0.5 text-xl text-amber-300" />
-                <div>
-                  <h2 className="text-lg font-semibold text-amber-100">NotebookLM Dummy Workspace</h2>
-                  <p className="mt-1 text-sm text-amber-100/85">
-                    This version is intentionally lightweight: source ingestion, chat sessions, vector stats, and retrieval search.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-100">Your Personal Notebooks</h2>
-              <button
-                type="button"
-                onClick={refreshNotebooks}
-                disabled={dashboardLoading}
-                className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {dashboardLoading ? (
-              <p className="text-sm text-gray-400">Loading notebooks...</p>
-            ) : sortedNotebooks.length === 0 ? (
-              <p className="text-sm text-gray-400">No personal notebooks yet. Create one to start.</p>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {sortedNotebooks.map((notebook) => (
-                  <article
-                    key={notebook.id}
-                    className="rounded-lg border border-gray-700 bg-gray-950/50 p-4"
-                  >
-                    <h3 className="text-sm font-semibold text-gray-100">{notebook.name}</h3>
-                    <p className="mt-1 line-clamp-2 text-xs text-gray-400">
-                      {notebook.description || 'No description'}
-                    </p>
-                    <p className="mt-2 text-[11px] text-gray-500">Updated: {new Date(notebook.updated_at).toLocaleString()}</p>
-
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigate(`/classroom/${classroomId}/personal-resources/notebook/${notebook.id}`)
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-500"
-                      >
-                        <IoSparklesOutline /> Open
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteNotebook(notebook.id)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-500/10"
-                      >
-                        <IoTrashOutline /> Delete
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-5">
-            <h2 className="text-lg font-semibold text-gray-100">Current Access</h2>
-            <p className="mt-2 text-sm text-gray-400">
-              Teacher-assigned modules, quizzes, and classroom progression remain available in the Modules section.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}
-                className="inline-flex items-center gap-2 rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-600"
-              >
-                <IoArrowBackOutline /> Back to Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500"
-              >
-                <IoBookOutline /> Open Classroom Modules
-              </button>
-            </div>
-          </div>
-        </div>
-      </GlassDashboardShell>
+      <DashboardView
+        notebooks={notebooks} sortedNotebooks={sortedNotebooks}
+        dashboardLoading={dashboardLoading} dashboardError={dashboardError} dashboardInfo={dashboardInfo}
+        newNotebookName={newNotebookName} setNewNotebookName={setNewNotebookName}
+        newNotebookDescription={newNotebookDescription} setNewNotebookDescription={setNewNotebookDescription}
+        creatingNotebook={creatingNotebook} createNotebook={createNotebook}
+        deleteNotebook={deleteNotebook} refreshNotebooks={refreshNotebooks}
+        classroomId={classroomId} navigate={navigate}
+      />
     );
   }
 
   return (
-    <GlassDashboardShell contentClassName="max-w-[1600px]" panelClassName="p-4 md:p-5">
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-700 bg-gray-900/60 px-4 py-3">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-cyan-300">Notebook Workspace</p>
-            <h1 className="text-lg font-semibold text-gray-100">
-              {notebookDetail?.name || 'Loading notebook...'}
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)}
-              className="inline-flex items-center gap-1 rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800"
-            >
-              <IoArrowBackOutline /> Notebook List
-            </button>
-            <button
-              type="button"
-              onClick={() => refreshWorkspace(notebookId)}
-              className="inline-flex items-center gap-1 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs text-white hover:bg-cyan-500"
-            >
-              <IoMapOutline /> Refresh Workspace
-            </button>
-          </div>
-        </div>
-
-        {(workspaceError || chatError || sourceActionError) && (
-          <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-            {workspaceError || chatError || sourceActionError}
-          </div>
-        )}
-
-        {workspaceLoading ? (
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-300">
-            Loading personal workspace...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <section className="rounded-xl border border-gray-700 bg-gray-900/60 p-4 xl:col-span-3">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-100">
-                <IoDocumentTextOutline className="text-cyan-300" /> Sources
-              </h2>
-
-              <div className="mt-3 space-y-2">
-                <input
-                  value={sourceTitle}
-                  onChange={(event) => setSourceTitle(event.target.value)}
-                  placeholder="Source title (optional)"
-                  className="w-full rounded-lg border border-gray-700 bg-gray-950/70 px-2.5 py-2 text-xs text-gray-100"
-                />
-                <textarea
-                  value={sourceText}
-                  onChange={(event) => setSourceText(event.target.value)}
-                  rows={4}
-                  placeholder="Paste notes/text..."
-                  className="w-full rounded-lg border border-gray-700 bg-gray-950/70 px-2.5 py-2 text-xs text-gray-100"
-                />
-                <button
-                  type="button"
-                  onClick={addTextSource}
-                  disabled={sourceActionLoading}
-                  className="w-full rounded-lg bg-cyan-600 px-3 py-2 text-xs font-medium text-white hover:bg-cyan-500 disabled:opacity-70"
-                >
-                  Add Text Source
-                </button>
-
-                <div className="h-px bg-gray-700" />
-
-                <div className="flex gap-2">
-                  <input
-                    value={sourceUrl}
-                    onChange={(event) => setSourceUrl(event.target.value)}
-                    placeholder="https://example.com/article"
-                    className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950/70 px-2.5 py-2 text-xs text-gray-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={addUrlSource}
-                    disabled={sourceActionLoading}
-                    className="rounded-lg border border-cyan-400/40 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/10"
-                  >
-                    <IoLinkOutline />
-                  </button>
-                </div>
-
-                <div className="rounded-lg border border-dashed border-gray-600 p-2.5">
-                  <input
-                    type="file"
-                    onChange={(event) => setSourceFile(event.target.files?.[0] || null)}
-                    className="w-full text-xs text-gray-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={addFileSource}
-                    disabled={!sourceFile || sourceActionLoading}
-                    className="mt-2 inline-flex items-center gap-1 rounded-lg bg-gray-700 px-2.5 py-1.5 text-xs text-white hover:bg-gray-600 disabled:opacity-60"
-                  >
-                    <IoCloudUploadOutline /> Upload File
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-300">
-                  Linked Sources ({sources.length})
-                </h3>
-                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                  {sources.length === 0 ? (
-                    <p className="text-xs text-gray-500">No sources yet.</p>
-                  ) : (
-                    sources.map((source) => (
-                      <div key={source.id} className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                        <p className="text-xs font-medium text-gray-100">{source.title}</p>
-                        <p className="text-[11px] text-gray-500">{source.source_type} • chunks {source.chunk_count}</p>
-                        <button
-                          type="button"
-                          onClick={() => removeSource(source.id)}
-                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-rose-300 hover:text-rose-200"
-                        >
-                          <IoTrashOutline /> Remove
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-gray-700 bg-gray-900/60 p-4 xl:col-span-6">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-100">
-                <IoSparklesOutline className="text-cyan-300" /> Chat
-              </h2>
-
-              <div className="mt-3 h-[52vh] space-y-3 overflow-y-auto rounded-lg border border-gray-700 bg-gray-950/40 p-3">
-                {chatMessages.length === 0 ? (
-                  <p className="text-sm text-gray-500">
-                    Ask a question about your uploaded notes and sources.
-                  </p>
-                ) : (
-                  chatMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`rounded-lg px-3 py-2 text-sm ${
-                        message.role === 'assistant'
-                          ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-50'
-                          : 'border border-gray-700 bg-gray-800 text-gray-100'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                      {message.citationCount > 0 && (
-                        <p className="mt-1 text-[11px] text-cyan-200">
-                          Citations: {message.citationCount}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
-                {sendingChat && <p className="text-xs text-gray-400">Generating response...</p>}
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="Ask about your personal sources..."
-                  className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950/70 px-3 py-2 text-sm text-gray-100"
-                />
-                <button
-                  type="button"
-                  onClick={sendMessage}
-                  disabled={sendingChat}
-                  className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-70"
-                >
-                  Send
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-gray-700 bg-gray-900/60 p-4 xl:col-span-3">
-              <h2 className="text-sm font-semibold text-gray-100">Studio</h2>
-
-              <div className="mt-3 space-y-3 text-xs">
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Storage</p>
-                  <p className="mt-1 text-gray-100">{health?.storage?.sqlite || 'Unknown'}</p>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Vector Docs</p>
-                  <p className="mt-1 text-gray-100">{vectorStats?.vector_documents_count ?? 'n/a'}</p>
-                  <button
-                    type="button"
-                    onClick={initializeVectorDb}
-                    className="mt-2 rounded-lg border border-cyan-400/40 px-2.5 py-1 text-[11px] text-cyan-200 hover:bg-cyan-500/10"
-                  >
-                    Initialize Vector DB
-                  </button>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Default Chat Provider</p>
-                  <p className="mt-1 text-gray-100">{models?.default_chat_provider || 'unknown'}</p>
-                </div>
-
-                <div className="rounded-lg border border-gray-700 bg-gray-950/60 p-2.5">
-                  <p className="text-gray-300">Semantic Search</p>
-                  <div className="mt-2 flex gap-1.5">
-                    <input
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search notes"
-                      className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100"
-                    />
-                    <button
-                      type="button"
-                      onClick={runSearch}
-                      disabled={searchLoading}
-                      className="rounded-lg bg-gray-700 px-2 py-1.5 text-xs text-white hover:bg-gray-600"
-                    >
-                      <IoSearchOutline />
-                    </button>
-                  </div>
-
-                  <div className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
-                    {searchResults.map((result, index) => (
-                      <div key={`${result.source_id}-${index}`} className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5">
-                        <p className="text-[11px] text-gray-200">{result.title || result.source_id}</p>
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-gray-400">
-                          {result.snippet || result.content || 'No snippet'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {studioMessage && <p className="text-[11px] text-amber-200">{studioMessage}</p>}
-
-                <button
-                  type="button"
-                  onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500"
-                >
-                  <IoBookOutline /> Classroom Modules
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
-      </div>
-    </GlassDashboardShell>
+    <WorkspaceView
+      notebookDetail={notebookDetail} workspaceLoading={workspaceLoading}
+      workspaceError={workspaceError} chatError={chatError} sourceActionError={sourceActionError}
+      sources={sources} chatMessages={chatMessages}
+      chatInput={chatInput} setChatInput={setChatInput} sendingChat={sendingChat} sendMessage={sendMessage}
+      sourceTitle={sourceTitle} setSourceTitle={setSourceTitle}
+      sourceText={sourceText} setSourceText={setSourceText}
+      sourceUrl={sourceUrl} setSourceUrl={setSourceUrl}
+      sourceFile={sourceFile} setSourceFile={setSourceFile}
+      sourceActionLoading={sourceActionLoading}
+      addTextSource={addTextSource} addUrlSource={addUrlSource} addFileSource={addFileSource} removeSource={removeSource}
+      health={health} models={models} vectorStats={vectorStats}
+      searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+      searchResults={searchResults} searchLoading={searchLoading} studioMessage={studioMessage}
+      runSearch={runSearch} initializeVectorDb={initializeVectorDb}
+      refreshWorkspace={refreshWorkspace} notebookId={notebookId} classroomId={classroomId} navigate={navigate}
+    />
   );
 };
 
