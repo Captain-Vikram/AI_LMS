@@ -49,6 +49,21 @@ export const API_ENDPOINTS = {
   RESOURCE_SUMMARY_GET_OR_CREATE: "/api/resource/summary/get-or-create",
   RESOURCE_CHAT_HISTORY_PREFIX: "/api/resource/chat-history/", // append resourceId/studentId
 
+  // --- Skill Pathways ---
+  PATHWAYS_AVAILABLE: "/api/pathways/available",
+  PATHWAYS_MY_PROGRESS: "/api/pathways/progress/my-pathways",
+  PATHWAY_ENROLL: (id) => `/api/pathways/${id}/enroll`,
+  PATHWAY_STAGE_DETAILS: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}`,
+  PATHWAY_GENERATE_RESOURCES: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/generate-resources`,
+  PATHWAY_SUBMIT_TEST: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/submit-test`,
+
+  STUDIO_GENERATE: "/api/studio/generate",
+  STUDIO_SUMMARY: "/api/studio/summary",
+  STUDIO_QUIZ: "/api/studio/quiz",
+
+  PORTABLE_RAG_PODCAST_GENERATE: "/api/portable-rag/podcasts/generate",
+  PORTABLE_RAG_PODCAST_JOB_PREFIX: "/api/portable-rag/podcasts/jobs/", // append job id
+
   STUDENT_PROGRESS_MODULE_PREFIX: "/api/student/progress/", // append module id
 
   MODULE_ASSESSMENT_DRAFT_GENERATE: "/api/module-assessment/draft-generate",

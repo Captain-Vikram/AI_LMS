@@ -410,6 +410,9 @@ const DashboardView = ({
             Refresh
           </button>
         </div>
+      </GlassDashboardShell>
+    );
+  }
 
         {dashboardLoading ? (
           <div style={{ color: 'var(--muted)', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Loading…</div>

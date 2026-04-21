@@ -3,6 +3,7 @@ import sys
 import uuid
 from importlib import import_module
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from routes.auth_routes import router as auth_router
 from routes.onboarding_routes import router as onboarding_router
 from routes.youtube_education import router as youtube_router
 from routes.youtube_quiz_routes import router as youtube_quiz_router
+from routes.studio_routes import router as studio_router
 from routes.gamification_routes import router as gamification_router
 from routes.deepsearch import router as deepsearch_router
 from routes.rag_route import router as rag_router
@@ -25,6 +27,7 @@ from routes.dashboard_routes import router as dashboard_router
 from routes.announcements_routes import router as announcements_router
 from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
+from routes.skill_pathway_routes import router as skill_pathway_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo
 
@@ -56,11 +59,23 @@ load_dotenv(override=True)
 if not os.getenv("LMSTUDIO_URL"):
     print("Info: LMSTUDIO_URL not set. Defaulting to http://127.0.0.1:1234 for local inference.")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize async database connection on app startup and close on shutdown"""
+    print("🚀 Initializing async database connection...")
+    await init_db()
+    print("✅ Database initialized and ready for async operations")
+    yield
+    print("🛑 Shutting down database connection...")
+    await disconnect_from_mongo()
+    print("✅ Database connection closed")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="SkillMaster Assessment API",
     description="API for generating personalized skill assessments and quizzes using local LM Studio inference",
     version="1.1.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -73,23 +88,6 @@ app.add_middleware(
 )
 
 
-# Async database lifecycle events
-@app.on_event("startup")
-async def startup_db():
-    """Initialize async database connection on app startup"""
-    print("🚀 Initializing async database connection...")
-    await init_db()
-    print("✅ Database initialized and ready for async operations")
-
-
-@app.on_event("shutdown")
-async def shutdown_db():
-    """Close async database connection on app shutdown"""
-    print("🛑 Shutting down database connection...")
-    await disconnect_from_mongo()
-    print("✅ Database connection closed")
-
-
 # Include routers
 app.include_router(mcq_router)
 app.include_router(auth_router)
@@ -100,6 +98,7 @@ app.include_router(dashboard_router)
 app.include_router(announcements_router)
 app.include_router(youtube_router)
 app.include_router(youtube_quiz_router)
+app.include_router(studio_router)
 app.include_router(gamification_router)
 app.include_router(deepsearch_router)
 app.include_router(rag_router)
@@ -107,6 +106,10 @@ app.include_router(analytics_router)
 app.include_router(user_router)
 app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
+app.include_router(skill_pathway_router)
+
+# Mount portable RAG backend endpoints under a dedicated API prefix.
+portable_rag_backend = include_portable_rag_backend(app, prefix="/api/portable-rag")
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
 portable_rag_backend = None
@@ -227,6 +230,11 @@ async def root():
             # Analytics endpoints
             "/api/analytics/dashboard",
 
+            # Studio orchestration endpoints
+            "/api/studio/generate",
+            "/api/studio/summary",
+            "/api/studio/quiz",
+
             # User milestones endpoints
             "/api/user/milestones",
 
@@ -234,6 +242,8 @@ async def root():
             "/api/portable-rag/health",
             "/api/portable-rag/vector-db/init",
             "/api/portable-rag/models",
+            "/api/portable-rag/podcasts/generate",
+            "/api/portable-rag/podcasts/jobs/{job_id}",
 
             "/health/dependencies",
         ]

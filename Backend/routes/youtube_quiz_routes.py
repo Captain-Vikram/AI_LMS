@@ -1,6 +1,6 @@
 """YouTube quiz endpoints for strict resource progression."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
-from database import db
+from database_async import get_db
 from functions.youtube_quiz_functions import YouTubeQuizGenerator, extract_video_id
 from models.activity_feed import ActivityType
 from models.quiz_attempt import QuestionType, QuizAttempt, QuizQuestion
@@ -29,9 +29,13 @@ class GenerateQuizRequest(BaseModel):
     """Request to generate a quiz for a resource"""
     youtube_url: str = Field(..., description="YouTube video URL")
     resource_id: str = Field(..., description="Resource ID from database")
-    module_id: str = Field(..., description="Module ID from database")
-    classroom_id: str = Field(..., description="Classroom ID from database")
+    module_id: str = Field("standalone", description="Module ID from database")
+    classroom_id: str = Field("standalone", description="Classroom ID from database")
     student_id: str = Field(..., description="Student ID requesting this quiz")
+    pathway_quiz_prompt: Optional[str] = Field(
+        None,
+        description="Optional pathway stage quiz prompt to guide generated questions",
+    )
 
 
 class SubmitQuizRequest(BaseModel):
@@ -124,7 +128,7 @@ def _resolve_module_resource(
     return target_resource, ordered_resources, target_index
 
 
-def _require_previous_resource_completion(
+async def _require_previous_resource_completion(
     student_id: str,
     module_id: str,
     ordered_resources: List[Dict[str, Any]],
@@ -137,7 +141,8 @@ def _require_previous_resource_completion(
     if not previous_resource_id:
         return
 
-    previous_progress = db.student_progress.find_one(
+    db = get_db()
+    previous_progress = await db.student_progress.find_one(
         {
             "student_id": student_id,
             "module_id": module_id,
@@ -189,7 +194,7 @@ def _normalize_quiz_questions(raw_questions: List[Dict[str, Any]]) -> List[QuizQ
     return questions
 
 
-def _count_existing_attempts(student_id: str, resource_id: str) -> int:
+async def _count_existing_attempts(student_id: str, resource_id: str) -> int:
     student_candidates: List[Any] = [student_id]
     resource_candidates: List[Any] = [resource_id]
 
@@ -200,7 +205,8 @@ def _count_existing_attempts(student_id: str, resource_id: str) -> int:
     if resource_oid:
         resource_candidates.append(resource_oid)
 
-    return db.quiz_attempts.count_documents(
+    db = get_db()
+    return await db.quiz_attempts.count_documents(
         {
             "student_id": {"$in": student_candidates},
             "resource_id": {"$in": resource_candidates},
@@ -258,33 +264,39 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
     Creates a QuizAttempt record in MongoDB and returns the quiz.
     """
     try:
-        classroom_oid = _to_object_id(request.classroom_id)
-        module_oid = _to_object_id(request.module_id)
+        db = get_db()
+        classroom_id = str(request.classroom_id or "").strip() or "standalone"
+        module_id = str(request.module_id or "").strip() or "standalone"
+        is_pathway = classroom_id == "standalone" or module_id == "standalone"
+        
+        if not is_pathway:
+            classroom_oid = _to_object_id(classroom_id)
+            module_oid = _to_object_id(module_id)
 
-        if not classroom_oid or not module_oid:
-            raise HTTPException(status_code=400, detail="Invalid classroom or module id")
+            if not classroom_oid or not module_oid:
+                raise HTTPException(status_code=400, detail="Invalid classroom or module id")
 
-        classroom = db.classrooms.find_one({"_id": classroom_oid})
-        if not classroom:
-            raise HTTPException(status_code=404, detail="Classroom not found")
+            classroom = await db.classrooms.find_one({"_id": classroom_oid})
+            if not classroom:
+                raise HTTPException(status_code=404, detail="Classroom not found")
 
-        module = db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
-        if not module:
-            raise HTTPException(status_code=404, detail="Module not found")
+            module = await db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
+            if not module:
+                raise HTTPException(status_code=404, detail="Module not found")
 
-        module_resource, ordered_resources, target_index = _resolve_module_resource(
-            module,
-            request.resource_id,
-        )
-        if not module_resource:
-            raise HTTPException(status_code=404, detail="Resource not found")
+            module_resource, ordered_resources, target_index = _resolve_module_resource(
+                module,
+                request.resource_id,
+            )
+            if not module_resource:
+                raise HTTPException(status_code=404, detail="Resource not found")
 
-        _require_previous_resource_completion(
-            student_id=request.student_id,
-            module_id=str(module["_id"]),
-            ordered_resources=ordered_resources,
-            target_index=target_index,
-        )
+            await _require_previous_resource_completion(
+                student_id=request.student_id,
+                module_id=str(module["_id"]),
+                ordered_resources=ordered_resources,
+                target_index=target_index,
+            )
 
         normalized_youtube_url = _normalize_resource_url(request.youtube_url)
         if not normalized_youtube_url:
@@ -300,6 +312,7 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
             num_questions=5,
             difficulty="intermediate",
             languages=["en"],
+            assessment_context=request.pathway_quiz_prompt,
         )
 
         questions = _normalize_quiz_questions(quiz_content.get("questions", []))
@@ -307,13 +320,17 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=500, detail="Failed to generate quiz questions")
 
         total_points = sum(question.points for question in questions)
-        existing_attempts = _count_existing_attempts(request.student_id, request.resource_id)
+        existing_attempts = int(
+            await _count_existing_attempts(request.student_id, request.resource_id) or 0
+        )
+        new_quiz_oid = ObjectId()
 
         quiz_attempt = QuizAttempt(
+            _id=str(new_quiz_oid),
             resource_id=str(request.resource_id),
             student_id=str(request.student_id),
-            classroom_id=str(request.classroom_id),
-            module_id=str(request.module_id),
+            classroom_id=classroom_id,
+            module_id=module_id,
             questions=questions,
             total_points=total_points,
             started_at=datetime.utcnow(),
@@ -321,8 +338,9 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
         )
 
         # Save to database
-        quiz_dict = quiz_attempt.model_dump(by_alias=True, exclude={"id"})
-        result = db.quiz_attempts.insert_one(quiz_dict)
+        quiz_dict = quiz_attempt.model_dump(by_alias=True)
+        quiz_dict["_id"] = new_quiz_oid
+        result = await db.quiz_attempts.insert_one(quiz_dict)
 
         # Return quiz to student (without correct answers)
         return {
@@ -358,11 +376,12 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
     Grades the quiz, updates StudentProgress, and unlocks next resource if applicable.
     """
     try:
+        db = get_db()
         quiz_attempt_oid = _to_object_id(request.quiz_attempt_id)
         quiz_attempt_filter: Dict[str, Any] = (
             {"_id": quiz_attempt_oid} if quiz_attempt_oid else {"_id": request.quiz_attempt_id}
         )
-        quiz_doc = db.quiz_attempts.find_one(quiz_attempt_filter)
+        quiz_doc = await db.quiz_attempts.find_one(quiz_attempt_filter)
 
         if not quiz_doc:
             raise HTTPException(status_code=404, detail="Quiz attempt not found")
@@ -419,7 +438,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
         )
 
         # Update quiz attempt in database
-        db.quiz_attempts.update_one(
+        await db.quiz_attempts.update_one(
             {"_id": quiz_attempt_id},
             {
                 "$set": {
@@ -435,7 +454,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
         )
 
         # Update StudentProgress
-        progress = db.student_progress.find_one({
+        progress = await db.student_progress.find_one({
             "student_id": request.student_id,
             "module_id": quiz_attempt.module_id,
             "resource_id": quiz_attempt.resource_id
@@ -459,7 +478,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                 "created_at": now,
                 "updated_at": now,
             }
-            result = db.student_progress.insert_one(progress)
+            result = await db.student_progress.insert_one(progress)
             progress["_id"] = result.inserted_id
         else:
             passed_count = int(progress.get("passed_tests_count", 0) or 0)
@@ -473,7 +492,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
 
             highest_score = max(highest_score, score_percentage)
 
-            db.student_progress.update_one(
+            await db.student_progress.update_one(
                 {"_id": progress["_id"]},
                 {
                     "$set": {
@@ -488,7 +507,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                 }
             )
 
-        updated_progress = db.student_progress.find_one({"_id": progress["_id"]}) or progress
+        updated_progress = await db.student_progress.find_one({"_id": progress["_id"]}) or progress
         passed_tests_count = int(updated_progress.get("passed_tests_count", 0) or 0)
 
         # Check if student should unlock next resource
@@ -503,7 +522,104 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
         module_doc = None
         module_oid = _to_object_id(quiz_attempt.module_id)
         if module_oid:
-            module_doc = db.learning_modules.find_one({"_id": module_oid})
+            module_doc = await db.learning_modules.find_one({"_id": module_oid})
+
+        # If this quiz belongs to a standalone pathway (frontend uses "standalone"
+        # for classroom/module when running outside the classroom flow), update
+        # the student_pathway_progress document so the pathway tracker reflects
+        # passed tests and stage completion.
+        try:
+            if str(quiz_attempt.classroom_id) == "standalone" or str(quiz_attempt.module_id) == "standalone":
+                path_progress = await db.student_pathway_progress.find_one({
+                    "student_id": request.student_id,
+                    "stage_progress.resources": {"$elemMatch": {"resource_id": quiz_attempt.resource_id}}
+                })
+
+                if path_progress:
+                    stage_list = path_progress.get("stage_progress", [])
+                    target_stage_index = None
+
+                    for s in stage_list:
+                        for r in s.get("resources", []):
+                            if r.get("resource_id") == quiz_attempt.resource_id:
+                                # update resource counters
+                                r["tests_taken"] = int(r.get("tests_taken", 0)) + 1
+                                if passed:
+                                    r["passed_tests_count"] = int(r.get("passed_tests_count", 0)) + 1
+                                target_stage_index = s.get("stage_index")
+                                break
+                        if target_stage_index is not None:
+                            break
+
+                    path_update = {
+                        "stage_progress": stage_list,
+                        "updated_at": datetime.utcnow(),
+                    }
+
+                    if passed:
+                        today = now.date()
+                        last_test_at = path_progress.get("last_test_at")
+                        last_test_date = None
+                        if isinstance(last_test_at, datetime):
+                            last_test_date = last_test_at.date()
+                        elif isinstance(last_test_at, str):
+                            try:
+                                last_test_date = datetime.fromisoformat(last_test_at).date()
+                            except ValueError:
+                                last_test_date = None
+
+                        current_streak = int(path_progress.get("current_streak", 0) or 0)
+                        if last_test_date == today:
+                            updated_streak = max(current_streak, 1)
+                        elif last_test_date == (today - timedelta(days=1)):
+                            updated_streak = current_streak + 1
+                        else:
+                            updated_streak = 1
+
+                        path_update["current_streak"] = updated_streak
+                        path_update["last_test_at"] = now
+
+                    # Persist the updated stage list back to DB
+                    await db.student_pathway_progress.update_one(
+                        {"_id": path_progress["_id"]},
+                        {"$set": path_update}
+                    )
+
+                    # Check if the stage is now fully passed (all resources have >=2 passes)
+                    if target_stage_index is not None:
+                        stage_tracker = next((s for s in stage_list if s.get("stage_index") == target_stage_index), None)
+                        if stage_tracker:
+                            all_passed = all(int(r.get("passed_tests_count", 0)) >= 2 for r in stage_tracker.get("resources", []))
+                            if all_passed:
+                                # mark stage completed and unlock next
+                                stage_tracker["status"] = "completed"
+                                next_idx = target_stage_index + 1
+                                for s in stage_list:
+                                    if s.get("stage_index") == next_idx:
+                                        s["status"] = "in-progress"
+                                        break
+
+                                await db.student_pathway_progress.update_one(
+                                    {"_id": path_progress["_id"]},
+                                    {"$set": path_update}
+                                )
+
+                                progress_update["is_unlocked"] = True
+                                progress_update["unlocked_resource_id"] = None
+                                progress_update["message"] = "Test passed! Stage completed and Next Stage Unlocked!"
+
+                                await log_activity(
+                                    classroom_id=quiz_attempt.classroom_id,
+                                    action_type=ActivityType.RESOURCE_UNLOCKED,
+                                    student_id=request.student_id,
+                                    resource_id=None,
+                                    details={"source_resource_id": quiz_attempt.resource_id},
+                                )
+                            else:
+                                progress_update["message"] = "Test recorded for pathway resource. Keep going to master it."
+        except Exception as e:
+            # Do not block quiz submission on pathway update failure; log and continue
+            print(f"Warning: failed updating pathway progress: {e}")
 
         if passed and passed_tests_count >= 2:
             progress_update["is_unlocked"] = True
@@ -512,7 +628,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
             progress_update["unlocked_resource_id"] = next_resource_id
 
             if next_resource_id:
-                next_progress = db.student_progress.find_one(
+                next_progress = await db.student_progress.find_one(
                     {
                         "student_id": request.student_id,
                         "module_id": quiz_attempt.module_id,
@@ -520,7 +636,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                     }
                 )
                 if next_progress:
-                    db.student_progress.update_one(
+                    await db.student_progress.update_one(
                         {"_id": next_progress["_id"]},
                         {
                             "$set": {
@@ -531,7 +647,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                         },
                     )
                 else:
-                    db.student_progress.insert_one(
+                    await db.student_progress.insert_one(
                         {
                             "student_id": request.student_id,
                             "classroom_id": quiz_attempt.classroom_id,
@@ -554,7 +670,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                     "Great work. You completed this resource and unlocked the next one."
                 )
 
-                log_activity(
+                await log_activity(
                     classroom_id=quiz_attempt.classroom_id,
                     action_type=ActivityType.RESOURCE_UNLOCKED,
                     student_id=request.student_id,
@@ -578,7 +694,7 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                 )
 
         # Log activity
-        log_activity(
+        await log_activity(
             classroom_id=quiz_attempt.classroom_id,
             action_type=ActivityType.QUIZ_PASSED if passed else ActivityType.QUIZ_FAILED,
             student_id=request.student_id,
@@ -634,7 +750,7 @@ def generate_quiz_feedback(score_percentage: float, passed: bool, answers: List[
     return "\n".join(feedback_lines)
 
 
-def log_activity(
+async def log_activity(
     classroom_id: str,
     action_type: ActivityType,
     student_id: str,
@@ -654,6 +770,7 @@ def log_activity(
             "details": details or {},
             "created_at": datetime.utcnow(),
         }
-        db.activity_feed.insert_one(activity)
+        db = get_db()
+        await db.activity_feed.insert_one(activity)
     except Exception as e:
         print(f"Error logging activity: {e}")

@@ -297,7 +297,13 @@ class YouTubeQuizGenerator:
                 "summary": f"Error extracting core topics: {str(e)}"
             }
 
-    def generate_quiz_from_transcript(self, transcript_text, num_questions=5, difficulty="intermediate"):
+    def generate_quiz_from_transcript(
+        self,
+        transcript_text,
+        num_questions=5,
+        difficulty="intermediate",
+        assessment_context=None,
+    ):
         """
         Generate a quiz based on transcript text.
 
@@ -309,11 +315,20 @@ class YouTubeQuizGenerator:
         Returns:
             dict: Generated quiz with questions and answers
         """
+        context_block = ""
+        if assessment_context and str(assessment_context).strip():
+            context_block = f"""
+        Pathway assessment context (must influence question selection and phrasing):
+        {str(assessment_context).strip()}
+        """
+
         # Create the prompt
         prompt = f"""
         You are an expert in creating educational assessments. Generate a quiz based on the following video transcript:
 
         {transcript_text[:8000]}  # Limited to 8000 chars to avoid token limits
+
+        {context_block}
 
         Create {num_questions} multiple-choice questions (with 4 options each) to test understanding of the key concepts in this video. 
         The questions should be at {difficulty} level.
@@ -384,7 +399,14 @@ class YouTubeQuizGenerator:
 
         return {"questions": questions}
 
-    def generate_quiz_from_video_url(self, video_url, num_questions=5, difficulty="intermediate", languages=['en']):
+    def generate_quiz_from_video_url(
+        self,
+        video_url,
+        num_questions=5,
+        difficulty="intermediate",
+        languages=['en'],
+        assessment_context=None,
+    ):
         """
         Generate a quiz from a YouTube video URL.
 
@@ -412,7 +434,12 @@ class YouTubeQuizGenerator:
         transcript_text = self.prepare_transcript_for_quiz(transcriptions)
 
         # Generate quiz
-        quiz = self.generate_quiz_from_transcript(transcript_text, num_questions, difficulty)
+        quiz = self.generate_quiz_from_transcript(
+            transcript_text,
+            num_questions,
+            difficulty,
+            assessment_context=assessment_context,
+        )
 
         # Combine everything
         result = {

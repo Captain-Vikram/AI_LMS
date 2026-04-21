@@ -24,6 +24,9 @@ import ClassroomSettings from "./pages/Classroom/ClassroomSettings";
 import InteractiveLessonViewer from "./components/Classroom/InteractiveLessonViewer";
 import TeacherGradingDashboard from "./components/Classroom/TeacherGradingDashboard";
 import StudentProgressTimeline from "./components/Classroom/StudentProgressTimeline";
+import SkillPathwaysCatalog from "./components/Skill/SkillPathwaysCatalog";
+import SkillPathwayTracker from "./components/Skill/SkillPathwayTracker";
+import SkillPathwayResource from "./components/Skill/SkillPathwayResource";
 import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import apiClient from "./services/apiClient";
@@ -166,6 +169,38 @@ const App = () => {
               element={
                 <UserProgressRoute>
                   <ClassroomList />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/skills"
+              element={
+                <UserProgressRoute>
+                  <SkillPathwaysCatalog />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/skill-pathway/:id"
+              element={
+                <UserProgressRoute>
+                  <Dashboard />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/skill-pathway/:id/resources"
+              element={
+                <UserProgressRoute>
+                  <SkillPathwayTracker />
+                </UserProgressRoute>
+              }
+            />
+            <Route
+              path="/skill-pathway/:id/stage/:stageIndex/resource/:resourceId"
+              element={
+                <UserProgressRoute>
+                  <SkillPathwayResource />
                 </UserProgressRoute>
               }
             />

@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
 import ClassroomCard from './ClassroomCard';
 import { FiPlus, FiLogIn, FiAlertTriangle, FiCheckCircle, FiLoader, FiGrid, FiList } from 'react-icons/fi';
 
 const ClassroomList = () => {
+  const navigate = useNavigate();
   const [classrooms, setClassrooms] = useState({ as_teacher: [], as_student: [] });
   const [enrolledClassrooms, setEnrolledClassrooms] = useState([]);
+  const [mySkills, setMySkills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [bootstrappingDemo, setBootstrappingDemo] = useState(false);
@@ -26,6 +28,18 @@ const ClassroomList = () => {
         const list = Array.isArray(res?.data?.classrooms) ? res.data.classrooms : Array.isArray(res?.classrooms) ? res.classrooms : [];
         setEnrolledClassrooms(list);
         setClassrooms({ as_teacher: [], as_student: [] });
+
+        // Load standalone skills for students
+        if (API_ENDPOINTS.PATHWAYS_MY_PROGRESS) {
+          try {
+            const skillsRes = await apiClient.get(API_ENDPOINTS.PATHWAYS_MY_PROGRESS);
+            if (skillsRes && skillsRes.status === 'success') {
+              setMySkills(skillsRes.data || []);
+            }
+          } catch (skErr) {
+            console.error("Failed to load skills", skErr);
+          }
+        }
       } else {
         const res = await apiClient.get(API_ENDPOINTS.CLASSROOM_LIST);
         const payload = res?.data || res || {};
@@ -139,19 +153,70 @@ const ClassroomList = () => {
         <Header />
 
         {userRole === 'student' ? (
-          studentHasClasses ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {enrolledClassrooms.map((c) => <ClassroomCard key={c.classroom_id} classroom={c} role="student" />)}
-            </div>
-          ) : (
-            <div className="text-center rounded-2xl border-2 border-dashed border-gray-700 bg-gray-900/50 p-12">
-              <h3 className="text-2xl font-bold text-white mb-2">No Enrolled Classes Yet</h3>
-              <p className="text-gray-400 mb-6 max-w-md mx-auto">Join a class using an enrollment code to unlock your student dashboard and start learning.</p>
-              <Link to="/classroom/join" className="inline-flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg text-base font-semibold">
-                <FiLogIn /> Join with Code
-              </Link>
-            </div>
-          )
+          <>
+            <Section title="My Classes">
+              {studentHasClasses ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {enrolledClassrooms.map((c) => <ClassroomCard key={c.classroom_id} classroom={c} role="student" />)}
+                </div>
+              ) : (
+                <div className="text-center rounded-2xl border-2 border-dashed border-gray-700 bg-gray-900/50 p-12">
+                  <h3 className="text-2xl font-bold text-white mb-2">No Enrolled Classes Yet</h3>
+                  <p className="text-gray-400 mb-6 max-w-md mx-auto">Join a class using an enrollment code to unlock your student dashboard and start learning.</p>
+                  <Link to="/classroom/join" className="inline-flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg text-base font-semibold">
+                    <FiLogIn /> Join with Code
+                  </Link>
+                </div>
+              )}
+            </Section>
+
+            <Section title="Skills">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Default Entry card */}
+                <div onClick={() => navigate('/skills')} className="cursor-pointer group rounded-2xl bg-gradient-to-br from-indigo-900/50 to-purple-900/30 border border-indigo-500/30 hover:border-indigo-400 p-6 flex flex-col justify-center items-center text-center shadow-lg transition-all h-full min-h-[220px]">
+                  <div className="bg-indigo-500/20 text-indigo-300 p-4 rounded-full mb-4 group-hover:scale-110 group-hover:bg-indigo-500/40 transition-transform">
+                    <FiPlus className="text-3xl" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">Learn New Skill</h3>
+                  <p className="text-indigo-200/70 text-sm">Explore standalone learning pathways</p>
+                </div>
+
+                {/* Enrolled skills */}
+                {mySkills.map((skill) => {
+                  const stageProgress = Array.isArray(skill?.stage_progress) ? skill.stage_progress : [];
+                  const currentStageIndex = stageProgress.find((s) => s.status === 'in-progress')?.stage_index || 1;
+                  const totalStages = Number(skill?.pathway_details?.total_stages) || stageProgress.length || 0;
+                  const pathwayId = String(skill?.pathway_id || '').trim();
+
+                  if (!pathwayId) {
+                    return null;
+                  }
+
+                  return (
+                    <div key={skill._id || pathwayId} onClick={() => navigate(`/skill-pathway/${pathwayId}`)} className="cursor-pointer group rounded-2xl bg-gray-800/80 border border-gray-700 hover:border-indigo-500/50 p-6 relative overflow-hidden transition-all h-full min-h-[220px] flex flex-col">
+                      <div className="absolute top-0 right-0 p-4">
+                        <span className="px-3 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs font-semibold">
+                          Stage {currentStageIndex}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-bold text-white mb-2 group-hover:text-indigo-300 transition-colors pr-16">{skill.pathway_details?.title || 'Skill Pathway'}</h3>
+                        <p className="text-gray-400 text-sm line-clamp-3">{skill.pathway_details?.description}</p>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-gray-700/50 flex justify-between items-center text-sm">
+                        <span className="text-gray-300 flex items-center gap-2">
+                          <FiList /> {totalStages} Stages
+                        </span>
+                        <span className="text-indigo-400 font-medium group-hover:translate-x-1 transition-transform">
+                          Continue &rarr;
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          </>
         ) : (
           <div className="space-y-8">
             <Section title="My Teaching Spaces">

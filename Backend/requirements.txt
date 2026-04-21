@@ -10,6 +10,7 @@ PyJWT>=2.3.0
 # These enable fully asynchronous, non-blocking I/O operations
 motor>=3.3.0  # Async MongoDB driver (Motor) - enables non-blocking database queries
 httpx>=0.25.0  # Async HTTP client - enables non-blocking external API calls
+# Deepgram STT fallback is implemented over httpx (no extra Deepgram SDK dependency required).
 
 # LangChain and LLM integration (pinned for compatibility)
 langchain>=0.3.0

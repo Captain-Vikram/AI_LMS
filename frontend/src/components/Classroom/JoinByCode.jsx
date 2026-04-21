@@ -16,9 +16,10 @@ const JoinByCode = () => {
     setError(null);
     setLoading(true);
     try {
-      const found = await apiClient.get(`${API_ENDPOINTS.CLASSROOM_FIND_BY_CODE}?code=${encodeURIComponent(code)}`);
+      const normalizedCode = code.trim();
+      const found = await apiClient.get(`${API_ENDPOINTS.CLASSROOM_FIND_BY_CODE}?code=${encodeURIComponent(normalizedCode)}`);
       const classId = found.classroom_id;
-      await apiClient.post(`${API_ENDPOINTS.CLASSROOM_JOIN.replace('{id}', classId)}?enrollment_code=${encodeURIComponent(code)}`, {});
+      await apiClient.post(`${API_ENDPOINTS.CLASSROOM_JOIN.replace('{id}', classId)}?enrollment_code=${encodeURIComponent(normalizedCode)}`, {});
       navigate(`/classroom/${classId}`);
     } catch (err) {
       setError(err.message || 'Failed to join classroom');
@@ -59,7 +60,7 @@ const JoinByCode = () => {
               <IoKeyOutline className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                onChange={(e) => setCode(e.target.value)}
                 placeholder="ABC123"
                 className="w-full rounded-lg border border-gray-600 bg-gray-800 py-2 pl-9 pr-3 text-white placeholder-gray-500 focus:border-cyan-500 focus:outline-none"
                 required
