@@ -8,7 +8,9 @@ import { BackgroundProvider } from "./context/BackgroundContext";
 import Register from "./components/Register/Register";
 import Login from "./components/Login";
 import Onboarding from "./components/onboarding/Onboarding";
+import Dashboard from "./components/Dashboard";
 import Signout from "./components/Signout";
+import OverallStatistics from "./components/OverallStatistics";
 import ClassroomList from "./components/Classroom/ClassroomList";
 import CreateClassroom from "./components/Classroom/CreateClassroom";
 import JoinByCode from "./components/Classroom/JoinByCode";
@@ -151,7 +153,14 @@ const App = () => {
                 </ProtectedRoute>
               }
             />
-            {/* Removed legacy global /dashboard route; use classroom dashboards */}
+            <Route
+              path="/dashboard"
+              element={
+                <UserProgressRoute>
+                  <Dashboard />
+                </UserProgressRoute>
+              }
+            />
             <Route
               path="/classrooms"
               element={
@@ -272,7 +281,7 @@ const App = () => {
                 </UserProgressRoute>
               }
             />
-            {/* Removed overall statistics route (internal analytics) */}
+            <Route path="/overall-statistics" element={<OverallStatistics />} />
           </Routes>
         </BrowserRouter>
         </ClassroomProvider>
