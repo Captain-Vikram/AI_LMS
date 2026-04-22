@@ -64,6 +64,7 @@ For full integration details with Mongo-backed host systems, see `INTEGRATION_FA
 ## Key Environment Variables
 
 - `PORTABLE_DATA_DIR`
+- `VECTOR_DB_API_BASE_URL` (optional external vector DB/API endpoint metadata; recommended host port `18001`)
 - `DEFAULT_CHAT_PROVIDER`, `DEFAULT_EMBEDDING_PROVIDER`
 - `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, `LOCAL_EMBEDDING_MODEL`
 - `LMSTUDIO_BASE_URL`, `LMSTUDIO_API_KEY`, `LMSTUDIO_CHAT_MODEL`, `LMSTUDIO_EMBEDDING_MODEL`

@@ -57,6 +57,7 @@ Common values used by backend code:
 Portable RAG integration values (new):
 
 - `PORTABLE_DATA_DIR` (default `./data/portable_rag`)
+- `VECTOR_DB_API_BASE_URL` (optional external vector DB/API URL, recommended host port `18001`)
 - `DEFAULT_CHAT_PROVIDER` (`local`, `lmstudio`, `gemini`)
 - `DEFAULT_EMBEDDING_PROVIDER` (`local`, `lmstudio`, `gemini`)
 - `LMSTUDIO_BASE_URL` (OpenAI-compatible endpoint, usually `http://localhost:1234/v1`)
@@ -109,46 +110,28 @@ No mandatory transfer from vector DB to MongoDB is required for this integration
 
 ## Docker Setup (Database)
 
-### MongoDB with Docker
+Backend stays on `8000` by default. To avoid collisions, run vector DB on a different host port.
 
-Start MongoDB container:
-
-```powershell
-docker run -d `
-  --name quasar-mongodb `
-  -p 27017:27017 `
-  -e MONGO_INITDB_ROOT_USERNAME=root `
-  -e MONGO_INITDB_ROOT_PASSWORD=password `
-  -v mongodb_data:/data/db `
-  mongo:latest
-```
-
-Or using `docker-compose` (create `docker-compose.yml`):
-
-```yaml
-version: "3.8"
-services:
-  mongodb:
-    image: mongo:latest
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: password
-    volumes:
-      - mongodb_data:/data/db
-
-volumes:
-  mongodb_data:
-```
-
-Then run:
+Preferred (MongoDB + Vector DB together):
 
 ```powershell
-docker-compose up -d
+docker compose -f docker-compose.infra.yml up -d
 ```
 
-Note: If another container already binds host port `8000` (for example `open-notebook-surrealdb-1`), your FastAPI backend cannot bind the same port. Stop or remap that container before running backend on `:8000`.
+Default host ports in `docker-compose.infra.yml`:
+
+- MongoDB: `27017 -> 27017`
+- Vector DB (SurrealDB): `18001 -> 8000`
+
+You can override ports at runtime without editing files:
+
+```powershell
+$env:MONGO_HOST_PORT = "27017"
+$env:VECTOR_DB_HOST_PORT = "18001"
+docker compose -f docker-compose.infra.yml up -d
+```
+
+This keeps backend `:8000` isolated even if vector DB startup/config fails.
 
 **Default connection string** (if not using auth):
 
@@ -163,6 +146,12 @@ mongodb://root:password@localhost:27017/quasar
 ```
 
 Set `MONGO_URI` in `.env` to match your setup.
+
+If you want backend health checks and portable RAG health metadata to track your vector endpoint, set:
+
+```env
+VECTOR_DB_API_BASE_URL=http://127.0.0.1:18001
+```
 
 ## Documentation
 

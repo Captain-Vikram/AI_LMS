@@ -1,0 +1,23 @@
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: quasar-mongo
+    restart: unless-stopped
+    ports:
+      - "${MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      - ./mongo-data:/data/db
+
+  vector-db:
+    image: surrealdb/surrealdb:v2
+    container_name: quasar-vector-db
+    user: "0:0"
+    restart: unless-stopped
+    command: start --log info --user root --pass root file:/data/quasar-vector.db
+    ports:
+      - "${VECTOR_DB_HOST_PORT:-18001}:8000"
+    volumes:
+      - surrealdb_data:/data
+
+volumes:
+  surrealdb_data:

@@ -121,11 +121,17 @@ def build_router(backend: PortableRAGBackend) -> APIRouter:
 
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
+        external_vector_url = backend.settings.resolve_vector_db_api_base_url()
         return HealthResponse(
             ok=True,
             storage={
                 "sqlite": str(backend.settings.resolve_sqlite_path()),
                 "vector": str(backend.settings.resolve_vector_dir()),
+            },
+            vector_db={
+                "mode": "local_chroma",
+                "external_configured": bool(external_vector_url),
+                "external_base_url": external_vector_url or "",
             },
         )
 

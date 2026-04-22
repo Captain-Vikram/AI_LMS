@@ -29,6 +29,13 @@ class PortableRAGSettings(BaseSettings):
         default="portable_rag_chunks",
         description="Collection name for the vector store.",
     )
+    vector_db_api_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional external vector DB API base URL for deployment health visibility "
+            "(for example http://localhost:18001)."
+        ),
+    )
 
     default_chunk_size: int = Field(default=1200, ge=200, le=4000)
     default_chunk_overlap: int = Field(default=180, ge=0, le=1000)
@@ -168,6 +175,11 @@ class PortableRAGSettings(BaseSettings):
         path = self.resolve_data_dir() / "vector_store"
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def resolve_vector_db_api_base_url(self) -> str | None:
+        if not self.vector_db_api_base_url:
+            return None
+        return self.vector_db_api_base_url.strip().rstrip("/")
 
     def resolve_upload_dir(self) -> Path:
         path = self.resolve_data_dir() / "uploads"

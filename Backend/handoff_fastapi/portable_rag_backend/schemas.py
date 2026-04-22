@@ -301,3 +301,4 @@ class SynthesizeRequest(BaseModel):
 class HealthResponse(BaseModel):
     ok: bool
     storage: dict[str, str]
+    vector_db: dict[str, str | bool] | None = None

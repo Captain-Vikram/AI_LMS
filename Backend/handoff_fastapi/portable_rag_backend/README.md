@@ -5,6 +5,7 @@ This module exposes lightweight podcast/audio features in the portable export.
 Configuration
 
 - Set `REMOTE_API_BASE_URL` (or `remote_api_base_url` in `PortableRAGSettings`) to forward requests to a running Open Notebook API (for example `http://localhost:5055/api`). If not set, the portable backend will run a local "audio overview" fallback.
+- Set `VECTOR_DB_API_BASE_URL` (or `vector_db_api_base_url` in `PortableRAGSettings`) to record your external vector endpoint (for example `http://localhost:18001`) in health metadata. Core portable retrieval still uses local Chroma persistence.
 - Forwarding tries both base variants automatically: with and without `/api` suffix.
 
 Endpoints (mounted under your portable router prefix; default in handoff docs is `/rag`)

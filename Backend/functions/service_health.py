@@ -65,6 +65,39 @@ def _probe_lmstudio(timeout_seconds: int = 2) -> Dict[str, Any]:
     }
 
 
+def _probe_vector_db_optional(timeout_seconds: int = 2) -> Dict[str, Any]:
+    base_url = (os.getenv("VECTOR_DB_API_BASE_URL") or "").strip().rstrip("/")
+    if not base_url:
+        return {
+            "status": "disabled",
+            "message": "External vector DB probe is disabled (VECTOR_DB_API_BASE_URL not set).",
+            "base_url": "",
+        }
+
+    probe_errors = []
+    for path in ("/health", "/status", "/"):
+        try:
+            response = requests.get(f"{base_url}{path}", timeout=timeout_seconds)
+            if response.status_code < 500:
+                return {
+                    "status": "up",
+                    "message": "External vector DB endpoint is reachable.",
+                    "base_url": base_url,
+                    "probe_path": path,
+                    "status_code": response.status_code,
+                }
+            probe_errors.append(f"{path}: HTTP {response.status_code}")
+        except requests.RequestException as exc:
+            probe_errors.append(f"{path}: {exc.__class__.__name__}: {exc}")
+
+    return {
+        "status": "degraded",
+        "message": "External vector DB endpoint is configured but currently unreachable.",
+        "base_url": base_url,
+        "error": " | ".join(probe_errors),
+    }
+
+
 def _probe_external_api_config() -> Dict[str, Any]:
     required_keys = [
         "GOOGLE_API_KEY",
@@ -217,6 +250,7 @@ def _probe_cloud_llm_fallback() -> Dict[str, Any]:
 def get_dependency_health_snapshot() -> Dict[str, Any]:
     mongodb = _probe_mongodb()
     lmstudio = _probe_lmstudio()
+    vector_db = _probe_vector_db_optional()
     external_apis = _probe_external_api_config()
     cloud_llm_fallback = _probe_cloud_llm_fallback()
 
@@ -225,12 +259,13 @@ def get_dependency_health_snapshot() -> Dict[str, Any]:
     fallback_up = cloud_llm_fallback["status"] == "up"
     external_degraded = external_apis["status"] == "degraded"
     fallback_degraded = cloud_llm_fallback["status"] == "down"
+    vector_degraded = vector_db["status"] in {"down", "degraded"}
 
     if mongodb_down:
         overall_status = "down"
     elif lmstudio_down and not fallback_up:
         overall_status = "down"
-    elif external_degraded or (lmstudio_down and fallback_up) or fallback_degraded:
+    elif external_degraded or (lmstudio_down and fallback_up) or fallback_degraded or vector_degraded:
         overall_status = "degraded"
     else:
         overall_status = "healthy"
@@ -241,6 +276,7 @@ def get_dependency_health_snapshot() -> Dict[str, Any]:
         "dependencies": {
             "mongodb": mongodb,
             "lmstudio": lmstudio,
+            "vector_db": vector_db,
             "external_apis": external_apis,
             "cloud_llm_fallback": cloud_llm_fallback,
         },
