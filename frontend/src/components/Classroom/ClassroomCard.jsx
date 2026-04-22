@@ -1,19 +1,51 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { FiArrowRight, FiBook, FiUser, FiUsers } from 'react-icons/fi';
+import { useNavigate } from 'react-router-dom';
+import { FiArrowRight, FiBook, FiLoader, FiUser, FiUsers } from 'react-icons/fi';
+import apiClient from '../../services/apiClient';
+import { API_ENDPOINTS } from '../../config/api';
 
 const ClassroomCard = ({ classroom, role }) => {
+  const navigate = useNavigate();
+  const [isOpening, setIsOpening] = React.useState(false);
   const isTeacher = role === 'teacher';
   const cardColors = isTeacher
     ? 'from-gray-800/60 to-gray-900/50 hover:border-blue-500/70'
     : 'from-gray-800/60 to-gray-900/50 hover:border-emerald-500/70';
+  const classroomId = classroom.classroom_id || classroom._id;
   
   const iconBgColor = isTeacher ? 'bg-blue-500/10' : 'bg-emerald-500/10';
   const iconColor = isTeacher ? 'text-blue-400' : 'text-emerald-400';
 
+  const handleOpenClassroom = async () => {
+    if (!classroomId || isOpening) {
+      return;
+    }
+
+    setIsOpening(true);
+
+    try {
+      const response = await apiClient.post(
+        `${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${classroomId}`
+      );
+      const token = response?.access_token || response?.token;
+
+      if (token) {
+        localStorage.setItem('token', token);
+        localStorage.setItem('isLoggedIn', 'true');
+      }
+    } catch {
+      // Continue navigation even if token refresh fails.
+    } finally {
+      setIsOpening(false);
+      navigate(`/classroom/${classroomId}/dashboard`);
+    }
+  };
+
   return (
-    <Link 
-      to={`/classroom/${classroom.classroom_id || classroom._id}`} 
+    <button
+      type="button"
+      onClick={handleOpenClassroom}
+      disabled={isOpening}
       className={`group block rounded-2xl bg-gradient-to-br p-5 transition-all duration-300 border border-gray-700/80 shadow-lg hover:shadow-2xl hover:-translate-y-1 ${cardColors}`}
     >
       <div className="flex items-start justify-between">
@@ -30,10 +62,14 @@ const ClassroomCard = ({ classroom, role }) => {
         </div>
       </div>
       <div className="mt-4 flex items-center justify-end text-sm text-cyan-400 group-hover:text-white transition-colors duration-300">
-        Open Classroom
-        <FiArrowRight className="ml-2 transform transition-transform duration-300 group-hover:translate-x-1" />
+        {isOpening ? 'Opening...' : 'Open Classroom'}
+        {isOpening ? (
+          <FiLoader className="ml-2 animate-spin" />
+        ) : (
+          <FiArrowRight className="ml-2 transform transition-transform duration-300 group-hover:translate-x-1" />
+        )}
       </div>
-    </Link>
+    </button>
   );
 };
 

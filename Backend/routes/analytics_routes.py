@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from bson import ObjectId
 import jwt
 
@@ -193,7 +193,7 @@ async def get_dashboard_analytics(authorization: str = Header(None)):
 from fastapi import Depends
 from services.classroom_analytics_service import ClassroomAnalyticsService
 from services.rbac_service import RBACService
-from functions.utils import get_current_user
+from functions.utils import get_current_user, normalize_user_role
 
 
 @router.get("/classroom/{classroom_id}")
@@ -262,5 +262,41 @@ async def get_my_progress(
     try:
         progress = analytics_svc.get_student_progress(classroom_id, current_user["user_id"])
         return {"status": "success", "data": progress}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/classroom/{classroom_id}/ai-questions-by-module")
+async def get_ai_questions_by_module(
+    classroom_id: str,
+    student_id: str = Query(default=""),
+    current_user = Depends(get_current_user)
+):
+    """Get ask-AI heatmap counts grouped by module and source for classroom or current student."""
+    db = get_db()
+    rbac = RBACService(db)
+
+    normalized_role = normalize_user_role(current_user.get("role"))
+    is_teacher = await rbac.is_teacher(current_user["user_id"], classroom_id)
+    is_student = await rbac.is_student(current_user["user_id"], classroom_id)
+
+    if not is_teacher and not is_student and normalized_role != "admin":
+        raise HTTPException(status_code=403, detail="Not a member of this classroom")
+
+    requested_student_id = (student_id or "").strip() or None
+    if is_teacher or normalized_role == "admin":
+        resolved_student_id = requested_student_id
+    else:
+        if requested_student_id and requested_student_id != current_user["user_id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Students can only view their own ask-AI heatmap",
+            )
+        resolved_student_id = current_user["user_id"]
+
+    analytics_svc = ClassroomAnalyticsService(db)
+    try:
+        payload = analytics_svc.get_ai_questions_by_module(classroom_id, resolved_student_id)
+        return {"status": "success", "data": payload}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

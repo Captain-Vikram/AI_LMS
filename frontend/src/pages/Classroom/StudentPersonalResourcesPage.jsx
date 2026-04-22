@@ -17,6 +17,7 @@ import {
 } from 'react-icons/io5';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
+import IconsCarousel from '../../components/IconsCarousel';
 
 const PORTABLE_RAG_PREFIX = '/api/portable-rag';
 const portablePath = (path) => `${PORTABLE_RAG_PREFIX}${path}`;
@@ -118,30 +119,28 @@ const toSafeFileName = (value) => {
 ───────────────────────────────────────────────────────────────*/
 const Styles = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
-
     :root {
-      --ink:       #0e0f13;
-      --surface:   #13151c;
-      --card:      #181b24;
-      --border:    rgba(255,255,255,0.07);
-      --border-hi: rgba(255,255,255,0.13);
-      --muted:     #5a5f72;
-      --text:      #e4e6f0;
-      --text-dim:  #8b90a8;
-      --accent:    #6c8fff;
-      --accent2:   #a78bfa;
-      --glow:      rgba(108,143,255,0.18);
-      --glow2:     rgba(167,139,250,0.14);
-      --success:   #34d399;
-      --danger:    #f87171;
+      --ink:       transparent;
+      --surface:   rgba(17, 24, 39, 0.4);
+      --card:      rgba(31, 41, 55, 0.6);
+      --border:    rgba(55, 65, 81, 0.5);
+      --border-hi: rgba(75, 85, 99, 0.8);
+      --muted:     #9ca3af;
+      --text:      #f9fafb;
+      --text-dim:  #d1d5db;
+      --accent:    #06b6d4;
+      --accent2:   #6366f1;
+      --glow:      rgba(6, 182, 212, 0.2);
+      --glow2:     rgba(99, 102, 241, 0.15);
+      --success:   #10b981;
+      --danger:    #f43f5e;
     }
 
     .nb-root * { box-sizing: border-box; }
 
     .nb-root {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--ink);
+      font-family: inherit;
+      background: transparent;
       color: var(--text);
       min-height: 100vh;
     }
@@ -155,11 +154,12 @@ const Styles = () => (
     /* ── Card ── */
     .nb-card {
       background: var(--card);
+      backdrop-filter: blur(12px);
       border: 1px solid var(--border);
       border-radius: 16px;
       transition: border-color .2s;
     }
-    .nb-card:hover { border-color: var(--border-hi); }
+    .nb-card:hover { border-color: var(--border-hi); shadow: 0 12px 32px rgba(0,0,0,0.5); }
 
     /* ── Inputs ── */
     .nb-input {
@@ -169,7 +169,7 @@ const Styles = () => (
       border-radius: 10px;
       padding: 10px 14px;
       color: var(--text);
-      font-family: 'DM Sans', sans-serif;
+      font-family: inherit;
       font-size: 13px;
       outline: none;
       transition: border-color .2s, box-shadow .2s;
@@ -187,7 +187,7 @@ const Styles = () => (
       align-items: center;
       gap: 7px;
       border-radius: 10px;
-      font-family: 'DM Sans', sans-serif;
+      font-family: inherit;
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
@@ -251,7 +251,8 @@ const Styles = () => (
       overflow: hidden;
       border-radius: 20px;
       padding: 36px 40px;
-      background: var(--card);
+      background: rgba(31, 41, 55, 0.5);
+      backdrop-filter: blur(12px);
       border: 1px solid var(--border);
     }
     .nb-hero::before {
@@ -262,9 +263,9 @@ const Styles = () => (
       pointer-events: none;
     }
     .nb-hero-title {
-      font-family: 'Instrument Serif', serif;
+      font-family: inherit;
       font-size: clamp(28px, 4vw, 42px);
-      font-weight: 400;
+      font-weight: 700;
       letter-spacing: -.5px;
       color: var(--text);
       line-height: 1.15;
@@ -274,6 +275,7 @@ const Styles = () => (
     /* ── Notebook Card ── */
     .nb-notebook-card {
       background: var(--card);
+      backdrop-filter: blur(12px);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 20px;
@@ -301,6 +303,7 @@ const Styles = () => (
     /* ── Workspace sidebar ── */
     .nb-ws-panel {
       background: var(--card);
+      backdrop-filter: blur(12px);
       border: 1px solid var(--border);
       border-radius: 16px;
       display: flex;
@@ -441,7 +444,11 @@ const DashboardView = ({
   classroomId, navigate,
 }) => (
   <GlassDashboardShell withPanel={false} contentClassName="max-w-[1240px]">
-    <div className="nb-root" style={{ padding: '16px 8px 10px', maxWidth: 1200, margin: '0 auto' }}>
+    <div className="nb-root relative" style={{ padding: '16px 8px 10px', maxWidth: 1200, margin: '0 auto', zIndex: 1 }}>
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: -1 }}>
+        <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+      </div>
       <Styles />
 
     {/* Hero */}
@@ -468,7 +475,7 @@ const DashboardView = ({
     <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 20 }}>
       {/* Create Notebook */}
       <div className="nb-card nb-animate nb-animate-d1" style={{ padding: 24 }}>
-        <h2 style={{ fontFamily: 'Instrument Serif', fontSize: 20, marginBottom: 6 }}>New Notebook</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 6 }}>New Notebook</h2>
         <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 18 }}>
           Create a private workspace to gather sources and chat.
         </p>
@@ -517,7 +524,7 @@ const DashboardView = ({
       {/* Notebooks list */}
       <div className="nb-animate nb-animate-d2">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h2 style={{ fontFamily: 'Instrument Serif', fontSize: 20 }}>Your Notebooks</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 'bold' }}>Your Notebooks</h2>
           <button className="nb-btn nb-btn-ghost nb-btn-sm" onClick={refreshNotebooks} disabled={dashboardLoading}>
             Refresh
           </button>
@@ -611,7 +618,7 @@ const WorkspaceView = ({
   return (
     <GlassDashboardShell withPanel={false} contentClassName="max-w-[1540px]">
       <div
-        className="nb-root nb-root-workspace"
+        className="nb-root nb-root-workspace relative"
         style={{
           height: `calc(100dvh - ${workspaceShellOffsetPx}px)`,
           maxHeight: `calc(100dvh - ${workspaceShellOffsetPx}px)`,
@@ -621,9 +628,15 @@ const WorkspaceView = ({
           overflow: 'hidden',
           border: '1px solid var(--border)',
           borderRadius: 16,
-          background: 'var(--card)',
+          background: 'rgba(31, 41, 55, 0.6)',
+          backdropFilter: 'blur(12px)',
+          zIndex: 1
         }}
       >
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: -2 }}>
+        <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+      </div>
       <Styles />
 
       {/* Top bar */}
@@ -644,8 +657,7 @@ const WorkspaceView = ({
           </button>
           <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
           <div>
-            {/* <span className="nb-badge nb-badge-accent" style={{ marginBottom: 2 }}><IoSparklesOutline /> Workspace</span> */}
-            <p style={{ fontFamily: 'Instrument Serif', fontSize: 17, color: 'var(--text)', marginTop: 1 }}>
+            <p style={{ fontSize: 17, fontWeight: 'bold', color: 'var(--text)', marginTop: 1 }}>
               {notebookDetail?.name || '—'}
             </p>
           </div>
@@ -692,7 +704,7 @@ const WorkspaceView = ({
               <div style={{ display: 'flex', gap: 4, marginBottom: 12, background: 'var(--surface)', padding: 3, borderRadius: 10 }}>
                 {['text', 'url', 'file'].map((tab) => (
                   <button key={tab} onClick={() => setActiveAddTab(tab)} style={{
-                    flex: 1, padding: '5px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 500, fontFamily: 'DM Sans',
+                    flex: 1, padding: '5px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 500, fontFamily: 'inherit',
                     background: activeAddTab === tab ? 'var(--card)' : 'transparent',
                     color: activeAddTab === tab ? 'var(--text)' : 'var(--muted)',
                     transition: 'all .15s',
@@ -766,7 +778,7 @@ const WorkspaceView = ({
                   <div style={{ width: 52, height: 52, borderRadius: 16, background: 'linear-gradient(135deg, var(--accent), var(--accent2))', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
                     <IoSparklesOutline style={{ color: '#fff', fontSize: 22 }} />
                   </div>
-                  <p style={{ fontFamily: 'Instrument Serif', fontSize: 20, color: 'var(--text)', marginBottom: 8 }}>Start a conversation</p>
+                  <p style={{ fontSize: 20, fontWeight: 'bold', color: 'var(--text)', marginBottom: 8 }}>Start a conversation</p>
                   <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65 }}>
                     Ask questions about your uploaded sources. The AI will answer using your personal notes.
                   </p>

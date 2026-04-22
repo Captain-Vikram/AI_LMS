@@ -151,6 +151,7 @@ Prefix: `/api/analytics`
 - `GET /classroom/{classroom_id}`
 - `GET /classroom/{classroom_id}/student/{student_id}`
 - `GET /classroom/{classroom_id}/my-progress`
+- `GET /classroom/{classroom_id}/ai-questions-by-module` (optional `student_id` query for student-scoped heatmap)
 
 ## Quiz and Learning Intelligence
 

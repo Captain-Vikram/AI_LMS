@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 import { Link, useNavigate } from 'react-router-dom';
+import AppBackButton from '../UI/AppBackButton';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
-import { IoArrowBackOutline, IoKeyOutline, IoPeopleOutline } from 'react-icons/io5';
+import { IoKeyOutline, IoPeopleOutline } from 'react-icons/io5';
 
 const JoinByCode = () => {
   const [code, setCode] = useState('');
@@ -40,13 +41,7 @@ const JoinByCode = () => {
                 Enter the code shared by your teacher or admin to join the right classroom instantly.
               </p>
             </div>
-            <Link
-              to="/classrooms"
-              className="inline-flex items-center gap-2 self-start rounded-lg border border-gray-600 bg-gray-800/70 px-3 py-2 text-sm text-gray-200 transition-colors hover:bg-gray-700"
-            >
-              <IoArrowBackOutline />
-              Back to Classrooms
-            </Link>
+            <AppBackButton label="Back to Classrooms" fallbackTo="/classrooms" />
           </div>
         </div>
 

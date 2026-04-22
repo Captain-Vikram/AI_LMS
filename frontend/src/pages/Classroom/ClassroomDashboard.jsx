@@ -6,25 +6,33 @@ import {
   useAnnouncements,
   useLearningModules,
 } from '../../hooks/useClassroom';
-import { LoadingState, ErrorState, ClassroomStats } from '../../components/Classroom/DashboardCard';
+import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { AnnouncementFeed, AnnouncementCreate } from '../../components/Classroom/AnnouncementFeed';
 import { PendingAssignments, SubmissionList } from '../../components/Classroom/PendingAssignments';
-import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
+import { ModuleList } from '../../components/Classroom/ModuleList';
+import ModuleQuestionHeatmap from '../../components/Classroom/ModuleQuestionHeatmap';
 import ActivityFeed from '../../components/Classroom/ActivityFeed';
+import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 import { normalizeClassroomRole } from '../../utils/classroomRoles';
 import {
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
   IoBarChartOutline,
-  IoBookOutline,
   IoCheckmarkCircleOutline,
   IoFlameOutline,
-  IoGridOutline,
-  IoRocketOutline,
-  IoTimeOutline,
-  IoArrowForwardOutline,
-  IoAlertCircleOutline,
   IoSchoolOutline,
   IoPeopleOutline,
   IoLayersOutline,
@@ -37,6 +45,73 @@ const parseData = (r) => { if (r && typeof r === 'object') { if (r.status === 's
 const normalizeEnrollments = (res) => {
   const raw = Array.isArray(res?.data?.classrooms) ? res.data.classrooms : Array.isArray(res?.classrooms) ? res.classrooms : [];
   return raw.map((r) => ({ classroom_id: String(r?.classroom_id || r?._id || r?.id || ''), name: r?.name || r?.classroom_name || 'Classroom', subject: r?.subject || r?.classroom_subject || 'Subject', grade_level: r?.grade_level || r?.classroom_grade || '' })).filter((r) => r.classroom_id);
+};
+const shortLabel = (label, max = 18) => {
+  const text = String(label || '').trim();
+  if (!text) return 'Module';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};
+const buildScoreDistributionData = (studentAnalytics = []) => {
+  const students = Array.isArray(studentAnalytics) ? studentAnalytics : [];
+  const bands = [
+    { name: '85-100', min: 85, max: 101, color: '#34d399' },
+    { name: '70-84', min: 70, max: 85, color: '#22d3ee' },
+    { name: '50-69', min: 50, max: 70, color: '#fbbf24' },
+    { name: '0-49', min: 0, max: 50, color: '#f87171' },
+  ];
+
+  return bands.map((band) => ({
+    ...band,
+    value: students.filter((student) => {
+      const score = Number(student?.average_score_percentage || 0);
+      return score >= band.min && score < band.max;
+    }).length,
+  }));
+};
+const buildModuleCompletionData = (studentAnalytics = []) => {
+  const aggregate = new Map();
+
+  (Array.isArray(studentAnalytics) ? studentAnalytics : []).forEach((student) => {
+    (Array.isArray(student?.module_progress) ? student.module_progress : []).forEach((module) => {
+      const key = String(module?.module_id || module?.module_name || 'module').trim();
+      const name = String(module?.module_name || 'Module').trim();
+      const completion = clamp(module?.completion_percentage || 0);
+
+      if (!aggregate.has(key)) {
+        aggregate.set(key, { module: name, total: 0, count: 0 });
+      }
+
+      const entry = aggregate.get(key);
+      entry.total += completion;
+      entry.count += 1;
+    });
+  });
+
+  return Array.from(aggregate.values())
+    .map((entry) => ({
+      module: shortLabel(entry.module),
+      completion: Math.round(entry.total / Math.max(entry.count, 1)),
+    }))
+    .sort((a, b) => a.module.localeCompare(b.module));
+};
+const hasMeaningfulModuleProgress = (module = {}) => {
+  const completion = Number(module?.completion_percentage || 0);
+  const totalAssessments = Number(module?.total_assessments || 0);
+  const completedAssessments = Number(module?.completed_assessments || 0);
+  const totalResources = Number(module?.total_resources || 0);
+  const viewedResources = Number(module?.viewed_resources || 0);
+  const attemptedResources = Number(module?.attempted_resources || 0);
+  const passedResources = Number(module?.passed_resources || 0);
+
+  return (
+    completion > 0 ||
+    totalAssessments > 0 ||
+    completedAssessments > 0 ||
+    totalResources > 0 ||
+    viewedResources > 0 ||
+    attemptedResources > 0 ||
+    passedResources > 0
+  );
 };
 
 /* ─── Atoms ──────────────────────────────────────────────────────── */
@@ -121,6 +196,14 @@ const ClassroomDashboard = () => {
   const [classContextLoading, setClassContextLoading] = useState(false);
   const [classContextError, setClassContextError] = useState('');
   const [pendingGradingCount, setPendingGradingCount] = useState(0);
+  const [studentActivityStats, setStudentActivityStats] = useState({
+    aiQuestionsAsked: 0,
+    quizEvents: 0,
+  });
+  const [teacherQuestionHeatmap, setTeacherQuestionHeatmap] = useState(null);
+  const [studentQuestionHeatmap, setStudentQuestionHeatmap] = useState(null);
+  const [teacherHeatmapLoading, setTeacherHeatmapLoading] = useState(false);
+  const [studentHeatmapLoading, setStudentHeatmapLoading] = useState(false);
 
   const { dashboard, overview, loading: dashLoad, error: dashErr } = useClassroomDashboard(classroomId);
   const { analytics, studentProgress, fetchMyProgress } = useClassroomAnalytics(classroomId);
@@ -189,6 +272,122 @@ const ClassroomDashboard = () => {
     return () => { ok = false; clearInterval(iv); };
   }, [classroomId, userRole]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadTeacherHeatmap = async () => {
+      if (!classroomId || userRole !== 'teacher') {
+        if (active) {
+          setTeacherQuestionHeatmap(null);
+          setTeacherHeatmapLoading(false);
+        }
+        return;
+      }
+
+      setTeacherHeatmapLoading(true);
+      try {
+        const response = await apiClient.get(`/api/analytics/classroom/${classroomId}/ai-questions-by-module`);
+        if (active) {
+          setTeacherQuestionHeatmap(parseData(response) || null);
+        }
+      } catch {
+        if (active) {
+          setTeacherQuestionHeatmap(null);
+        }
+      } finally {
+        if (active) {
+          setTeacherHeatmapLoading(false);
+        }
+      }
+    };
+
+    loadTeacherHeatmap();
+
+    return () => {
+      active = false;
+    };
+  }, [classroomId, userRole]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadStudentHeatmap = async () => {
+      if (!classroomId || userRole !== 'student' || !studentProgress?.student_id) {
+        if (active) {
+          setStudentQuestionHeatmap(null);
+          setStudentHeatmapLoading(false);
+        }
+        return;
+      }
+
+      setStudentHeatmapLoading(true);
+      try {
+        const response = await apiClient.get(
+          `/api/analytics/classroom/${classroomId}/ai-questions-by-module?student_id=${encodeURIComponent(studentProgress.student_id)}`
+        );
+        if (active) {
+          setStudentQuestionHeatmap(parseData(response) || null);
+        }
+      } catch {
+        if (active) {
+          setStudentQuestionHeatmap(null);
+        }
+      } finally {
+        if (active) {
+          setStudentHeatmapLoading(false);
+        }
+      }
+    };
+
+    loadStudentHeatmap();
+
+    return () => {
+      active = false;
+    };
+  }, [classroomId, userRole, studentProgress?.student_id]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadStudentActivityStats = async () => {
+      if (!classroomId || userRole !== 'student' || !studentProgress?.student_id) {
+        if (active) {
+          setStudentActivityStats({ aiQuestionsAsked: 0, quizEvents: 0 });
+        }
+        return;
+      }
+
+      try {
+        const response = await apiClient.get(`/api/classroom/${classroomId}/activity-feed?limit=200`);
+        const items = Array.isArray(response?.items) ? response.items : [];
+        const myId = String(studentProgress.student_id || '').trim();
+
+        const mine = items.filter((item) => {
+          const studentId = String(item?.student_id || '').trim();
+          const actorId = String(item?.action_performed_by_id || '').trim();
+          return studentId === myId || actorId === myId;
+        });
+
+        const aiQuestionsAsked = mine.filter((item) => item?.action_type === 'ai_question_asked').length;
+        const quizEvents = mine.filter((item) => item?.action_type === 'quiz_passed' || item?.action_type === 'quiz_failed').length;
+
+        if (active) {
+          setStudentActivityStats({ aiQuestionsAsked, quizEvents });
+        }
+      } catch {
+        if (active) {
+          setStudentActivityStats({ aiQuestionsAsked: 0, quizEvents: 0 });
+        }
+      }
+    };
+
+    loadStudentActivityStats();
+
+    return () => {
+      active = false;
+    };
+  }, [classroomId, userRole, studentProgress?.student_id]);
+
   if (dashLoad) return <GlassDashboardShell contentClassName="max-w-7xl"><LoadingState message="Loading…" /></GlassDashboardShell>;
   if (dashErr || !dashboard) return <GlassDashboardShell contentClassName="max-w-7xl"><ErrorState message={dashErr||'Not found'} onRetry={() => window.location.reload()} /></GlassDashboardShell>;
 
@@ -204,17 +403,17 @@ const ClassroomDashboard = () => {
     const engRate        = Math.min(100, Math.round((totalViews / Math.max(1, totalStudents*Math.max(1,totalAnn)))*100));
     const subVel         = totalStudents ? Math.min(100, Math.round((totalSubs/totalStudents)*100)) : 0;
     const compRate       = clamp(analytics?.assignment_completion_rate||0);
-    const resSum         = td?.resource_summary||{total:0,pending:0};
-    const checklist      = [
-      { icon: IoRocketOutline, label:'Publish a kickoff announcement', done: totalAnn>0 },
-      { icon: IoBookOutline,   label:'Create your first assignment',   done: totalAssign>0 },
-      { icon: IoGridOutline,   label:'Add at least one module',        done: modCount>0 },
-      { icon: IoTimeOutline,   label:'Collect first submissions',      done: totalSubs>0 },
-    ];
+    const studentAnalytics = Array.isArray(analytics?.student_analytics) ? analytics.student_analytics : [];
+    const scoreDistributionData = buildScoreDistributionData(studentAnalytics);
+    const moduleCompletionData = buildModuleCompletionData(studentAnalytics);
 
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-5 px-3 py-5 sm:px-5">
+          <AppBackButton
+            label="Back to Classrooms"
+            fallbackTo="/classrooms/"
+          />
 
           {/* ── HERO ─────────────────────────────────────────── */}
           <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#060c18] via-[#0a1020] to-[#0c1428] shadow-2xl">
@@ -273,7 +472,19 @@ const ClassroomDashboard = () => {
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <div className="space-y-5 xl:col-span-8">
 
-              {/* Announcement Studio removed to simplify the teacher dashboard (removed per request) */}
+              <Panel>
+                <SectionLabel right={<span className="rounded-full bg-blue-500/15 px-2 py-0.5 font-bold text-blue-400">{totalAnn} active</span>}>
+                  Announcement Studio
+                </SectionLabel>
+                <AnnouncementCreate onSubmit={createAnnouncement} isLoading={annLoad} />
+                <AnnouncementFeed
+                  announcements={announcements}
+                  onMarkViewed={markAsViewed}
+                  onDelete={deleteAnnouncement}
+                  isTeacher
+                  loading={annLoad}
+                />
+              </Panel>
 
               <Panel>
                 <SectionLabel right={<span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-bold text-emerald-400">{totalSubs} recent</span>}>
@@ -289,12 +500,9 @@ const ClassroomDashboard = () => {
               </Panel>
 
               <Panel>
-                <SectionLabel right={
-                  <button onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-                    className="inline-flex items-center gap-1 font-bold text-blue-400 hover:text-blue-300">
-                    View all <IoArrowForwardOutline />
-                  </button>
-                }>Module Snapshot</SectionLabel>
+                <SectionLabel right={<span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-slate-500">Top 3 modules</span>}>
+                  Module Snapshot
+                </SectionLabel>
                 <ModuleList modules={modules.slice(0,3)} loading={modLoad} />
               </Panel>
             </div>
@@ -319,63 +527,120 @@ const ClassroomDashboard = () => {
               <Panel>
                 <SectionLabel right={
                   pendingGradingCount > 0 && (
-                    <button onClick={() => navigate(`/classroom/${classroomId}/grading`)}
-                      className="font-bold text-amber-400 hover:text-amber-300">{pendingGradingCount} pending</button>
+                    <span className="font-bold text-amber-400">{pendingGradingCount} pending</span>
                   )
                 }>Activity Feed</SectionLabel>
                 <ActivityFeed classroomId={classroomId} limit={12} compact />
               </Panel>
-
-              <Panel>
-                <SectionLabel>Setup Checklist</SectionLabel>
-                <div className="space-y-2">
-                  {checklist.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <div key={item.label}
-                        className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${item.done ? 'border-emerald-500/20 bg-emerald-500/[0.05]' : 'border-white/[0.05] bg-white/[0.02]'}`}>
-                        <Icon className={`shrink-0 text-base ${item.done ? 'text-emerald-400' : 'text-amber-400'}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium text-slate-300">{item.label}</p>
-                          <p className={`text-[10px] ${item.done ? 'text-emerald-600' : 'text-slate-700'}`}>{item.done ? 'Complete' : 'Recommended'}</p>
-                        </div>
-                        {item.done && <span className="text-[10px] font-extrabold text-emerald-500">✓</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </Panel>
-
-              <Panel>
-                <SectionLabel>Resource Hub</SectionLabel>
-                <div className="mb-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
-                    <p className="text-[10px] text-slate-600">Total</p>
-                    <p className="text-xl font-extrabold text-cyan-300">{Number(resSum.total||0)}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
-                    <p className="text-[10px] text-slate-600">Pending</p>
-                    <p className="text-xl font-extrabold text-amber-300">{Number(resSum.pending||0)}</p>
-                  </div>
-                </div>
-                <button onClick={() => navigate(`/classroom/${classroomId}/resources`)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-violet-500 transition-colors">
-                  Open Resource Hub <IoArrowForwardOutline />
-                </button>
-              </Panel>
-
-              <Panel>
-                <SectionLabel>Upcoming Assignments</SectionLabel>
-                {td.pending_assignments?.length > 0
-                  ? <PendingAssignments assignments={td.pending_assignments} loading={false} />
-                  : <div className="flex items-start gap-2 text-xs text-slate-600">
-                      <IoAlertCircleOutline className="mt-0.5 shrink-0 text-amber-500" />
-                      No upcoming assignments. Create one to activate student workflows.
-                    </div>
-                }
-              </Panel>
             </div>
           </div>
+
+          <Panel className="!border-cyan-500/10 bg-gradient-to-br from-cyan-500/[0.06] to-slate-500/[0.05]">
+            <SectionLabel right={<span className="rounded-full bg-cyan-500/15 px-2 py-0.5 font-bold text-cyan-300">{studentAnalytics.length} learners</span>}>
+              Student Insights
+            </SectionLabel>
+
+            <div className="space-y-4">
+              {studentAnalytics.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Score Distribution</p>
+                    <div className="h-52">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={scoreDistributionData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={72}
+                            innerRadius={42}
+                          >
+                            {scoreDistributionData.map((entry) => (
+                              <Cell key={entry.name} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#0b1220',
+                              borderColor: 'rgba(148, 163, 184, 0.25)',
+                              color: '#e2e8f0',
+                            }}
+                            formatter={(value, name) => [`${value} students`, name]}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-1 grid grid-cols-2 gap-2">
+                      {scoreDistributionData.map((entry) => (
+                        <div key={entry.name} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5">
+                          <span className="flex items-center gap-2 text-[10px] text-slate-400">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                            {entry.name}
+                          </span>
+                          <span className="text-xs font-bold text-slate-200">{entry.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Module Completion Trend</p>
+                    {moduleCompletionData.length > 0 ? (
+                      <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={moduleCompletionData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.12)" />
+                            <XAxis
+                              dataKey="module"
+                              tick={{ fill: '#94a3b8', fontSize: 10 }}
+                              interval={0}
+                              angle={-14}
+                              textAnchor="end"
+                              height={52}
+                            />
+                            <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: '#0b1220',
+                                borderColor: 'rgba(148, 163, 184, 0.25)',
+                                color: '#e2e8f0',
+                              }}
+                              formatter={(value) => [`${value}%`, 'Avg completion']}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="completion"
+                              stroke="#22d3ee"
+                              strokeWidth={2.5}
+                              dot={{ r: 3, fill: '#22d3ee' }}
+                              activeDot={{ r: 5 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-500">
+                        Module completion trend appears once students interact with published modules.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-500">
+                  Student analytics charts appear after learners submit assignments and module progress data is recorded.
+                </p>
+              )}
+
+              <ModuleQuestionHeatmap
+                data={teacherQuestionHeatmap}
+                loading={teacherHeatmapLoading}
+                title="Ask AI Doubts Heatmap (All Students)"
+                emptyMessage="Heatmap appears once students ask AI questions inside module resources."
+              />
+            </div>
+          </Panel>
         </div>
       </GlassDashboardShell>
     );
@@ -390,16 +655,42 @@ const ClassroomDashboard = () => {
   const totalPts  = Number(cp.total_possible_points||0);
   const ptsAtt    = totalPts > 0 ? clamp((earned/totalPts)*100) : 0;
   const modList   = Array.isArray(cp.module_progress) ? cp.module_progress : [];
+  const meaningfulModuleList = modList.filter((module) => hasMeaningfulModuleProgress(module));
+  const activeModulePreview = meaningfulModuleList;
   const modAvg    = modList.length ? clamp(modList.reduce((s,m)=>s+Number(m?.completion_percentage||0),0)/modList.length) : 0;
+  const totalResourcesViewed = modList.reduce((sum, module) => sum + Number(module?.viewed_resources || 0), 0);
+  const totalSourceTestsAttempted = modList.reduce((sum, module) => sum + Number(module?.attempted_resources || 0), 0);
+  const totalSourceTestsPassed = modList.reduce((sum, module) => sum + Number(module?.passed_resources || 0), 0);
+  const weightedResourceScore = modList.reduce((sum, module) => {
+    const attempted = Number(module?.attempted_resources || 0);
+    const avg = Number(module?.average_resource_test_score || 0);
+    return sum + (attempted > 0 ? attempted * avg : 0);
+  }, 0);
+  const avgSourceTestScore = totalSourceTestsAttempted > 0 ? clamp(weightedResourceScore / totalSourceTestsAttempted) : 0;
+  const sourceTestSuccess = totalSourceTestsAttempted > 0
+    ? clamp((totalSourceTestsPassed / totalSourceTestsAttempted) * 100)
+    : 0;
+  const studentAiQuestionTotal = Number(studentQuestionHeatmap?.total_questions || studentActivityStats.aiQuestionsAsked || 0);
+  const showDetailedProgressStats = (
+    totalSourceTestsAttempted > 0 ||
+    totalSourceTestsPassed > 0 ||
+    avgSourceTestScore > 0 ||
+    studentAiQuestionTotal > 0 ||
+    (studentActivityStats?.quizEvents || 0) > 0 ||
+    totalResourcesViewed > 0
+  );
   const coreProgress = clamp(avgScore*0.45+ptsAtt*0.35+modAvg*0.2);
   const roomIdx   = studentClassrooms.findIndex((r)=>r.classroom_id===classroomId);
   const totalRooms = studentClassrooms.length || 1;
   const roomsDisplay = studentClassrooms.length > 0 ? studentClassrooms : [{ classroom_id:classroomId, name:sd.classroom_name, subject:sd.classroom_subject, grade_level:'' }];
-  const modsForProgress = Array.isArray(sd.modules) && sd.modules.length > 0 ? sd.modules : modules;
 
   return (
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-5 px-3 py-5 sm:px-5">
+        <AppBackButton
+          label="Back to Classrooms"
+          fallbackTo="/classrooms"
+        />
 
         {/* ── STUDENT HERO ── */}
         <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#070816] via-[#09091e] to-[#0b0e22] shadow-2xl">
@@ -432,7 +723,6 @@ const ClassroomDashboard = () => {
               <StatChip icon={IoLayersOutline}   label={`Class ${roomIdx>=0?roomIdx+1:1} of ${totalRooms}`} color="border-slate-500/20 bg-slate-500/10 text-slate-400" />
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] pt-4">
-              <ActionPill label="All Classrooms"     onClick={() => navigate('/classrooms')} variant="ghost" />
               <ActionPill label="Personal Resources" onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)} variant="violet" />
               <ActionPill label="Open Modules"       onClick={() => navigate(`/classroom/${classroomId}/modules`)} variant="emerald" />
             </div>
@@ -440,43 +730,70 @@ const ClassroomDashboard = () => {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
           <Kpi label="Core Progress"    value={`${coreProgress}%`}  accent="border-indigo-500/20 bg-indigo-500/[0.05]" />
           <Kpi label="Average Score"    value={`${avgScore}%`}       accent="border-emerald-500/20 bg-emerald-500/[0.05]" />
           <Kpi label="Points Earned"    value={earned} sub={`of ${totalPts}`} accent="border-blue-500/20 bg-blue-500/[0.05]" />
           <Kpi label="Assignments Done" value={doneCount}             accent="border-violet-500/20 bg-violet-500/[0.05]" />
+          <Kpi label="Source Tests"     value={totalSourceTestsAttempted} accent="border-cyan-500/20 bg-cyan-500/[0.05]" />
+          <Kpi label="AI Questions"     value={studentAiQuestionTotal} accent="border-fuchsia-500/20 bg-fuchsia-500/[0.05]" />
         </div>
 
         {/* Network */}
         <Panel>
-          <SectionLabel right={classContextError && <span className="text-red-400">{classContextError}</span>}>
-            My Classroom Network
-          </SectionLabel>
-          {classContextLoading
-            ? <div className="grid animate-pulse grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{[...Array(3)].map((_,i)=><div key={i} className="h-20 rounded-xl bg-white/[0.04]" />)}</div>
-            : <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {roomsDisplay.map((room) => {
-                  const active = room.classroom_id === classroomId;
-                  const rp = studentClassProgress[room.classroom_id] || { averageScore:active?avgScore:0, assignmentsCompleted:active?doneCount:0, moduleAverage:active?modAvg:0, overallProgress:active?coreProgress:0 };
+          {/* Module Snapshot — individual horizontal blocks */}
+          {activeModulePreview.length > 0 && (
+            <div >
+              <p className="mb-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-600">Module Snapshot</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {activeModulePreview.map((module, index) => {
+                  const moduleName = String(module?.module_name || `Module ${index + 1}`).trim();
+                  const completion = clamp(module?.completion_percentage || 0);
+                  const totalCheckpoints = Number(module?.total_assessments || module?.total_resources || 0);
+                  const completedCheckpoints = Number(module?.completed_assessments || module?.passed_resources || 0);
+                  const attemptedResources = Number(module?.attempted_resources || 0);
+                  const passedResources = Number(module?.passed_resources || 0);
+                  const averageResourceScore = clamp(module?.average_resource_test_score || 0);
+
                   return (
-                    <button key={room.classroom_id} onClick={() => navigate(`/classroom/${room.classroom_id}/dashboard`)}
-                      className={`group rounded-xl border p-4 text-left transition-all duration-150 hover:-translate-y-[1px] hover:shadow-lg ${active ? 'border-indigo-500/40 bg-indigo-500/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-indigo-500/25'}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-bold text-white">{room.name}</p>
-                          <p className="truncate text-[11px] text-slate-600 mt-0.5">{room.subject}{room.grade_level?` · ${room.grade_level}`:''}</p>
-                        </div>
-                        <span className="shrink-0 text-sm font-extrabold tabular-nums text-indigo-300">{rp.overallProgress}%</span>
+                    <div
+                      key={`${module?.module_id || moduleName}-${index}`}
+                      className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <p className="text-[11px] font-semibold text-slate-200 leading-snug">{moduleName}</p>
+                        <span className="shrink-0 text-[11px] font-bold tabular-nums text-indigo-300">{completion}%</span>
                       </div>
-                      <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-white/[0.05]">
-                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-[width] duration-700" style={{ width:`${rp.overallProgress}%` }} />
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-[width] duration-700"
+                          style={{ width: `${completion}%` }}
+                        />
                       </div>
-                      <p className="mt-2 text-[10px] text-slate-700">Score {rp.averageScore}% · Done {rp.assignmentsCompleted} · Modules {rp.moduleAverage}%</p>
-                    </button>
+                      {totalCheckpoints > 0 && (
+                        <p className="mt-1.5 text-[10px] text-slate-600">{completedCheckpoints}/{totalCheckpoints} checkpoints completed</p>
+                      )}
+                      <p className="mt-1 text-[10px] text-slate-600">
+                        Tests {attemptedResources} · Passed {passedResources} · Avg {averageResourceScore}%
+                      </p>
+                    </div>
                   );
                 })}
               </div>
-          }
+            </div>
+          )}
+        </Panel>
+
+        <Panel className="!border-fuchsia-500/10 bg-gradient-to-br from-fuchsia-500/[0.06] to-indigo-500/[0.06]">
+          <SectionLabel right={<span className="rounded-full bg-fuchsia-500/15 px-2 py-0.5 font-bold text-fuchsia-300">{studentAiQuestionTotal} questions</span>}>
+            Ask AI Doubts Heatmap
+          </SectionLabel>
+          <ModuleQuestionHeatmap
+            data={studentQuestionHeatmap}
+            loading={studentHeatmapLoading}
+            title="My Questions by Module and Source"
+            emptyMessage="Ask AI questions on module resources to populate your personal heatmap."
+          />
         </Panel>
 
         {/* Content */}
@@ -498,41 +815,41 @@ const ClassroomDashboard = () => {
               <SectionLabel>My Progress</SectionLabel>
               <div className="space-y-4">
                 <Bar label="Score Accuracy"    icon={IoBarChartOutline}       pct={avgScore} from="from-emerald-500" to="to-green-400" />
-                <Bar label="Points Attainment" icon={IoFlameOutline}          pct={ptsAtt}   from="from-cyan-500"   to="to-blue-500" />
+                <Bar label="Source Test Success" icon={IoFlameOutline}        pct={sourceTestSuccess} from="from-cyan-500" to="to-blue-500" />
                 <Bar label="Module Completion" icon={IoCheckmarkCircleOutline} pct={modAvg}  from="from-violet-500" to="to-pink-500" />
               </div>
-              {modList.length > 0 && (
-                <div className="mt-5 space-y-3 border-t border-white/[0.06] pt-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-700">Module Breakdown</p>
-                  {modList.slice(0,4).map((m) => (
-                    <div key={m.module_id} className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="max-w-[72%] truncate text-[11px] text-slate-500">{m.module_name}</span>
-                        <span className="text-[11px] font-bold tabular-nums text-white">{clamp(m.completion_percentage)}%</span>
-                      </div>
-                      <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.05]">
-                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500 transition-[width] duration-700" style={{ width:`${clamp(m.completion_percentage)}%` }} />
-                      </div>
-                    </div>
-                  ))}
+              {showDetailedProgressStats && (
+                <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/[0.06] pt-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">Tests Taken</p>
+                  <p className="text-sm font-bold text-indigo-300">{totalSourceTestsAttempted}</p>
                 </div>
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">Tests Passed</p>
+                  <p className="text-sm font-bold text-blue-300">{totalSourceTestsPassed}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">Avg Test Score</p>
+                  <p className="text-sm font-bold text-cyan-300">{avgSourceTestScore}%</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">AI Questions</p>
+                  <p className="text-sm font-bold text-fuchsia-300">{studentAiQuestionTotal}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">Quiz Events</p>
+                  <p className="text-sm font-bold text-emerald-300">{studentActivityStats.quizEvents}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1.5 text-center">
+                  <p className="text-[10px] text-slate-600">Sources Viewed</p>
+                  <p className="text-sm font-bold text-amber-300">{totalResourcesViewed}</p>
+                </div>
+              </div>
               )}
-            </Panel>
-            <Panel>
-              <SectionLabel>Curriculum Modules</SectionLabel>
-              <LearningModuleProgress modules={modsForProgress} studentProgress={cp} loading={modLoad} />
             </Panel>
           </div>
         </div>
 
-        {modules.length > 0 && (
-          <div className="flex justify-center pt-1">
-            <button onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition-all hover:brightness-110 active:scale-[0.98]">
-              View Full Curriculum <IoArrowForwardOutline />
-            </button>
-          </div>
-        )}
       </div>
     </GlassDashboardShell>
   );

@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  IoArrowBackOutline,
   IoCheckmarkCircleOutline,
   IoCloudUploadOutline,
   IoSchoolOutline,
@@ -9,6 +8,7 @@ import {
 } from 'react-icons/io5';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import AppBackButton from '../UI/AppBackButton';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
 
 const CreateClassroom = () => {
@@ -85,13 +85,7 @@ const CreateClassroom = () => {
                 announcements, and learning modules.
               </p>
             </div>
-            <Link
-              to="/classrooms"
-              className="inline-flex items-center gap-2 self-start rounded-lg border border-gray-600 bg-gray-800/70 px-3 py-2 text-sm text-gray-200 transition-colors hover:bg-gray-700"
-            >
-              <IoArrowBackOutline />
-              Back to Classrooms
-            </Link>
+            <AppBackButton label="Back to Classrooms" fallbackTo="/classrooms" />
           </div>
         </div>
 

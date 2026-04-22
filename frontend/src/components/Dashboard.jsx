@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import IconsCarousel from "./IconsCarousel";
 import UserSkills from "./UserSkills";
 import AssessmentHistoryChart from "./AssessmentHistoryChart";
@@ -46,7 +46,6 @@ const Dashboard = () => {
     totalLearningHours: 0,
     completedModules: 0,
     progressPercentage: 0,
-    weeklyActivity: [0, 0, 0, 0, 0, 0, 0],
     upcomingMilestones: [],
     recentAchievements: [],
   });
@@ -216,15 +215,11 @@ const Dashboard = () => {
 
       setAnalyticsData((prevData) => ({
         ...prevData,
-        learningStreak: analytics.learning_streak ?? prevData.learningStreak,
         totalLearningHours:
           analytics.total_learning_hours ?? prevData.totalLearningHours,
         completedModules: analytics.completed_modules ?? prevData.completedModules,
         progressPercentage:
           analytics.progress_percentage ?? prevData.progressPercentage,
-        weeklyActivity: Array.isArray(analytics.weekly_activity)
-          ? analytics.weekly_activity
-          : prevData.weeklyActivity,
         upcomingMilestones: apiMilestones.map((milestone) => ({
           id: milestone.id,
           name: milestone.name || "Learning milestone",
@@ -937,24 +932,9 @@ const Dashboard = () => {
                           "Stage assessments are generated from the pathway quiz prompt and your resource content."}
                       </p>
                     </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <button
-                        onClick={handleTakeSkillAssessment}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center"
-                      >
-                        Take Assessment
-                        <IoArrowForwardOutline className="ml-1" />
-                      </button>
-
-                      <button
-                        onClick={handleOpenResourcesWorkspace}
-                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors flex items-center justify-center"
-                      >
-                        Open Resources
-                        <IoPlayCircleOutline className="ml-1" />
-                      </button>
-                    </div>
+                    <p className="rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-sm text-blue-200">
+                      Use Stage Workspace above for resource actions and assessments.
+                    </p>
                   </div>
                 ) : assessmentResults ? (
                   <div>
@@ -994,14 +974,6 @@ const Dashboard = () => {
                     </ul>
 
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <button
-                        onClick={() => navigate("/recommendations")}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center"
-                      >
-                        View Resources
-                        <IoArrowForwardOutline className="ml-1" />
-                      </button>
-
                       <button
                         onClick={handleRetakeAssessment}
                         className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors flex items-center justify-center"
@@ -1388,12 +1360,6 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
-              <button
-                className="mt-4 w-full py-2 text-center text-blue-400 hover:text-white hover:bg-blue-600 rounded-lg transition-colors"
-                onClick={() => {}}
-              >
-                View Learning Path
-              </button>
             </div>
 
             {/* Recent Achievements */}
@@ -1431,27 +1397,16 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
-              <button
-                className="mt-4 w-full py-2 text-center text-yellow-400 hover:text-white hover:bg-yellow-600 rounded-lg transition-colors"
-                onClick={() => {}}
-              >
-                View All Achievements
-              </button>
             </div>
           </div>
 
           {/* User Skills Section */}
           <div className="mt-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4">
               <h2 className="text-xl font-semibold text-white flex items-center">
                 <IoBookOutline className="mr-2 text-blue-400" />
                 Your Skills Progress
               </h2>
-              <Link to="/recommendations">
-                <button className="text-blue-400 hover:text-blue-300 transition-colors">
-                  Improve Skills
-                </button>
-              </Link>
             </div>
             <UserSkills
               skills={userSkills}

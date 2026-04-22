@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import IconsCarousel from "../IconsCarousel";
 import {
-  IoArrowBackOutline,
   IoChatbubbleEllipsesOutline,
+  IoCheckmarkCircle,
   IoHelpCircleOutline,
   IoRefreshOutline,
   IoSparklesOutline,
+  IoTimeOutline,
+  IoTrophyOutline,
 } from "react-icons/io5";
 import apiClient from "../../services/apiClient";
 import { API_ENDPOINTS } from "../../config/api";
+import AppBackButton from "../UI/AppBackButton";
 import QuizModal from "../Classroom/QuizModal";
 import QuizFeedbackModal from "../Classroom/QuizFeedbackModal";
 
@@ -57,22 +61,6 @@ const extractYouTubeId = (url) => {
   return match && match[2].length === 11 ? match[2] : null;
 };
 
-const normalizePodcastJob = (payload) => {
-  const source = payload && typeof payload === "object" ? payload : {};
-  return {
-    id: String(source.job_id || source.id || "").trim(),
-    status: String(source.status || "").trim().toLowerCase(),
-    message: String(source.message || "").trim(),
-    result:
-      source.result && typeof source.result === "object"
-        ? source.result
-        : source.result
-          ? { value: source.result }
-          : null,
-    error: String(source.error || "").trim(),
-  };
-};
-
 const SkillPathwayResource = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -103,38 +91,33 @@ const SkillPathwayResource = () => {
   const [stageQuizPrompt, setStageQuizPrompt] = useState("");
   const [hasAutoOpenedAssessment, setHasAutoOpenedAssessment] = useState(false);
 
-  const [podcastEpisodeName, setPodcastEpisodeName] = useState("");
-  const [podcastEpisodeProfile, setPodcastEpisodeProfile] = useState("default");
-  const [podcastSpeakerProfile, setPodcastSpeakerProfile] = useState("default");
-  const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState("");
-  const [podcastSubmitting, setPodcastSubmitting] = useState(false);
-  const [podcastRefreshing, setPodcastRefreshing] = useState(false);
-  const [podcastJob, setPodcastJob] = useState(null);
-
   const videoUrl = useMemo(
     () => normalizeResourceUrl(resource?.url || resource?.youtube_url || ""),
     [resource]
   );
   const videoId = useMemo(() => extractYouTubeId(videoUrl), [videoUrl]);
 
+  const progressStatus = resourceProgress?.status;
+  const testsTaken = Number(resourceProgress?.tests_taken || 0);
+  const passedCount = Number(resourceProgress?.passed_tests_count || 0);
+  const passTarget = 2;
+  const passProgress = Math.min(passedCount / passTarget, 1);
+
   const progressLabel = useMemo(() => {
-    const status = resourceProgress?.status;
-    if (status === "completed") return "Completed";
-    if (status === "in_progress") return "In Progress";
-    if (status === "unlocked") return "Unlocked";
-    if (status === "locked") return "Locked";
+    if (progressStatus === "completed") return "Completed";
+    if (progressStatus === "in_progress") return "In Progress";
+    if (progressStatus === "unlocked") return "Unlocked";
+    if (progressStatus === "locked") return "Locked";
     return "Not Started";
-  }, [resourceProgress]);
+  }, [progressStatus]);
 
-  const podcastJobId = useMemo(
-    () => String(podcastJob?.id || "").trim(),
-    [podcastJob?.id]
-  );
-
-  const isPodcastRunning = useMemo(() => {
-    const status = String(podcastJob?.status || "").toLowerCase();
-    return ["queued", "running", "submitted", "pending"].includes(status);
-  }, [podcastJob?.status]);
+  const statusConfig = useMemo(() => {
+    if (progressStatus === "completed")
+      return { color: "text-emerald-300", bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: <IoCheckmarkCircle className="text-emerald-400" /> };
+    if (progressStatus === "in_progress")
+      return { color: "text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/30", icon: <IoTimeOutline className="text-amber-400" /> };
+    return { color: "text-gray-400", bg: "bg-gray-800/50", border: "border-gray-700", icon: <IoTimeOutline className="text-gray-500" /> };
+  }, [progressStatus]);
 
   const loadProgress = async (targetStudentId, selectedResourceId) => {
     if (!targetStudentId || !pathwayId || !stageIndex) return;
@@ -145,13 +128,12 @@ const SkillPathwayResource = () => {
       const resources = Array.isArray(tracker.resources) ? tracker.resources : [];
       const found = resources.find((item) => item.resource_id === selectedResourceId) || null;
       if (found) {
-         // Mock resourceProgress to match what InteractiveLessonViewer expects
-         setResourceProgress({
-            ...found,
-            status: found.passed_tests_count >= 2 ? "completed" : "in_progress",
-         });
+        setResourceProgress({
+          ...found,
+          status: found.passed_tests_count >= 2 ? "completed" : "in_progress",
+        });
       } else {
-         setResourceProgress(null);
+        setResourceProgress(null);
       }
     } catch (e) {
       console.error(e);
@@ -187,8 +169,8 @@ const SkillPathwayResource = () => {
         }
 
         setStageQuizPrompt(String(stageResponse?.data?.quiz_prompt || "").trim());
-
         setModuleData({ name: `Stage ${stageIndex}` });
+
         const moduleResources = Array.isArray(modulePayload.resources)
           ? modulePayload.resources
           : [];
@@ -216,9 +198,7 @@ const SkillPathwayResource = () => {
                   Array.isArray(chatResponse?.chat_history) ? chatResponse.chat_history : []
                 );
               } catch {
-                if (isMounted) {
-                  setChatHistory([]);
-                }
+                if (isMounted) setChatHistory([]);
               }
             })(),
           ]);
@@ -227,9 +207,7 @@ const SkillPathwayResource = () => {
         if (!isMounted) return;
         setError(err?.message || "Failed to load lesson");
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -243,58 +221,6 @@ const SkillPathwayResource = () => {
   useEffect(() => {
     setHasAutoOpenedAssessment(false);
   }, [pathwayId, stageIndex, resourceId]);
-
-  useEffect(() => {
-    if (!podcastJobId || !isPodcastRunning) {
-      return undefined;
-    }
-
-    let isCancelled = false;
-    const timer = setInterval(async () => {
-      try {
-        const statusResponse = await apiClient.get(
-          `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
-            podcastJobId
-          )}`
-        );
-
-        if (!isCancelled) {
-          setPodcastJob(normalizePodcastJob(statusResponse));
-        }
-      } catch {
-        // Keep auto-polling silent. Manual refresh shows explicit failures.
-      }
-    }, 5000);
-
-    return () => {
-      isCancelled = true;
-      clearInterval(timer);
-    };
-  }, [podcastJobId, isPodcastRunning]);
-
-  const buildPodcastContent = () => {
-    const blocks = [];
-
-    const summaryText = String(summary || "").trim();
-    if (summaryText) {
-      blocks.push(`Summary:\n${summaryText}`);
-    }
-
-    const descriptionText = String(resource?.description || resource?.content || "").trim();
-    if (descriptionText) {
-      blocks.push(`Lesson Details:\n${descriptionText}`);
-    }
-
-    if (videoUrl) {
-      blocks.push(`Source URL:\n${videoUrl}`);
-    }
-
-    if (!blocks.length) {
-      blocks.push(`Lesson title: ${resource?.title || "Untitled lesson"}`);
-    }
-
-    return blocks.join("\n\n");
-  };
 
   const toQuizSession = (response) => ({
     quizAttemptId: response?.quiz_attempt_id,
@@ -329,9 +255,7 @@ const SkillPathwayResource = () => {
       }
 
       setSummary(response?.summary || "Summary unavailable.");
-      const cacheMessage = response?.is_cached
-        ? "Loaded cached summary."
-        : "Generated new summary.";
+      const cacheMessage = response?.is_cached ? "Loaded cached summary." : "Generated new summary.";
       setInfoMessage(`${cacheMessage} (${sourceLabel})`);
     } catch (err) {
       setInfoMessage(err?.message || "Failed to generate summary");
@@ -406,13 +330,8 @@ const SkillPathwayResource = () => {
 
   useEffect(() => {
     const shouldAutoOpenAssessment = searchParams.get("assessment") === "1";
-    if (!shouldAutoOpenAssessment || hasAutoOpenedAssessment || loading) {
-      return;
-    }
-
-    if (!videoUrl || !studentId) {
-      return;
-    }
+    if (!shouldAutoOpenAssessment || hasAutoOpenedAssessment || loading) return;
+    if (!videoUrl || !studentId) return;
 
     setHasAutoOpenedAssessment(true);
     handleStartQuiz();
@@ -420,76 +339,7 @@ const SkillPathwayResource = () => {
     const updatedParams = new URLSearchParams(searchParams);
     updatedParams.delete("assessment");
     setSearchParams(updatedParams, { replace: true });
-  }, [
-    searchParams,
-    hasAutoOpenedAssessment,
-    loading,
-    videoUrl,
-    studentId,
-    setSearchParams,
-    stageQuizPrompt,
-  ]);
-
-  const handleGeneratePodcast = async () => {
-    if (!resource || !videoUrl) return;
-
-    setPodcastSubmitting(true);
-    setInfoMessage("");
-
-    try {
-      const episodeName =
-        String(podcastEpisodeName || "").trim() ||
-        `${resource?.title || "Lesson"} Audio Overview`;
-
-      const response = await apiClient.post(
-        API_ENDPOINTS.PORTABLE_RAG_PODCAST_GENERATE,
-        {
-          episode_profile: String(podcastEpisodeProfile || "default").trim() || "default",
-          speaker_profile: String(podcastSpeakerProfile || "default").trim() || "default",
-          episode_name: episodeName,
-          content: buildPodcastContent(),
-          briefing_suffix: String(podcastBriefingSuffix || "").trim() || undefined,
-        }
-      );
-
-      const normalizedJob = normalizePodcastJob(response);
-      setPodcastJob(normalizedJob);
-      setInfoMessage(
-        normalizedJob.id
-          ? `Podcast job submitted: ${normalizedJob.id}`
-          : response?.message || "Podcast job submitted."
-      );
-    } catch (err) {
-      setInfoMessage(err?.message || "Unable to generate podcast");
-    } finally {
-      setPodcastSubmitting(false);
-    }
-  };
-
-  const handleRefreshPodcastStatus = async () => {
-    if (!podcastJobId) {
-      setInfoMessage("Generate a podcast first to check status.");
-      return;
-    }
-
-    setPodcastRefreshing(true);
-    setInfoMessage("");
-
-    try {
-      const response = await apiClient.get(
-        `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
-          podcastJobId
-        )}`
-      );
-      const normalizedJob = normalizePodcastJob(response);
-      setPodcastJob(normalizedJob);
-      setInfoMessage(`Podcast job status: ${normalizedJob.status || "unknown"}.`);
-    } catch (err) {
-      setInfoMessage(err?.message || "Unable to fetch podcast status");
-    } finally {
-      setPodcastRefreshing(false);
-    }
-  };
+  }, [searchParams, hasAutoOpenedAssessment, loading, videoUrl, studentId, setSearchParams, stageQuizPrompt]);
 
   const handleSubmitQuiz = async (quizAttemptId, answers) => {
     setSubmittingQuiz(true);
@@ -514,53 +364,69 @@ const SkillPathwayResource = () => {
 
   if (loading) {
     return (
-      <section className="mx-auto max-w-6xl px-4 py-8 text-gray-200">
-        <p>Loading lesson...</p>
+      <section className="relative min-h-screen flex items-center justify-center pt-28 text-gray-200">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+        </div>
+        <div className="relative z-10 flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 border-4 border-t-cyan-500 border-b-indigo-500 border-l-transparent border-r-transparent rounded-full animate-spin"></div>
+          <p className="text-lg font-medium">Loading lesson...</p>
+        </div>
       </section>
     );
   }
 
   if (error || !resource) {
     return (
-      <section className="mx-auto max-w-6xl px-4 py-8 text-gray-200">
-        <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200">
-          {error || "Resource not found."}
-        </p>
-        <button
-          type="button"
-          onClick={() => navigate(`/skill-pathway/${pathwayId}`)}
-          className="mt-4 rounded-lg bg-gray-700 px-4 py-2 text-sm text-white hover:bg-gray-600"
-        >
-          Back to Pathway
-        </button>
+      <section className="relative min-h-screen flex items-center justify-center pt-28 px-4 text-gray-200">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+        </div>
+        <div className="relative z-10 bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-8 shadow-xl max-w-xl w-full text-center">
+          <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-4 text-red-200 mb-6 font-medium">
+            {error || "Resource not found."}
+          </p>
+          <div className="flex justify-center">
+            <AppBackButton
+              label="Back to Pathway"
+              fallbackTo={`/skill-pathway/${pathwayId}/resources`}
+            />
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="mx-auto max-w-7xl space-y-5 px-4 py-8">
-      <header className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
-        <button
-          type="button"
-          onClick={() => navigate(`/skill-pathway/${pathwayId}`)}
-          className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"
-        >
-          <IoArrowBackOutline />
-          Back to Pathway
-        </button>
-        <h1 className="mt-2 text-2xl font-semibold text-gray-100">{resource.title || "Resource"}</h1>
-        <p className="mt-1 text-sm text-gray-400">{moduleData?.name || `Stage ${stageIndex}`}</p>
+    <section className="relative min-h-screen px-4 py-12 pt-28">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+      </div>
+
+      <div className="container mx-auto relative z-10 max-w-7xl">
+        <div className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-3xl p-5 md:p-8 shadow-2xl space-y-6">
+          
+      <header className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 pb-6">
+        <AppBackButton
+          label="Back to Pathway"
+          fallbackTo={`/skill-pathway/${pathwayId}/resources`}
+        />
+        <h1 className="mt-4 text-3xl md:text-4xl font-bold text-white tracking-tight">{resource.title || "Resource"}</h1>
+        <p className="mt-1.5 text-base font-medium text-emerald-400">{moduleData?.name || `Stage ${stageIndex}`}</p>
       </header>
 
       {infoMessage && (
-        <p className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
+        <p className="rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-5 py-4 text-sm text-indigo-200 mb-2">
           {infoMessage}
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-        <div className="xl:col-span-8 space-y-4">
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <div className="xl:col-span-8 space-y-5">
+          <div className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
             {videoId ? (
               <div className="aspect-video overflow-hidden rounded-lg border border-gray-700 bg-black">
                 <iframe
@@ -577,20 +443,40 @@ const SkillPathwayResource = () => {
               </div>
             )}
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Status</p>
-                <p className="text-sm font-medium text-cyan-200">{progressLabel}</p>
+            {/* Progress Card */}
+            <div className={`mt-4 rounded-xl border ${statusConfig.border} ${statusConfig.bg} p-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {statusConfig.icon}
+                  <span className={`text-sm font-semibold ${statusConfig.color}`}>{progressLabel}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <IoTimeOutline className="shrink-0" />
+                  <span>{testsTaken} attempt{testsTaken !== 1 ? "s" : ""} taken</span>
+                </div>
               </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Tests Taken</p>
-                <p className="text-sm font-medium text-gray-100">{Number(resourceProgress?.tests_taken || 0)}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Passed (Need 2)</p>
-                <p className="text-sm font-medium text-emerald-300">
-                  {Number(resourceProgress?.passed_tests_count || 0)}/2
-                </p>
+
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-gray-400 flex items-center gap-1">
+                    <IoTrophyOutline className="text-emerald-400" />
+                    Tests passed
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-300">
+                    {passedCount} / {passTarget}
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
+                    style={{ width: `${passProgress * 100}%` }}
+                  />
+                </div>
+                {passedCount >= passTarget && (
+                  <p className="mt-1.5 text-xs text-emerald-400 font-medium">
+                    ✓ Requirement met — this resource is complete.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -621,103 +507,10 @@ const SkillPathwayResource = () => {
                 <p className="text-sm text-blue-100">{summary}</p>
               </div>
             )}
-
-            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/10 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-violet-100">
-                  Podcast Generator (Portable RAG)
-                </h3>
-                {isPodcastRunning && (
-                  <span className="text-xs text-violet-200">Auto-refreshing every 5s</span>
-                )}
-              </div>
-
-              <p className="mt-1 text-xs text-violet-200/90">
-                Creates a podcast-style audio overview job from this lesson.
-              </p>
-
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  value={podcastEpisodeName}
-                  onChange={(event) => setPodcastEpisodeName(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Episode name (optional)"
-                />
-                <input
-                  value={podcastEpisodeProfile}
-                  onChange={(event) => setPodcastEpisodeProfile(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Episode profile (default)"
-                />
-                <input
-                  value={podcastSpeakerProfile}
-                  onChange={(event) => setPodcastSpeakerProfile(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Speaker profile (default)"
-                />
-                <input
-                  value={podcastBriefingSuffix}
-                  onChange={(event) => setPodcastBriefingSuffix(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Briefing suffix (optional)"
-                />
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleGeneratePodcast}
-                  disabled={podcastSubmitting || !videoUrl}
-                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {podcastSubmitting ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
-                  {podcastSubmitting ? "Submitting Podcast Job..." : "Generate Podcast"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleRefreshPodcastStatus}
-                  disabled={podcastRefreshing || !podcastJobId}
-                  className="inline-flex items-center gap-2 rounded-lg bg-violet-900/60 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-800/70 disabled:opacity-60"
-                >
-                  {podcastRefreshing ? <IoRefreshOutline className="animate-spin" /> : <IoRefreshOutline />}
-                  Refresh Job Status
-                </button>
-              </div>
-
-              {podcastJob && (
-                <div className="mt-3 rounded-lg border border-violet-400/25 bg-black/30 p-3 text-xs text-violet-100">
-                  <p>
-                    <span className="font-semibold text-violet-200">Job ID:</span>{" "}
-                    {podcastJob.id || "Not provided"}
-                  </p>
-                  <p className="mt-1">
-                    <span className="font-semibold text-violet-200">Status:</span>{" "}
-                    {podcastJob.status || "unknown"}
-                  </p>
-                  {podcastJob.message && (
-                    <p className="mt-1">
-                      <span className="font-semibold text-violet-200">Message:</span>{" "}
-                      {podcastJob.message}
-                    </p>
-                  )}
-                  {podcastJob.error && (
-                    <p className="mt-1 text-rose-200">
-                      <span className="font-semibold text-rose-100">Error:</span> {podcastJob.error}
-                    </p>
-                  )}
-                  {podcastJob.result && (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-violet-400/20 bg-gray-950/70 p-2 text-[11px] text-violet-100">
-                      {JSON.stringify(podcastJob.result, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
-        <aside className="xl:col-span-4 rounded-xl border border-gray-700 bg-gray-900/60 p-4">
+        <aside className="xl:col-span-4 rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
           <h2 className="inline-flex items-center gap-2 text-lg font-semibold text-gray-100">
             <IoChatbubbleEllipsesOutline className="text-cyan-300" />
             Ask AI
@@ -759,6 +552,9 @@ const SkillPathwayResource = () => {
           </form>
         </aside>
       </div>
+
+      </div>
+        </div>
 
       {quizSession && (
         <QuizModal

@@ -123,17 +123,15 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 pb-10">
+    <div className="mx-auto max-w-5xl space-y-6 pb-10">
       
-      {/* ── Glassmorphic Header Banner ─────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl border border-cyan-500/20 bg-gradient-to-br from-[#0B0F19] to-cyan-950/30 p-8 shadow-[0_0_40px_rgba(6,182,212,0.1)] backdrop-blur-xl">
-        <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-600/10 blur-3xl" />
-        
-        <h2 className="font-['Poppins',sans-serif] flex items-center gap-3 text-2xl font-bold tracking-wide text-cyan-50">
-          <IoSchoolOutline className="text-3xl text-cyan-400" />
+      {/* ── Header Banner ─────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 pb-6">
+        <h2 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-white">
+          <IoSchoolOutline className="text-3xl text-emerald-400" />
           Student Learning Flow
         </h2>
-        <p className="font-['Inter',sans-serif] mt-2 max-w-2xl text-sm leading-relaxed text-cyan-100/70">
+        <p className="mt-2 max-w-2xl text-base font-medium text-gray-400">
           Complete each resource in order. Pass 2 quizzes with at least 80% to unlock the next lesson. Your journey is tracked in real-time.
         </p>
       </div>
@@ -170,53 +168,53 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
           return (
             <article 
               key={moduleId} 
-              className="group relative overflow-hidden rounded-3xl border border-white/5 bg-[#0A0D14]/80 p-7 shadow-xl backdrop-blur-2xl transition-all duration-300 hover:border-white/10"
+              className="group relative overflow-hidden rounded-3xl border border-gray-700/50 bg-gray-800/60 p-6 shadow-xl backdrop-blur-md transition-all duration-300"
             >
               {/* Module Header */}
-              <div className="mb-6 border-b border-white/5 pb-5">
-                <h3 className="font-['Poppins',sans-serif] text-xl font-semibold tracking-wide text-gray-100">
+              <div className="mb-6 border-b border-gray-700/50 pb-5">
+                <h3 className="text-xl font-bold tracking-tight text-white">
                   {module.name || module.title || "Untitled Module"}
                 </h3>
-                <p className="font-['Inter',sans-serif] mt-1.5 text-sm text-gray-400">
+                <p className="mt-1.5 text-sm font-medium text-gray-400">
                   {module.description || "Complete the lessons below to unlock the final assessment."}
                 </p>
               </div>
 
               {/* Resources Path */}
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {resources.map((resource, index) => {
                   const resourceId = getResourceId(resource);
                   const resourceProgress = progressMap.get(resourceId);
                   const status = resolveStatus(resourceProgress, index);
 
-                  // Neon status themes
+                  // Theme classes based on status
                   const isCompleted = status === "completed";
                   const isLocked = status === "locked";
                   const isActive = status === "in_progress" || status === "unlocked";
 
                   const themeClasses = isCompleted
-                    ? "border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50 hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+                    ? "border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50 hover:shadow-lg"
                     : isActive
-                    ? "border-cyan-500/40 bg-cyan-500/10 hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.2)]"
-                    : "border-white/5 bg-white/[0.02] opacity-60 grayscale-[50%]";
+                    ? "border-cyan-500/30 bg-cyan-500/10 hover:border-cyan-500/50 hover:shadow-lg"
+                    : "border-gray-700/50 bg-gray-900/40 opacity-70";
 
                   const iconColor = isCompleted ? "text-emerald-400" : isActive ? "text-cyan-400" : "text-gray-500";
 
                   return (
                     <div
                       key={resourceId || index}
-                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition-all duration-300 ${themeClasses}`}
+                      className={`relative flex flex-col justify-between gap-5 rounded-2xl border p-5 transition-all duration-300 ${themeClasses}`}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0A0D14] shadow-inner ${iconColor}`}>
-                          {isCompleted ? <IoCheckmarkCircleOutline size={20} /> : isLocked ? <IoLockClosedOutline size={20} /> : <IoPlayCircleOutline size={20} />}
+                      <div className="flex items-start gap-3">
+                        <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-900/80 shadow-inner ${iconColor}`}>
+                          {isCompleted ? <IoCheckmarkCircleOutline size={22} /> : isLocked ? <IoLockClosedOutline size={20} /> : <IoPlayCircleOutline size={22} />}
                         </div>
-                        <div>
-                          <p className="font-['Inter',sans-serif] text-sm font-medium text-gray-200">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold leading-snug text-gray-200 line-clamp-2" title={resource.title || "Resource material"}>
                             {resource.title || "Resource material"}
                           </p>
-                          <p className="font-mono mt-1 text-[10px] uppercase tracking-widest text-gray-500">
-                            Passed Quizzes: {Number(resourceProgress?.passed_tests_count || 0)}/2
+                          <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                            Passed: {Number(resourceProgress?.passed_tests_count || 0)}/2
                           </p>
                         </div>
                       </div>
@@ -225,11 +223,11 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
                         type="button"
                         onClick={() => openResource(moduleId, resourceId, status)}
                         disabled={isLocked}
-                        className={`font-['Poppins',sans-serif] shrink-0 rounded-xl px-5 py-2 text-xs font-semibold tracking-wide transition-all ${
+                        className={`w-full shrink-0 rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider transition-all ${
                           isLocked
-                            ? "cursor-not-allowed bg-gray-800 text-gray-500"
+                            ? "cursor-not-allowed bg-gray-800/80 text-gray-500"
                             : isActive
-                            ? "bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30"
+                            ? "bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25"
                             : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
                         }`}
                       >
@@ -241,16 +239,16 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
               </div>
 
               {/* Final Assessment Gate */}
-              <div className={`mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border p-5 backdrop-blur-md transition-all ${
+              <div className={`mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-5 transition-all ${
                 canTakeFinal || assessment?.status === "completed" 
-                  ? "border-indigo-500/40 bg-indigo-500/10 hover:shadow-[0_0_25px_rgba(99,102,241,0.2)]" 
-                  : "border-white/5 bg-[#0B0F19]/50"
+                  ? "border-indigo-500/40 bg-indigo-500/10" 
+                  : "border-gray-700/50 bg-gray-900/40"
               }`}>
                 <div>
-                  <p className="font-['Poppins',sans-serif] text-sm font-bold tracking-wide text-indigo-300">
+                  <p className="text-sm font-bold uppercase tracking-wide text-indigo-400">
                     FINAL MODULE ASSESSMENT
                   </p>
-                  <p className="font-['Inter',sans-serif] mt-1 text-xs text-gray-400">
+                  <p className="mt-1 text-sm font-medium text-gray-400">
                     {assessment?.status === "completed"
                       ? "Module completed successfully."
                       : assessment?.published
@@ -260,14 +258,14 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
                 </div>
 
                 {assessment?.status === "completed" ? (
-                  <span className="font-mono rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-400 border border-emerald-500/20">
+                  <span className="rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-400 border border-emerald-500/20">
                     SCORE: {Math.round(Number(assessment?.score || 0) * 100)}%
                   </span>
                 ) : canTakeFinal ? (
                   <button
                     type="button"
                     onClick={() => launchAssessment(moduleId, assessment.assessment_id)}
-                    className="font-['Poppins',sans-serif] shrink-0 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-bold tracking-widest text-white shadow-[0_0_15px_rgba(79,70,229,0.5)] transition-colors hover:bg-indigo-500"
+                    className="shrink-0 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:bg-indigo-500"
                   >
                     START TEST
                   </button>

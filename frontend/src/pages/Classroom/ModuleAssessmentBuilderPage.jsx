@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { IoArrowBackOutline, IoDocumentTextOutline } from 'react-icons/io5';
+import { IoDocumentTextOutline } from 'react-icons/io5';
 import ModuleAssessmentEditor from '../../components/Classroom/ModuleAssessmentEditor';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
+import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import { useLearningModules } from '../../hooks/useClassroom';
 
@@ -65,14 +66,10 @@ const ModuleAssessmentBuilderPage = () => {
       <GlassDashboardShell contentClassName="max-w-5xl">
         <div className="space-y-4">
           <ErrorState message="Module not found for this classroom." />
-          <button
-            type="button"
-            onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700"
-          >
-            <IoArrowBackOutline />
-            Back to Modules
-          </button>
+          <AppBackButton
+            label="Back to Modules"
+            fallbackTo={`/classroom/${classroomId}/modules`}
+          />
         </div>
       </GlassDashboardShell>
     );
@@ -93,15 +90,10 @@ const ModuleAssessmentBuilderPage = () => {
                 Generate an AI draft, refine questions, and publish the final assessment.
               </p>
             </div>
-
-            <button
-              type="button"
-              onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700"
-            >
-              <IoArrowBackOutline />
-              Back to Modules
-            </button>
+            <AppBackButton
+              label="Back to Modules"
+              fallbackTo={`/classroom/${classroomId}/modules`}
+            />
           </div>
         </div>
 

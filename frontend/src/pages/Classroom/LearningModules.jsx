@@ -22,6 +22,7 @@ import {
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
 import LearningModulesStudent from '../../components/Classroom/LearningModulesStudent';
+import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 
 const getModuleId = (module) => module?.module_id || module?._id || '';
@@ -570,6 +571,10 @@ const LearningModulesPage = () => {
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-5">
+          <AppBackButton
+            label="Back to Dashboard"
+            fallbackTo={`/classroom/${classroomId}/dashboard`}
+          />
 
           {/* ── Header band ────────────────────────────────────────────────── */}
           <div className="relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-[#1a1230] via-[#130f1e] to-[#0d1520] p-7 shadow-2xl">
@@ -712,7 +717,13 @@ const LearningModulesPage = () => {
   if (!canManageModules)
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
-        <LearningModulesStudent classroomId={classroomId} modules={orderedModules} />
+        <div className="space-y-4">
+          <AppBackButton
+            label="Back to Dashboard"
+            fallbackTo={`/classroom/${classroomId}/dashboard`}
+          />
+          <LearningModulesStudent classroomId={classroomId} modules={orderedModules} />
+        </div>
       </GlassDashboardShell>
     );
 
@@ -720,6 +731,11 @@ const LearningModulesPage = () => {
   return (
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-6">
+        <AppBackButton
+          label="Back to Dashboard"
+          fallbackTo={`/classroom/${classroomId}/dashboard`}
+        />
+
         <div className="rounded-2xl border border-slate-700/70 bg-gradient-to-r from-slate-900 via-gray-900 to-slate-800 p-6 shadow-2xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>

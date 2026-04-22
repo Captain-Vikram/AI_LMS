@@ -1,17 +1,32 @@
 import React, { useState, useRef } from "react";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useNavbarVisibility from "../hooks/useNavbarVisibility";
 import { navbarVariants, childVariants } from "../animations/navbarAnimations";
 
 const Navbar = () => {
   const isVisible = useNavbarVisibility();
+  const location = useLocation();
   const [hoveredItem, setHoveredItem] = useState(null);
   const navRefs = useRef({});
   const navigate = useNavigate();
   // Check if user is logged in
   const isLoggedIn = localStorage.getItem('isLoggedIn');
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const hiddenRouteMatchers = [
+    /^\/onboarding(?:\/|$)/i,
+    /^\/classroom(?:\/|$)/i,
+    /^\/skill-pathway(?:\/|$)/i,
+  ];
+
+  const shouldHideNavbar = hiddenRouteMatchers.some((matcher) =>
+    matcher.test(location.pathname)
+  );
+
+  if (shouldHideNavbar) {
+    return null;
+  }
 
   // Navigation items with scroll functionality for Features
   const navItems = [

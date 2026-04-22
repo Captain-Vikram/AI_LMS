@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import AppBackButton from '../UI/AppBackButton';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
 import { FiLoader, FiAlertTriangle, FiBookOpen, FiStar, FiCheck, FiArrowRight } from 'react-icons/fi';
 
@@ -76,6 +77,10 @@ const SkillPathwaysCatalog = () => {
 
   return (
     <GlassDashboardShell contentClassName="max-w-6xl">
+      <div className="mb-5">
+        <AppBackButton label="Back to Dashboard" fallbackTo="/dashboard" />
+      </div>
+
       <div className="mb-10 text-center">
         <h1 className="text-4xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-400 inline-block">Skill Pathways Catalog</h1>
         <p className="text-gray-300 max-w-2xl mx-auto text-lg leading-relaxed">

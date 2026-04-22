@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import AppBackButton from '../UI/AppBackButton';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
 import { FiLoader, FiAlertTriangle, FiBook, FiCheckCircle, FiPlayCircle, FiMessageCircle, FiRefreshCw, FiCheck } from 'react-icons/fi';
 
@@ -96,7 +97,9 @@ const SkillPathwayTracker = () => {
       <GlassDashboardShell contentClassName="max-w-6xl">
          <div className="bg-red-900/30 border border-red-700/50 p-6 rounded-lg text-red-200">
           <div className="flex items-center"><FiAlertTriangle className="mr-3 text-2xl"/> {error}</div>
-          <button onClick={() => navigate('/skills')} className="mt-4 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700">Back to Skills</button>
+          <div className="mt-4">
+            <AppBackButton label="Back to Skills" fallbackTo="/skills" />
+          </div>
         </div>
       </GlassDashboardShell>
     );
@@ -108,6 +111,10 @@ const SkillPathwayTracker = () => {
 
   return (
     <GlassDashboardShell contentClassName="max-w-6xl">
+      <div className="mb-4">
+        <AppBackButton label="Back to Skills" fallbackTo="/skills" />
+      </div>
+
       <div className="mb-6 flex items-center justify-between">
          <h1 className="text-3xl font-bold text-white">{dashboardData.pathway_details?.title || 'Skill Pathway'}</h1>
          <div className="flex items-center space-x-4 bg-gray-800/80 px-4 py-2 rounded-xl border border-gray-700/60 shadow-inner">

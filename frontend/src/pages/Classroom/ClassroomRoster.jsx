@@ -11,6 +11,7 @@ import { useEnrollment, useStudentGroups } from '../../hooks/useClassroom';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { RosterTable, RosterStats } from '../../components/Classroom/RosterTable';
 import { GroupManagement } from '../../components/Classroom/GroupManagement';
+import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 
 const ClassroomRoster = () => {
@@ -87,6 +88,11 @@ const ClassroomRoster = () => {
   return (
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-6">
+        <AppBackButton
+          label="Back to Dashboard"
+          fallbackTo={`/classroom/${classroomId}/dashboard`}
+        />
+
         <div className="rounded-2xl border border-slate-700/70 bg-gradient-to-r from-slate-900 via-gray-900 to-slate-800 p-6 shadow-2xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>

@@ -1,14 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import IconsCarousel from "../IconsCarousel";
 import {
-  IoArrowBackOutline,
   IoChatbubbleEllipsesOutline,
+  IoCheckmarkCircle,
   IoHelpCircleOutline,
+  IoOpenOutline,
   IoRefreshOutline,
   IoSparklesOutline,
+  IoTimeOutline,
+  IoTrophyOutline,
 } from "react-icons/io5";
 import apiClient from "../../services/apiClient";
 import { API_ENDPOINTS } from "../../config/api";
+import AppBackButton from "../UI/AppBackButton";
 import QuizModal from "./QuizModal";
 import QuizFeedbackModal from "./QuizFeedbackModal";
 
@@ -57,20 +62,37 @@ const extractYouTubeId = (url) => {
   return match && match[2].length === 11 ? match[2] : null;
 };
 
-const normalizePodcastJob = (payload) => {
-  const source = payload && typeof payload === "object" ? payload : {};
-  return {
-    id: String(source.job_id || source.id || "").trim(),
-    status: String(source.status || "").trim().toLowerCase(),
-    message: String(source.message || "").trim(),
-    result:
-      source.result && typeof source.result === "object"
-        ? source.result
-        : source.result
-          ? { value: source.result }
-          : null,
-    error: String(source.error || "").trim(),
-  };
+const isHttpUrl = (url) => /^https?:\/\//i.test(String(url || "").trim());
+
+const isPdfUrl = (url) => /\.pdf(?:$|[?#])/i.test(String(url || "").trim());
+
+const detectResourcePreviewKind = (resource, url) => {
+  const resourceType = String(
+    resource?.resource_type || resource?.type || resource?.content_type || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (extractYouTubeId(url) || resourceType.includes("youtube")) return "youtube";
+  if (isPdfUrl(url) || resourceType.includes("pdf")) return "pdf";
+  if (
+    resourceType.includes("article") ||
+    resourceType.includes("blog") ||
+    resourceType.includes("link") ||
+    resourceType.includes("document")
+  ) {
+    return isHttpUrl(url) ? "web" : "unknown";
+  }
+  if (isHttpUrl(url)) return "web";
+  return "unknown";
+};
+
+const getUrlHost = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
 };
 
 const InteractiveLessonViewer = () => {
@@ -98,38 +120,42 @@ const InteractiveLessonViewer = () => {
 
   const [infoMessage, setInfoMessage] = useState("");
 
-  const [podcastEpisodeName, setPodcastEpisodeName] = useState("");
-  const [podcastEpisodeProfile, setPodcastEpisodeProfile] = useState("default");
-  const [podcastSpeakerProfile, setPodcastSpeakerProfile] = useState("default");
-  const [podcastBriefingSuffix, setPodcastBriefingSuffix] = useState("");
-  const [podcastSubmitting, setPodcastSubmitting] = useState(false);
-  const [podcastRefreshing, setPodcastRefreshing] = useState(false);
-  const [podcastJob, setPodcastJob] = useState(null);
-
-  const videoUrl = useMemo(
-    () => normalizeResourceUrl(resource?.url || resource?.youtube_url || ""),
+  const resourceUrl = useMemo(
+    () =>
+      normalizeResourceUrl(
+        resource?.url || resource?.youtube_url || resource?.resource_url || resource?.link || ""
+      ),
     [resource]
   );
-  const videoId = useMemo(() => extractYouTubeId(videoUrl), [videoUrl]);
+  const videoId = useMemo(() => extractYouTubeId(resourceUrl), [resourceUrl]);
+  const resourcePreviewKind = useMemo(
+    () => detectResourcePreviewKind(resource, resourceUrl),
+    [resource, resourceUrl]
+  );
+  const resourceHost = useMemo(() => getUrlHost(resourceUrl), [resourceUrl]);
+  const isYouTubeResource = resourcePreviewKind === "youtube";
+
+  const progressStatus = resourceProgress?.status;
+  const testsTaken = Number(resourceProgress?.tests_taken || 0);
+  const passedCount = Number(resourceProgress?.passed_tests_count || 0);
+  const passTarget = 2;
+  const passProgress = Math.min(passedCount / passTarget, 1);
 
   const progressLabel = useMemo(() => {
-    const status = resourceProgress?.status;
-    if (status === "completed") return "Completed";
-    if (status === "in_progress") return "In Progress";
-    if (status === "unlocked") return "Unlocked";
-    if (status === "locked") return "Locked";
+    if (progressStatus === "completed") return "Completed";
+    if (progressStatus === "in_progress") return "In Progress";
+    if (progressStatus === "unlocked") return "Unlocked";
+    if (progressStatus === "locked") return "Locked";
     return "Not Started";
-  }, [resourceProgress]);
+  }, [progressStatus]);
 
-  const podcastJobId = useMemo(
-    () => String(podcastJob?.id || "").trim(),
-    [podcastJob?.id]
-  );
-
-  const isPodcastRunning = useMemo(() => {
-    const status = String(podcastJob?.status || "").toLowerCase();
-    return ["queued", "running", "submitted", "pending"].includes(status);
-  }, [podcastJob?.status]);
+  const statusConfig = useMemo(() => {
+    if (progressStatus === "completed")
+      return { color: "text-emerald-300", bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: <IoCheckmarkCircle className="text-emerald-400" /> };
+    if (progressStatus === "in_progress")
+      return { color: "text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/30", icon: <IoTimeOutline className="text-amber-400" /> };
+    return { color: "text-gray-400", bg: "bg-gray-800/50", border: "border-gray-700", icon: <IoTimeOutline className="text-gray-500" /> };
+  }, [progressStatus]);
 
   const loadProgress = async (targetStudentId, selectedResourceId) => {
     if (!targetStudentId || !moduleId || !classroomId) return;
@@ -203,9 +229,7 @@ const InteractiveLessonViewer = () => {
                   Array.isArray(chatResponse?.chat_history) ? chatResponse.chat_history : []
                 );
               } catch {
-                if (isMounted) {
-                  setChatHistory([]);
-                }
+                if (isMounted) setChatHistory([]);
               }
             })(),
           ]);
@@ -214,9 +238,7 @@ const InteractiveLessonViewer = () => {
         if (!isMounted) return;
         setError(err?.message || "Failed to load lesson");
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -227,58 +249,6 @@ const InteractiveLessonViewer = () => {
     };
   }, [classroomId, moduleId, resourceId]);
 
-  useEffect(() => {
-    if (!podcastJobId || !isPodcastRunning) {
-      return undefined;
-    }
-
-    let isCancelled = false;
-    const timer = setInterval(async () => {
-      try {
-        const statusResponse = await apiClient.get(
-          `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
-            podcastJobId
-          )}`
-        );
-
-        if (!isCancelled) {
-          setPodcastJob(normalizePodcastJob(statusResponse));
-        }
-      } catch {
-        // Keep auto-polling silent. Manual refresh shows explicit failures.
-      }
-    }, 5000);
-
-    return () => {
-      isCancelled = true;
-      clearInterval(timer);
-    };
-  }, [podcastJobId, isPodcastRunning]);
-
-  const buildPodcastContent = () => {
-    const blocks = [];
-
-    const summaryText = String(summary || "").trim();
-    if (summaryText) {
-      blocks.push(`Summary:\n${summaryText}`);
-    }
-
-    const descriptionText = String(resource?.description || resource?.content || "").trim();
-    if (descriptionText) {
-      blocks.push(`Lesson Details:\n${descriptionText}`);
-    }
-
-    if (videoUrl) {
-      blocks.push(`Source URL:\n${videoUrl}`);
-    }
-
-    if (!blocks.length) {
-      blocks.push(`Lesson title: ${resource?.title || "Untitled lesson"}`);
-    }
-
-    return blocks.join("\n\n");
-  };
-
   const toQuizSession = (response) => ({
     quizAttemptId: response?.quiz_attempt_id,
     questions: Array.isArray(response?.questions) ? response.questions : [],
@@ -286,7 +256,7 @@ const InteractiveLessonViewer = () => {
   });
 
   const handleSummary = async () => {
-    if (!resourceId || !videoUrl) return;
+    if (!resourceId || !resourceUrl) return;
 
     setSummaryLoading(true);
     setInfoMessage("");
@@ -299,7 +269,7 @@ const InteractiveLessonViewer = () => {
         response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
           type: "summary",
           resource_id: resourceId,
-          resource_url: videoUrl,
+          resource_url: resourceUrl,
           force_refresh: false,
         });
       } catch {
@@ -307,14 +277,12 @@ const InteractiveLessonViewer = () => {
         response = await apiClient.get(
           `${API_ENDPOINTS.RESOURCE_SUMMARY_GET_OR_CREATE}?resource_id=${encodeURIComponent(
             resourceId
-          )}&resource_url=${encodeURIComponent(videoUrl)}`
+          )}&resource_url=${encodeURIComponent(resourceUrl)}`
         );
       }
 
       setSummary(response?.summary || "Summary unavailable.");
-      const cacheMessage = response?.is_cached
-        ? "Loaded cached summary."
-        : "Generated new summary.";
+      const cacheMessage = response?.is_cached ? "Loaded cached summary." : "Generated new summary.";
       setInfoMessage(`${cacheMessage} (${sourceLabel})`);
     } catch (err) {
       setInfoMessage(err?.message || "Failed to generate summary");
@@ -325,7 +293,7 @@ const InteractiveLessonViewer = () => {
 
   const handleAskQuestion = async (event) => {
     event.preventDefault();
-    if (!question.trim() || !studentId || !videoUrl) return;
+    if (!question.trim() || !studentId || !resourceUrl) return;
 
     setAskingQuestion(true);
     setInfoMessage("");
@@ -333,7 +301,7 @@ const InteractiveLessonViewer = () => {
     try {
       const response = await apiClient.post(`/api/resource/qa/ask`, {
         resource_id: resourceId,
-        resource_url: videoUrl,
+        resource_url: resourceUrl,
         student_id: studentId,
         module_id: moduleId,
         classroom_id: classroomId,
@@ -350,7 +318,12 @@ const InteractiveLessonViewer = () => {
   };
 
   const handleStartQuiz = async () => {
-    if (!videoUrl || !studentId) return;
+    if (!resourceUrl || !studentId) return;
+
+    if (!isYouTubeResource) {
+      setInfoMessage("Quiz generation is currently available for YouTube video resources only.");
+      return;
+    }
 
     setInfoMessage("");
 
@@ -361,7 +334,7 @@ const InteractiveLessonViewer = () => {
       try {
         response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
           type: "quiz",
-          resource_url: videoUrl,
+          resource_url: resourceUrl,
           resource_id: resourceId,
           module_id: moduleId,
           classroom_id: classroomId,
@@ -370,7 +343,7 @@ const InteractiveLessonViewer = () => {
       } catch {
         sourceLabel = "quiz endpoint";
         response = await apiClient.post(API_ENDPOINTS.YOUTUBE_QUIZ_GENERATE, {
-          youtube_url: videoUrl,
+          youtube_url: resourceUrl,
           resource_id: resourceId,
           module_id: moduleId,
           classroom_id: classroomId,
@@ -382,67 +355,6 @@ const InteractiveLessonViewer = () => {
       setInfoMessage(`Quiz generated via ${sourceLabel}.`);
     } catch (err) {
       setInfoMessage(err?.message || "Unable to generate quiz");
-    }
-  };
-
-  const handleGeneratePodcast = async () => {
-    if (!resource || !videoUrl) return;
-
-    setPodcastSubmitting(true);
-    setInfoMessage("");
-
-    try {
-      const episodeName =
-        String(podcastEpisodeName || "").trim() ||
-        `${resource?.title || "Lesson"} Audio Overview`;
-
-      const response = await apiClient.post(
-        API_ENDPOINTS.PORTABLE_RAG_PODCAST_GENERATE,
-        {
-          episode_profile: String(podcastEpisodeProfile || "default").trim() || "default",
-          speaker_profile: String(podcastSpeakerProfile || "default").trim() || "default",
-          episode_name: episodeName,
-          content: buildPodcastContent(),
-          briefing_suffix: String(podcastBriefingSuffix || "").trim() || undefined,
-        }
-      );
-
-      const normalizedJob = normalizePodcastJob(response);
-      setPodcastJob(normalizedJob);
-      setInfoMessage(
-        normalizedJob.id
-          ? `Podcast job submitted: ${normalizedJob.id}`
-          : response?.message || "Podcast job submitted."
-      );
-    } catch (err) {
-      setInfoMessage(err?.message || "Unable to generate podcast");
-    } finally {
-      setPodcastSubmitting(false);
-    }
-  };
-
-  const handleRefreshPodcastStatus = async () => {
-    if (!podcastJobId) {
-      setInfoMessage("Generate a podcast first to check status.");
-      return;
-    }
-
-    setPodcastRefreshing(true);
-    setInfoMessage("");
-
-    try {
-      const response = await apiClient.get(
-        `${API_ENDPOINTS.PORTABLE_RAG_PODCAST_JOB_PREFIX}${encodeURIComponent(
-          podcastJobId
-        )}`
-      );
-      const normalizedJob = normalizePodcastJob(response);
-      setPodcastJob(normalizedJob);
-      setInfoMessage(`Podcast job status: ${normalizedJob.status || "unknown"}.`);
-    } catch (err) {
-      setInfoMessage(err?.message || "Unable to fetch podcast status");
-    } finally {
-      setPodcastRefreshing(false);
     }
   };
 
@@ -469,54 +381,70 @@ const InteractiveLessonViewer = () => {
 
   if (loading) {
     return (
-      <section className="mx-auto max-w-6xl px-4 py-8 text-gray-200">
-        <p>Loading lesson...</p>
+      <section className="relative min-h-screen flex items-center justify-center pt-28 text-gray-200">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+        </div>
+        <div className="relative z-10 flex flex-col items-center space-y-4">
+          <div className="w-12 h-12 border-4 border-t-cyan-500 border-b-indigo-500 border-l-transparent border-r-transparent rounded-full animate-spin"></div>
+          <p className="text-lg font-medium">Loading lesson...</p>
+        </div>
       </section>
     );
   }
 
   if (error || !resource) {
     return (
-      <section className="mx-auto max-w-6xl px-4 py-8 text-gray-200">
-        <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200">
-          {error || "Resource not found."}
-        </p>
-        <button
-          type="button"
-          onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-          className="mt-4 rounded-lg bg-gray-700 px-4 py-2 text-sm text-white hover:bg-gray-600"
-        >
-          Back to Modules
-        </button>
+      <section className="relative min-h-screen flex items-center justify-center pt-28 px-4 text-gray-200">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+          <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+        </div>
+        <div className="relative z-10 bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-8 shadow-xl max-w-xl w-full text-center">
+          <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-4 text-red-200 mb-6 font-medium">
+            {error || "Resource not found."}
+          </p>
+          <div className="flex justify-center">
+            <AppBackButton
+              label="Back to Modules"
+              fallbackTo={`/classroom/${classroomId}/modules`}
+            />
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="mx-auto max-w-7xl space-y-5 px-4 py-8">
-      <header className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
-        <button
-          type="button"
-          onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-          className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"
-        >
-          <IoArrowBackOutline />
-          Back to Modules
-        </button>
-        <h1 className="mt-2 text-2xl font-semibold text-gray-100">{resource.title || "Resource"}</h1>
-        <p className="mt-1 text-sm text-gray-400">{moduleData?.name || "Module"}</p>
+    <section className="relative min-h-screen px-4 py-12 pt-28">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <IconsCarousel backgroundColor="rgba(17, 24, 39, 0.8)" iconColor="gray-500/30" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
+      </div>
+
+      <div className="container mx-auto relative z-10 max-w-7xl">
+        <div className="bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-3xl p-5 md:p-8 shadow-2xl space-y-6">
+          
+      <header className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 pb-6">
+        <AppBackButton
+          label="Back to Modules"
+          fallbackTo={`/classroom/${classroomId}/modules`}
+        />
+        <h1 className="mt-4 text-3xl md:text-4xl font-bold text-white tracking-tight">{resource.title || "Resource"}</h1>
+        <p className="mt-1.5 text-base font-medium text-emerald-400">{moduleData?.name || "Module"}</p>
       </header>
 
       {infoMessage && (
-        <p className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
+        <p className="rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-5 py-4 text-sm text-indigo-200 mb-2">
           {infoMessage}
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-        <div className="xl:col-span-8 space-y-4">
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
-            {videoId ? (
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        <div className="xl:col-span-8 space-y-5">
+          <div className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
+            {resourcePreviewKind === "youtube" && videoId ? (
               <div className="aspect-video overflow-hidden rounded-lg border border-gray-700 bg-black">
                 <iframe
                   title={resource.title || "Lesson video"}
@@ -526,26 +454,93 @@ const InteractiveLessonViewer = () => {
                   allowFullScreen
                 />
               </div>
+            ) : resourcePreviewKind === "pdf" ? (
+              <div className="h-[70vh] overflow-hidden rounded-lg border border-gray-700 bg-gray-950">
+                <iframe
+                  title={resource.title || "Lesson PDF"}
+                  src={resourceUrl}
+                  className="h-full w-full"
+                />
+              </div>
+            ) : resourcePreviewKind === "web" ? (
+              <div className="h-[70vh] overflow-hidden rounded-lg border border-gray-700 bg-white">
+                <iframe
+                  title={resource.title || "Lesson resource"}
+                  src={resourceUrl}
+                  className="h-full w-full"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             ) : (
               <div className="rounded-lg border border-dashed border-gray-700 p-6 text-sm text-gray-400">
-                Unable to embed this resource. Please verify the saved YouTube URL.
+                Preview is unavailable for this source type. Open the source link directly.
               </div>
             )}
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Status</p>
-                <p className="text-sm font-medium text-cyan-200">{progressLabel}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Tests Taken</p>
-                <p className="text-sm font-medium text-gray-100">{Number(resourceProgress?.tests_taken || 0)}</p>
-              </div>
-              <div className="rounded-lg border border-gray-700 bg-gray-950/50 px-3 py-2">
-                <p className="text-xs text-gray-400">Passed (Need 2)</p>
-                <p className="text-sm font-medium text-emerald-300">
-                  {Number(resourceProgress?.passed_tests_count || 0)}/2
+            {resourceUrl && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-700 bg-gray-950/40 px-3 py-2">
+                <p className="text-xs text-gray-300">
+                  {resourcePreviewKind === "youtube"
+                    ? "Source: YouTube video"
+                    : resourcePreviewKind === "pdf"
+                      ? "Source: PDF document"
+                      : resourcePreviewKind === "web"
+                        ? "Source: Article / Blog / Link"
+                        : "Source: External resource"}
+                  {resourceHost ? ` (${resourceHost})` : ""}
                 </p>
+                <a
+                  href={resourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-200"
+                >
+                  <IoOpenOutline />
+                  Open Source
+                </a>
+              </div>
+            )}
+
+            {resourcePreviewKind === "web" && (
+              <p className="mt-2 text-xs text-gray-400">
+                Some websites block iframe embedding. If this panel stays blank, use Open Source.
+              </p>
+            )}
+
+            {/* Progress Card */}
+            <div className={`mt-4 rounded-xl border ${statusConfig.border} ${statusConfig.bg} p-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {statusConfig.icon}
+                  <span className={`text-sm font-semibold ${statusConfig.color}`}>{progressLabel}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <IoTimeOutline className="shrink-0" />
+                  <span>{testsTaken} attempt{testsTaken !== 1 ? "s" : ""} taken</span>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-gray-400 flex items-center gap-1">
+                    <IoTrophyOutline className="text-emerald-400" />
+                    Tests passed
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-300">
+                    {passedCount} / {passTarget}
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
+                    style={{ width: `${passProgress * 100}%` }}
+                  />
+                </div>
+                {passedCount >= passTarget && (
+                  <p className="mt-1.5 text-xs text-emerald-400 font-medium">
+                    ✓ Requirement met — this resource is complete.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -553,7 +548,7 @@ const InteractiveLessonViewer = () => {
               <button
                 type="button"
                 onClick={handleSummary}
-                disabled={summaryLoading || !videoUrl}
+                disabled={summaryLoading || !resourceUrl}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
               >
                 {summaryLoading ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
@@ -563,11 +558,11 @@ const InteractiveLessonViewer = () => {
               <button
                 type="button"
                 onClick={handleStartQuiz}
-                disabled={!videoUrl}
+                disabled={!isYouTubeResource}
                 className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60"
               >
                 <IoHelpCircleOutline />
-                Take Test (Studio)
+                Take Test (YouTube)
               </button>
             </div>
 
@@ -576,103 +571,10 @@ const InteractiveLessonViewer = () => {
                 <p className="text-sm text-blue-100">{summary}</p>
               </div>
             )}
-
-            <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/10 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-violet-100">
-                  Podcast Generator (Portable RAG)
-                </h3>
-                {isPodcastRunning && (
-                  <span className="text-xs text-violet-200">Auto-refreshing every 5s</span>
-                )}
-              </div>
-
-              <p className="mt-1 text-xs text-violet-200/90">
-                Creates a podcast-style audio overview job from this lesson.
-              </p>
-
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  value={podcastEpisodeName}
-                  onChange={(event) => setPodcastEpisodeName(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Episode name (optional)"
-                />
-                <input
-                  value={podcastEpisodeProfile}
-                  onChange={(event) => setPodcastEpisodeProfile(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Episode profile (default)"
-                />
-                <input
-                  value={podcastSpeakerProfile}
-                  onChange={(event) => setPodcastSpeakerProfile(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Speaker profile (default)"
-                />
-                <input
-                  value={podcastBriefingSuffix}
-                  onChange={(event) => setPodcastBriefingSuffix(event.target.value)}
-                  className="rounded-md border border-violet-400/30 bg-gray-950/70 px-3 py-2 text-sm text-gray-100 focus:border-violet-300 focus:outline-none"
-                  placeholder="Briefing suffix (optional)"
-                />
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleGeneratePodcast}
-                  disabled={podcastSubmitting || !videoUrl}
-                  className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {podcastSubmitting ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
-                  {podcastSubmitting ? "Submitting Podcast Job..." : "Generate Podcast"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleRefreshPodcastStatus}
-                  disabled={podcastRefreshing || !podcastJobId}
-                  className="inline-flex items-center gap-2 rounded-lg bg-violet-900/60 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-800/70 disabled:opacity-60"
-                >
-                  {podcastRefreshing ? <IoRefreshOutline className="animate-spin" /> : <IoRefreshOutline />}
-                  Refresh Job Status
-                </button>
-              </div>
-
-              {podcastJob && (
-                <div className="mt-3 rounded-lg border border-violet-400/25 bg-black/30 p-3 text-xs text-violet-100">
-                  <p>
-                    <span className="font-semibold text-violet-200">Job ID:</span>{" "}
-                    {podcastJob.id || "Not provided"}
-                  </p>
-                  <p className="mt-1">
-                    <span className="font-semibold text-violet-200">Status:</span>{" "}
-                    {podcastJob.status || "unknown"}
-                  </p>
-                  {podcastJob.message && (
-                    <p className="mt-1">
-                      <span className="font-semibold text-violet-200">Message:</span>{" "}
-                      {podcastJob.message}
-                    </p>
-                  )}
-                  {podcastJob.error && (
-                    <p className="mt-1 text-rose-200">
-                      <span className="font-semibold text-rose-100">Error:</span> {podcastJob.error}
-                    </p>
-                  )}
-                  {podcastJob.result && (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-violet-400/20 bg-gray-950/70 p-2 text-[11px] text-violet-100">
-                      {JSON.stringify(podcastJob.result, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
-        <aside className="xl:col-span-4 rounded-xl border border-gray-700 bg-gray-900/60 p-4">
+        <aside className="xl:col-span-4 rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
           <h2 className="inline-flex items-center gap-2 text-lg font-semibold text-gray-100">
             <IoChatbubbleEllipsesOutline className="text-cyan-300" />
             Ask AI
@@ -701,12 +603,12 @@ const InteractiveLessonViewer = () => {
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               rows={3}
-              placeholder="Ask about a concept in this video..."
+              placeholder="Ask about a concept in this lesson resource..."
               className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-cyan-500 focus:outline-none"
             />
             <button
               type="submit"
-              disabled={askingQuestion || !question.trim() || !videoUrl}
+              disabled={askingQuestion || !question.trim() || !resourceUrl}
               className="w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60"
             >
               {askingQuestion ? "Asking..." : "Ask Question"}
@@ -714,6 +616,9 @@ const InteractiveLessonViewer = () => {
           </form>
         </aside>
       </div>
+
+      </div>
+        </div>
 
       {quizSession && (
         <QuizModal

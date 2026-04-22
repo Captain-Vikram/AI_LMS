@@ -118,6 +118,25 @@ Preferred (MongoDB + Vector DB together):
 docker compose -f docker-compose.infra.yml up -d
 ```
 
+DB-only lifecycle commands:
+
+```powershell
+# Start only MongoDB + Vector DB
+docker compose -f docker-compose.infra.yml up -d
+
+# Check status
+docker compose -f docker-compose.infra.yml ps
+
+# View logs
+docker compose -f docker-compose.infra.yml logs -f
+
+# Stop containers
+docker compose -f docker-compose.infra.yml stop
+
+# Stop and remove containers/network (keeps data)
+docker compose -f docker-compose.infra.yml down
+```
+
 Default host ports in `docker-compose.infra.yml`:
 
 - MongoDB: `27017 -> 27017`

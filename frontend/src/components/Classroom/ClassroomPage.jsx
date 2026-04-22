@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   FiArrowRight,
   FiCopy,
@@ -9,11 +9,11 @@ import {
   FiBookOpen,
   FiAlertCircle,
   FiLoader,
-  FiChevronLeft,
   FiCheck,
 } from 'react-icons/fi';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
+import AppBackButton from '../UI/AppBackButton';
 import GlassDashboardShell from '../UI/GlassDashboardShell';
 import { canManageClassroom } from '../../utils/classroomRoles';
 
@@ -215,12 +215,7 @@ const ClassroomPage = () => {
       <div className="space-y-6 px-4 py-6 sm:px-6">
 
         {/* ── Back link ── */}
-        <Link
-          to="/classrooms"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-cyan-400"
-        >
-          <FiChevronLeft size={14} /> Back to all classrooms
-        </Link>
+        <AppBackButton label="Back to Classrooms" fallbackTo="/classrooms" />
 
         {/* ── Hero header ── */}
         <div className="flex flex-col gap-4 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-slate-800/70 to-slate-900/80 p-6 shadow-xl backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">

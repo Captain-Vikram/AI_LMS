@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
+import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import {
   IoCheckmarkCircleOutline,
@@ -116,13 +117,10 @@ const ClassroomSettings = () => {
                 Maintain classroom details, enrollment access, and status from one workspace.
               </p>
             </div>
-            <button
-              onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}
-              className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-600"
-            >
-              <IoGridOutline />
-              Back to Dashboard
-            </button>
+            <AppBackButton
+              label="Back to Dashboard"
+              fallbackTo={`/classroom/${classroomId}/dashboard`}
+            />
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 export const PendingAssignments = ({ assignments = [], loading = false }) => {
@@ -82,6 +82,8 @@ export const PendingAssignments = ({ assignments = [], loading = false }) => {
 };
 
 export const SubmissionList = ({ submissions = [], loading = false }) => {
+  const [displayLimit, setDisplayLimit] = useState(3);
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-2">
@@ -102,10 +104,10 @@ export const SubmissionList = ({ submissions = [], loading = false }) => {
 
   return (
     <div className="space-y-2">
-      {submissions.map((submission) => (
+      {submissions.slice(0, displayLimit).map((submission, idx) => (
         <div
-          key={submission.assignment_id}
-          className="p-3 rounded-lg bg-gray-800 border border-gray-700 hover:border-blue-500 transition-colors"
+          key={`${submission.assignment_id || 'sub'}-${idx}`}
+          className="p-3 rounded-lg bg-gray-800 border border-gray-700 hover:border-emerald-500/50 transition-colors"
         >
           <div className="flex items-start justify-between mb-2">
             <div className="flex-1">
@@ -131,6 +133,17 @@ export const SubmissionList = ({ submissions = [], loading = false }) => {
           </div>
         </div>
       ))}
+
+      {submissions.length > displayLimit && (
+        <div className="pt-2 text-center">
+          <button
+            onClick={() => setDisplayLimit((prev) => prev + 5)}
+            className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 px-4 py-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors shadow-sm active:scale-95"
+          >
+            Show {Math.min(5, submissions.length - displayLimit)} More
+          </button>
+        </div>
+      )}
     </div>
   );
 };
