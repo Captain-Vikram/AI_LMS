@@ -1,0 +1,29 @@
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=4196, pipe_handle=1584)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "C:\Users\konth\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\main.py", line 14, in <module>
+    from routes.auth_routes import router as auth_router
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\routes\auth_routes.py", line 10, in <module>
+    from models.user_models import UserRegistration, UserLogin
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\models\user_models.py", line 45, in <module>
+    class UserModel(BaseModel):
+    ...<21 lines>...
+        badge_progress: Dict[str, Any] = {}
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\models\user_models.py", line 60, in UserModel
+    xp_data: Dict[str, Any] = {
+             ^^^^
+NameError: name 'Dict' is not defined. Did you mean: 'dict'? 

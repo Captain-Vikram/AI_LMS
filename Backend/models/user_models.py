@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 
 class UserRegistration(BaseModel):
@@ -56,3 +56,12 @@ class UserModel(BaseModel):
     # Backward compatible flags
     onboarding_complete: Optional[bool] = None
     assessment_complete: Optional[bool] = None
+    # Gamification
+    xp_data: Dict[str, Any] = {
+        "current": 0,
+        "level": 1,
+        "level_threshold": 100,
+        "total_earned": 0
+    }
+    earned_badges: List[Dict[str, Any]] = []
+    badge_progress: Dict[str, Any] = {}

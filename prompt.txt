@@ -1,0 +1,61 @@
+This prompt is designed for a coding agent (like GitHub Copilot, Cursor, or a specialized LLM agent). It organizes your feedback into technical requirements, categorized by file, while respecting your constraints regarding hardcoded auth and PDF-only requirements.
+
+---
+
+# Prompt for Coding Agent: Module Assessment System Refinement
+
+**Context:**
+You are refining a FastAPI-based educational assessment system. The system handles "Standard Assessments" and "Multi-mode Workflows" (Scenario, PDF, Article, LaTeX). You must address the following logic gaps, missing features, and stability issues.
+
+**Constraints:**
+* **Auth:** Keep hardcoded identity strings (e.g., `"current_teacher_id"`) as placeholders for now.
+* **PPT/PDF:** Ignore `python-pptx` logic. Students are required to upload **PDF only** for the PPT category. Remove any current `.pptx` extraction placeholders.
+* **Environment:** MongoDB/Motor is the primary database.
+
+---
+
+## 1. File `module_assessment.py` (Models)
+* **Workflow Models:** Update Pydantic models (if necessary) to include `bloom_config` within the `WorkflowUpdateRequest`.
+* **Submission Storage:** Ensure the submission model can store metadata for uploaded files (file path/key, original filename, and content type).
+
+## 2. File `module_assessment_workflow_routes.py`
+### **File Storage & Retrieval (Priority)**
+* **Implement Persistence:** Currently, file bytes for PDF (PPT category) and `.tex` (Research category) are discarded after extraction. Implement a storage mechanism (e.g., saving to a local `uploads/` directory or MongoDB GridFS).
+* **New Endpoint:** `GET /submission/{submission_id}/download`: Fetch the stored file for teacher review.
+* **Update Submit Artifact:** Modify `submit_artifact` to save the file and record the storage reference in the submission document.
+
+### **Workflow Logic & Validation**
+* **Updatable Bloom's Config:** Add `bloom_config: Optional[Dict[str, Any]]` to `WorkflowUpdateRequest`. In the PATCH handler, use `_normalize_bloom_config` to update the draft.
+* **Validation on Finalize:**
+    * **Research:** Verify `latex_template.get("full_text")` exists and is not empty before allowing publication.
+    * **Topic Selection:** Block publication for PPT, Article, and Research if no `selected_topic_id` has been set.
+    * **Scenario Set ID:** In the PATCH handler, validate that the `selected_scenario_set_id` actually exists within the `question_sets` array using a check similar to `_topic_id_exists`.
+* **Bloom's Alignment Warning:** Implement a check in `_normalize_scenario_sets`. If a teacher edits a prompt, compare the text against the assigned `bloom_verb`. If they don't align, return a `bloom_alignment_warning` flag in the response (do not block, just warn).
+
+### **Grading & Scraper Improvements**
+* **Article Teacher Override:** Change article submissions from `is_final_score: True` to a state that allows teacher overrides. Ensure the `teacher-review` endpoint accepts Article submissions even if AI grading is complete.
+* **JS-Heavy Scraping:** Update `_fetch_article_text` to handle modern blog platforms (Medium/Substack). Suggest using a library like `trafilatura` or a basic fallback logic if the initial scrape returns insufficient text.
+* **Race Condition:** Refactor submission logic to use MongoDB `find_one_and_update` with a filter `{ "submitted_at": None }` to ensure a student cannot submit the same assessment twice simultaneously.
+
+### **Serialization & Visibility**
+* **Expose Content:** Update `_serialize_submission` to include the `content` dictionary (URLs, file names, excerpts) so teachers can actually see what they are grading.
+* **Bloom's Context:** Include the `bloom_config` and specific question Bloom levels in the submission serializer so the teacher knows the cognitive target of each response during review.
+
+## 3. File `module_assessment_routes.py`
+* **Standard Assessment Parity:** Ensure any relevant logic fixes (like the submission race condition or serialization improvements) are mirrored here for standard assessments.
+
+## 4. New Endpoints (Required)
+* **`POST /workflow/{workflow_id}/regenerate`**: Re-run the AI topic/scenario generation logic to overwrite the current draft if the teacher is unhappy with the initial results.
+* **`GET /submissions/workflow/{workflow_id}`**: List all submissions for a specific workflow (regardless of grading status) to provide a class-wide overview.
+* **`GET /submissions/my/{student_id}`**: Allow students to retrieve a list of their own past and current submissions.
+
+## 5. Performance Optimization
+* **N+1 Query Fix:** Refactor `get_pending_workflow_grades`. Instead of querying the `users` and `workflows` collections inside a loop, collect all required IDs first and perform two `$in` queries to fetch all metadata in bulk.
+
+---
+
+### **Specific Change Instructions for the Agent:**
+1.  **Refactor `submit_artifact`** in `module_assessment_workflow_routes.py` to include a file-writing step.
+2.  **Modify `finalize_workflow`** to include the strict validation checks for LaTeX templates and selected topics.
+3.  **Update `WorkflowUpdateRequest` Pydantic class** and its corresponding logic in the PATCH route to handle `bloom_config`.
+4.  **Rewrite the `pending-grades` logic** to use an aggregation or bulk-find approach to solve the N+1 issue.

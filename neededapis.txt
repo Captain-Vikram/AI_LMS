@@ -1,4 +1,3 @@
-from Backend import database
 import os
 from pymongo import MongoClient
 

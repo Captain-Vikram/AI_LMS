@@ -54,7 +54,26 @@ def get_available_pathways(
         pathways = list(db.global_learning_pathways.find({}, {"stages.resource_generation_prompt": 0}))
         for p in pathways:
             p["_id"] = str(p["_id"])
+            if "total_stages" not in p:
+                p["total_stages"] = len(p.get("stages", []))
         return {"status": "success", "data": pathways}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{pathway_id}")
+def get_pathway_blueprint(
+    pathway_id: str,
+    db = Depends(get_db)
+):
+    """Get full blueprint of a specific skill pathway."""
+    try:
+        pathway = db.global_learning_pathways.find_one({"_id": pathway_id}, {"stages.resource_generation_prompt": 0})
+        if not pathway:
+            raise HTTPException(status_code=404, detail="Pathway not found")
+        pathway["_id"] = str(pathway["_id"])
+        if "total_stages" not in pathway:
+            pathway["total_stages"] = len(pathway.get("stages", []))
+        return {"status": "success", "data": pathway}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -113,18 +132,50 @@ def get_my_pathways(
         for progress in enrolled:
             pathway = db.global_learning_pathways.find_one(
                 {"_id": progress["pathway_id"]},
-                {"title": 1, "description": 1, "total_stages": 1}
+                {"title": 1, "description": 1, "stages": 1}
             )
             if pathway:
                 progress["_id"] = str(progress["_id"])
+                total_stages = len(pathway.get("stages", []))
                 progress["pathway_details"] = {
                     "title": pathway.get("title"),
                     "description": pathway.get("description"),
-                    "total_stages": pathway.get("total_stages")
+                    "total_stages": total_stages
                 }
                 results.append(progress)
                 
         return {"status": "success", "data": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/progress/{pathway_id}")
+def get_specific_pathway_progress(
+    pathway_id: str,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get detailed progress for a specific enrolled pathway."""
+    try:
+        student_id = str(current_user["user_id"])
+        progress = db.student_pathway_progress.find_one({"student_id": student_id, "pathway_id": pathway_id})
+        if not progress:
+            raise HTTPException(status_code=404, detail="Not enrolled in this pathway")
+            
+        pathway = db.global_learning_pathways.find_one(
+            {"_id": pathway_id},
+            {"title": 1, "description": 1, "stages": 1}
+        )
+        
+        progress["_id"] = str(progress["_id"])
+        if pathway:
+            total_stages = len(pathway.get("stages", []))
+            progress["pathway_details"] = {
+                "title": pathway.get("title"),
+                "description": pathway.get("description"),
+                "total_stages": total_stages
+            }
+            
+        return {"status": "success", "data": progress}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -160,6 +211,62 @@ def get_stage_details(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{pathway_id}/stage/{stage_index}/complete")
+def complete_stage_manually(
+    pathway_id: str,
+    stage_index: int,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark a stage as completed (useful for project stages)."""
+    try:
+        student_id = str(current_user["user_id"])
+        
+        # 1. Mark stage as completed
+        db.student_pathway_progress.update_one(
+            {"student_id": student_id, "pathway_id": pathway_id, "stage_progress.stage_index": stage_index},
+            {"$set": {"stage_progress.$.status": "completed", "stage_progress.$.project_completed": True}}
+        )
+        
+        # 2. Unlock next stage
+        next_stage_index = stage_index + 1
+        db.student_pathway_progress.update_one(
+            {"student_id": student_id, "pathway_id": pathway_id, "stage_progress.stage_index": next_stage_index},
+            {"$set": {"stage_progress.$.status": "in-progress"}}
+        )
+        
+        return {"status": "success", "message": "Stage marked as completed and next stage unlocked."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{pathway_id}/stage/{stage_index}/resource/{resource_id}/tests")
+async def generate_resource_tests(
+    pathway_id: str,
+    stage_index: int,
+    resource_id: str,
+    service: SkillPathwayService = Depends(get_pathway_service),
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate tests for a specific resource in a pathway stage."""
+    student_id = str(current_user["user_id"])
+    progress = db.student_pathway_progress.find_one({"student_id": student_id, "pathway_id": pathway_id})
+    if not progress:
+        raise HTTPException(status_code=404, detail="Enrollment not found")
+        
+    stage_tracker = next((s for s in progress.get("stage_progress", []) if s["stage_index"] == stage_index), None)
+    if not stage_tracker:
+        raise HTTPException(status_code=404, detail="Stage not found")
+        
+    resource = next((r for r in stage_tracker.get("resources", []) if r["resource_id"] == resource_id), None)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+        
+    result = await service.generate_tests_for_resource(pathway_id, stage_index, resource["title"])
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message"))
+    return result
 
 @router.post("/{pathway_id}/stage/{stage_index}/generate-resources")
 async def trigger_resource_generation(

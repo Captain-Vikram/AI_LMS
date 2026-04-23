@@ -27,6 +27,7 @@ from routes.dashboard_routes import router as dashboard_router
 from routes.announcements_routes import router as announcements_router
 from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
+from routes.module_assessment_workflow_routes import router as module_assessment_workflow_router
 from routes.skill_pathway_routes import router as skill_pathway_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo
@@ -106,6 +107,7 @@ app.include_router(analytics_router)
 app.include_router(user_router)
 app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
+app.include_router(module_assessment_workflow_router)
 app.include_router(skill_pathway_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.

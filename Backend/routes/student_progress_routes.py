@@ -117,15 +117,51 @@ async def get_student_progress(
             sort=[("updated_at", -1)],
         )
 
+        # Check for workflow assessment as well
+        workflow = db.module_assessment_workflows.find_one(
+            {
+                "module_id": {"$in": [module_id, str(module_oid)]},
+                "is_published": True
+            },
+            sort=[("finalized_at", -1)]
+        )
+
         final_assessment_data = {
             "status": "coming_soon",
             "published": False,
             "assessment_id": None,
             "valid_from": None,
             "valid_until": None,
+            "mode": "standard"
         }
 
-        if assessment:
+        if workflow:
+            # Workflow takes precedence if published
+            workflow_id = str(workflow.get("_id"))
+            final_assessment_data["status"] = "published"
+            final_assessment_data["published"] = True
+            final_assessment_data["assessment_id"] = workflow_id
+            final_assessment_data["mode"] = "workflow"
+            if workflow.get("finalized_at"):
+                final_assessment_data["valid_from"] = workflow["finalized_at"].isoformat()
+            
+            # Check for workflow submission
+            wf_submission = db.module_assessment_workflow_submissions.find_one({
+                "workflow_id": {"$in": [workflow_id, workflow.get("_id")]},
+                "student_id": student_id,
+            }, sort=[("submitted_at", -1)])
+
+            if wf_submission:
+                if wf_submission.get("status") == "graded" or wf_submission.get("grading_status") == "fully_graded":
+                    final_assessment_data["status"] = "completed"
+                    final_assessment_data["score"] = wf_submission.get("score_percentage", 0)
+                    final_assessment_data["passed"] = wf_submission.get("passed", False)
+                elif wf_submission.get("submitted_at"):
+                    final_assessment_data["status"] = "submitted"
+                else:
+                    final_assessment_data["status"] = "in_progress"
+
+        elif assessment:
             assessment_id = str(assessment.get("_id"))
             final_assessment_data["status"] = assessment.get("status", "draft")
             final_assessment_data["published"] = assessment.get("is_published", False)
