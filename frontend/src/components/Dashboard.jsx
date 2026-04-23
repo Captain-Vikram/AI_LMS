@@ -37,8 +37,10 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [myPathways, setMyPathways] = useState([]);
   const [pathwayStageData, setPathwayStageData] = useState(null);
+  const [pathwayBlueprint, setPathwayBlueprint] = useState(null);
   const [pathwayStageLoading, setPathwayStageLoading] = useState(false);
   const [pathwayActionLoading, setPathwayActionLoading] = useState(false);
+  const [completingStage, setCompletingStage] = useState(false);
   const [userSkills, setUserSkills] = useState([]);
   const [assessmentHistory, setAssessmentHistory] = useState([]);
   const [analyticsData, setAnalyticsData] = useState({
@@ -64,6 +66,7 @@ const Dashboard = () => {
 
   const [badges, setBadges] = useState([]);
   const [achievementQueue, setAchievementQueue] = useState([]);
+  const [isRoadmapExpanded, setIsRoadmapExpanded] = useState(false);
 
   const addErrorMessage = (message) => {
     setErrorMessages((prevMessages) => {
@@ -171,6 +174,9 @@ const Dashboard = () => {
           category: badge.category,
           color: badge.color,
           icon: badge.icon,
+          unlocked: badge.unlocked,
+          earned_date: badge.earned_date,
+          progress: badge.progress,
           xpAwarded: badge.xp_awarded,
           reward: badge.reward || null,
         }))
@@ -398,6 +404,20 @@ const Dashboard = () => {
     }
   };
 
+  const fetchPathwayBlueprint = async () => {
+    if (!isSkillPathwayMode || !focusedPathwayId) return;
+    try {
+      if (API_ENDPOINTS.PATHWAY_GET_BLUEPRINT) {
+        const response = await apiClient.get(API_ENDPOINTS.PATHWAY_GET_BLUEPRINT(focusedPathwayId));
+        if (response?.status === "success") {
+          setPathwayBlueprint(response.data);
+        }
+      }
+    } catch (error) {
+      console.warn("Could not load pathway blueprint", error);
+    }
+  };
+
   const verifyUserStatus = async () => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -448,9 +468,23 @@ const Dashboard = () => {
       fetchUserSkills(),
       fetchUserData(),
       fetchMyPathways(),
+      isSkillPathwayMode ? fetchPathwayBlueprint() : Promise.resolve(),
     ]);
 
     setIsRefreshing(false);
+  };
+
+  const handleCompleteStage = async (stageIndex) => {
+    if (!focusedPathwayId) return;
+    setCompletingStage(true);
+    try {
+      await apiClient.post(API_ENDPOINTS.PATHWAY_COMPLETE_STAGE(focusedPathwayId, stageIndex));
+      await refreshDashboardData();
+    } catch (error) {
+      addErrorMessage(`Unable to complete stage: ${error.message}`);
+    } finally {
+      setCompletingStage(false);
+    }
   };
 
   const handleGenerateFocusedResources = async () => {
@@ -555,6 +589,7 @@ const Dashboard = () => {
     }
 
     fetchFocusedPathwayStageData();
+    fetchPathwayBlueprint();
   }, [isSkillPathwayMode, focusedPathwayId, focusedCurrentStage?.stage_index]);
 
   useEffect(() => {
@@ -615,15 +650,13 @@ const Dashboard = () => {
               <h1 className="text-3xl font-bold text-white mb-2">
                 {isSkillPathwayMode
                   ? `${focusedPathway?.pathway_details?.title || "Skill Pathway"} Dashboard`
-                  : `Welcome back, ${userData.firstName || "Learner"} ${
-                      userData.lastName || ""
-                    }`}
+                  : `Welcome back, ${userData.firstName || "Learner"} ${userData.lastName || ""
+                  }`}
               </h1>
               <p className="text-gray-400">
                 {isSkillPathwayMode
-                  ? `Track your stage progress and continue learning with AI-generated resources for Stage ${
-                      focusedCurrentStage?.stage_index || 1
-                    }.`
+                  ? `Track your stage progress and continue learning with AI-generated resources for Stage ${focusedCurrentStage?.stage_index || 1
+                  }.`
                   : `Last active: ${userData.lastActive || "Today"}`}
               </p>
             </div>
@@ -663,29 +696,22 @@ const Dashboard = () => {
           )}
 
           <div className="flex justify-start space-x-2">
-          <button
-            onClick={() => setShowBadgeCollection(true)}
-            className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mt-6"
-          >
-            <IoGridOutline className="mr-2" />
-            View Badge Collection
-          </button>
-
-          <a
-              href={codingLabUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => setShowBadgeCollection(true)}
               className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors mt-6"
-          >
-            Try out coding!
-          </a>
+            >
+              <IoGridOutline className="mr-2" />
+              View Badge Collection
+            </button>
+
+
           </div>
 
           {showBadgeCollection && (
-              <BadgeCollection
-                  badges={badges}
-                  onClose={() => setShowBadgeCollection(false)}
-              />
+            <BadgeCollection
+              badges={badges}
+              onClose={() => setShowBadgeCollection(false)}
+            />
           )}
 
           <div className="mt-4 mb-8">
@@ -697,7 +723,7 @@ const Dashboard = () => {
           </div>
 
           {/* Main Content Grid */}
-          
+
           {/* Enrolled Pathways Section */}
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
@@ -723,7 +749,7 @@ const Dashboard = () => {
                   const progressPct = Math.round(
                     (stageProgress.filter((s) => s.status === "completed").length /
                       totalStages) *
-                      100
+                    100
                   );
                   const pathwayDescription = String(
                     pathway?.pathway_details?.description || ""
@@ -744,13 +770,13 @@ const Dashboard = () => {
                           {progressPct}% Complete
                         </div>
                       </div>
-                      
+
                       <div className="mb-3">
                         <div className="w-full bg-gray-600 rounded-full h-1.5">
                           <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-1.5 rounded-full" style={{ width: `${progressPct}%` }}></div>
                         </div>
                       </div>
-                      
+
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-300"><span className="text-white font-medium">Current Phase:</span> Stage {currentStage?.stage_index || 1}</span>
                         <span className="text-gray-400">{currentStage?.status || "locked"}</span>
@@ -773,138 +799,115 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {isSkillPathwayMode && (
-            <div className="mb-8 rounded-2xl border border-indigo-500/30 bg-gray-700/40 p-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-white mb-1 flex items-center">
-                    <IoLayersOutline className="mr-2 text-indigo-300" />
-                    Stage Workspace
-                  </h2>
-                  <p className="text-sm text-gray-300">
-                    Stage {focusedCurrentStage?.stage_index || 1} • Status: {focusedCurrentStage?.status || "locked"} • {focusedProgressPercent}% pathway complete
-                  </p>
-                </div>
+          {isSkillPathwayMode && pathwayBlueprint && (
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-white mb-6 flex items-center">
+                <IoLayersOutline className="mr-2 text-indigo-400" />
+                Pathway Roadmap
+              </h2>
+              
+              <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-600 before:to-transparent">
+                {(isRoadmapExpanded ? pathwayBlueprint.stages : pathwayBlueprint.stages.slice(0, 3)).map((stage, i) => {
+                  const stageState = focusedStageProgress.find(s => s.stage_index === stage.stage_index) || { status: "locked" };
+                  const isCompleted = stageState.status === "completed";
+                  const isActive = stageState.status === "in-progress";
+                  const isLocked = stageState.status === "locked";
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={refreshDashboardData}
-                    disabled={isRefreshing || pathwayActionLoading}
-                    className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 disabled:opacity-60 text-white text-sm inline-flex items-center"
-                  >
-                    <IoRefreshOutline className="mr-2" />
-                    {isRefreshing ? "Refreshing..." : "Refresh"}
-                  </button>
-                  <button
-                    onClick={handleGenerateFocusedResources}
-                    disabled={pathwayActionLoading || !focusedCurrentStage?.stage_index}
-                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm inline-flex items-center"
-                  >
-                    <IoFlashOutline className="mr-2" />
-                    {pathwayActionLoading ? "Working..." : "Generate Study Material"}
-                  </button>
-                </div>
-              </div>
+                  return (
+                    <div key={stage.stage_index} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                      <div className={`flex items-center justify-center w-10 h-10 rounded-full border-4 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 absolute left-0 md:left-1/2 -translate-x-1/2 md:translate-x-0 
+                        ${isCompleted ? 'bg-emerald-500 border-gray-800 text-gray-900 text-xl font-bold' : 
+                          isActive ? 'bg-indigo-500 border-gray-800 text-white shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 
+                          'bg-gray-700 border-gray-800 text-gray-400'}`}>
+                        {isCompleted ? <IoCheckmarkCircleOutline className="text-xl text-white" /> : stage.stage_index}
+                      </div>
 
-              <div className="mt-5 grid grid-cols-1 xl:grid-cols-12 gap-4">
-                <div className="xl:col-span-4 rounded-xl border border-indigo-500/20 bg-gray-800/50 p-4">
-                  <h3 className="text-base font-semibold text-indigo-200 mb-3">Learning Objectives</h3>
-                  {Array.isArray(pathwayStageData?.blueprint_topics) &&
-                  pathwayStageData.blueprint_topics.length > 0 ? (
-                    <ul className="space-y-3">
-                      {pathwayStageData.blueprint_topics.map((topic, topicIndex) => (
-                        <li key={`${topic.name || "topic"}-${topicIndex}`} className="text-sm text-gray-300">
-                          <span className="block font-medium text-indigo-300 mb-1">
-                            {topic.name || `Topic ${topicIndex + 1}`}
+                      <div className={`w-[calc(100%-3rem)] md:w-[calc(50%-2.5rem)] p-5 rounded-2xl border backdrop-blur-md transition-all
+                        ${isActive ? 'bg-indigo-900/30 border-indigo-500/50 shadow-lg' : 
+                          isCompleted ? 'bg-gray-800/60 border-emerald-500/20' : 
+                          'bg-gray-800/40 border-gray-700/50 opacity-70'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                          <h3 className={`text-lg font-bold ${isCompleted ? 'text-emerald-300' : isActive ? 'text-indigo-200' : 'text-gray-400'}`}>
+                            {stage.title}
+                          </h3>
+                          <span className={`text-[10px] font-black tracking-wider uppercase px-2 py-1 rounded 
+                            ${isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 
+                              isActive ? 'bg-indigo-500/30 text-indigo-300' : 
+                              'bg-gray-700 text-gray-500'}`}>
+                            {stageState.status}
                           </span>
-                          <ul className="list-disc pl-5 text-gray-400 space-y-1">
-                            {(topic.subtopics || []).map((subtopic, subtopicIndex) => (
-                              <li key={`${subtopic}-${subtopicIndex}`}>{subtopic}</li>
+                        </div>
+
+                        {stage.topics && stage.topics.length > 0 && (
+                          <div className="mt-3 mb-4 space-y-2">
+                            {stage.topics.map((topic, idx) => (
+                              <div key={idx}>
+                                <h4 className="text-sm font-semibold text-gray-300 mb-1">{topic.name}</h4>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {(topic.subtopics || []).map((subtopic, sIdx) => (
+                                    <span key={sIdx} className="text-[11px] bg-gray-900/50 text-gray-400 px-2 py-0.5 rounded border border-gray-700/50">
+                                      {subtopic}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
                             ))}
-                          </ul>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-gray-400">Objectives will appear here after stage details are loaded.</p>
-                  )}
+                          </div>
+                        )}
 
-                  <div className="mt-4 rounded-lg border border-indigo-500/25 bg-indigo-900/30 p-3">
-                    <p className="text-xs uppercase tracking-wide text-indigo-200/80 mb-1">Project Prompt</p>
-                    <p className="text-sm text-indigo-100/90">
-                      {pathwayStageData?.project_prompt || "Follow the generated resources and complete each resource test to advance."}
-                    </p>
-                  </div>
+                        {isActive && (
+                          <div className="mt-4 pt-4 border-t border-indigo-500/20">
+                            {stage.project_assessment_prompt && (
+                              <div className="mb-4 bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
+                                <p className="text-[10px] uppercase font-bold text-blue-400 mb-1">Project Objective</p>
+                                <p className="text-xs text-blue-200/80">{stage.project_assessment_prompt}</p>
+                              </div>
+                            )}
 
-                  <div className="mt-4 rounded-lg border border-blue-500/25 bg-blue-900/20 p-3">
-                    <p className="text-xs uppercase tracking-wide text-blue-200/80 mb-1">Assessment Prompt</p>
-                    <p className="text-sm text-blue-100/90">
-                      {pathwayStageData?.quiz_prompt ||
-                        "Assessments are generated from the current stage and selected resource content."}
-                    </p>
-                  </div>
-                </div>
+                            <div className="flex flex-wrap gap-2">
+                              {focusedResources.length === 0 ? (
+                                <button
+                                  onClick={handleGenerateFocusedResources}
+                                  disabled={pathwayActionLoading || !focusedCurrentStage?.stage_index}
+                                  className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+                                >
+                                  {pathwayActionLoading ? "Working..." : "Generate Resources"}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={handleOpenResourcesWorkspace}
+                                  className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center"
+                                >
+                                  <IoPlayCircleOutline className="mr-1" /> Open Resources
+                                </button>
+                              )}
 
-                <div className="xl:col-span-8 rounded-xl border border-gray-700 bg-gray-800/40 p-4">
-                  <h3 className="text-base font-semibold text-white mb-3">Resource Workspace</h3>
-
-                  {pathwayStageLoading ? (
-                    <div className="rounded-lg border border-gray-700/80 bg-gray-900/40 p-4 text-sm text-gray-300">
-                      Loading stage resources...
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
-                          <p className="text-xs text-gray-400">Total Resources</p>
-                          <p className="text-lg font-semibold text-white">{focusedResources.length}</p>
-                        </div>
-                        <div className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
-                          <p className="text-xs text-gray-400">Videos / Articles</p>
-                          <p className="text-lg font-semibold text-white">{focusedVideoCount} / {focusedArticleCount}</p>
-                        </div>
-                        <div className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
-                          <p className="text-xs text-gray-400">Mastered Resources</p>
-                          <p className="text-lg font-semibold text-emerald-300">{focusedMasteredCount}</p>
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg border border-dashed border-gray-600 bg-gray-900/20 p-4">
-                        <p className="text-sm text-gray-300">
-                          Resource cards, Study actions, and per-resource tests are moved to a dedicated page for cleaner skill dashboard flow.
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          onClick={handleOpenResourcesWorkspace}
-                          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm inline-flex items-center"
-                        >
-                          <IoPlayCircleOutline className="mr-2" />
-                          Open Resources Page
-                        </button>
-
-                        <button
-                          onClick={handleTakeSkillAssessment}
-                          className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm"
-                        >
-                          Take Skill Assessment
-                        </button>
-
-                        {focusedResources.length === 0 && (
-                          <button
-                            onClick={handleGenerateFocusedResources}
-                            disabled={pathwayActionLoading || !focusedCurrentStage?.stage_index}
-                            className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-60 text-white text-sm"
-                          >
-                            {pathwayActionLoading ? "Working..." : "Generate Resources"}
-                          </button>
+                              <button
+                                onClick={() => handleCompleteStage(stage.stage_index)}
+                                disabled={completingStage}
+                                className="px-3 py-1.5 rounded border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold"
+                              >
+                                {completingStage ? "Updating..." : "Mark Fully Complete"}
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })}
               </div>
+
+              {pathwayBlueprint.stages.length > 3 && (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={() => setIsRoadmapExpanded(!isRoadmapExpanded)}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-gray-800/80 text-gray-300 border border-gray-600/50 hover:bg-gray-700 hover:text-white transition-all shadow-lg text-sm font-medium z-10"
+                  >
+                    {isRoadmapExpanded ? "Show Less" : `Show ${pathwayBlueprint.stages.length - 3} More Stages`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -961,11 +964,10 @@ const Dashboard = () => {
                         (area, index) => (
                           <li key={index} className="flex items-center">
                             <span
-                              className={`h-2 w-2 rounded-full mr-2 ${
-                                area.level === "needs improvement"
+                              className={`h-2 w-2 rounded-full mr-2 ${area.level === "needs improvement"
                                   ? "bg-amber-400"
                                   : "bg-green-400"
-                              }`}
+                                }`}
                             ></span>
                             {area.skill}
                           </li>
@@ -1015,11 +1017,10 @@ const Dashboard = () => {
                     >
                       <div className="relative w-full flex justify-center">
                         <div
-                          className={`w-6 ${
-                            activity.count > 0
+                          className={`w-6 ${activity.count > 0
                               ? "bg-gradient-to-t from-purple-600 to-blue-500"
                               : "bg-gray-600/30"
-                          } rounded-t-sm`}
+                            } rounded-t-sm`}
                           style={{ height: `${activity.percentage}%` }}
                         ></div>
                         {activity.count > 0 && (
@@ -1116,13 +1117,12 @@ const Dashboard = () => {
                 <div className="bg-gray-800/50 p-4 rounded-lg">
                   <h3 className="text-white font-medium mb-2">Score Change</h3>
                   <div
-                    className={`text-xl font-bold ${
-                      analyticsData.assessmentProgress.scoreChange > 0
+                    className={`text-xl font-bold ${analyticsData.assessmentProgress.scoreChange > 0
                         ? "text-green-400"
                         : analyticsData.assessmentProgress.scoreChange < 0
-                        ? "text-red-400"
-                        : "text-gray-300"
-                    }`}
+                          ? "text-red-400"
+                          : "text-gray-300"
+                      }`}
                   >
                     {analyticsData.assessmentProgress.scoreChange > 0 && "+"}
                     {analyticsData.assessmentProgress.scoreChange.toFixed(1)}%
@@ -1244,31 +1244,30 @@ const Dashboard = () => {
                         <p className="text-xl text-white font-semibold">
                           {assessmentHistory.length >= 3
                             ? Math.round(
-                                (new Date(assessmentHistory[0].timestamp) -
-                                  new Date(
-                                    assessmentHistory[
-                                      assessmentHistory.length - 1
-                                    ].timestamp
-                                  )) /
-                                  (1000 *
-                                    60 *
-                                    60 *
-                                    24 *
-                                    (assessmentHistory.length - 1))
-                              ) + "d"
+                              (new Date(assessmentHistory[0].timestamp) -
+                                new Date(
+                                  assessmentHistory[
+                                    assessmentHistory.length - 1
+                                  ].timestamp
+                                )) /
+                              (1000 *
+                                60 *
+                                60 *
+                                24 *
+                                (assessmentHistory.length - 1))
+                            ) + "d"
                             : "N/A"}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400">Improvement</p>
                         <p
-                          className={`text-xl font-semibold ${
-                            assessmentHistory[0].score.percentage >
-                            assessmentHistory[assessmentHistory.length - 1]
-                              .score.percentage
+                          className={`text-xl font-semibold ${assessmentHistory[0].score.percentage >
+                              assessmentHistory[assessmentHistory.length - 1]
+                                .score.percentage
                               ? "text-green-400"
                               : "text-red-400"
-                          }`}
+                            }`}
                         >
                           {(
                             assessmentHistory[0].score.percentage -
@@ -1303,13 +1302,12 @@ const Dashboard = () => {
                             </div>
                             <div className="w-full bg-gray-700 rounded-full h-1.5">
                               <div
-                                className={`h-1.5 rounded-full ${
-                                  level === "beginner"
+                                className={`h-1.5 rounded-full ${level === "beginner"
                                     ? "bg-green-500"
                                     : level === "intermediate"
-                                    ? "bg-blue-500"
-                                    : "bg-purple-500"
-                                }`}
+                                      ? "bg-blue-500"
+                                      : "bg-purple-500"
+                                  }`}
                                 style={{ width: `${percentage}%` }}
                               ></div>
                             </div>
@@ -1323,97 +1321,7 @@ const Dashboard = () => {
             </div>
           )}
 
-          {/* More Bento Layout Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            {/* Upcoming Milestones */}
-            <div className="bg-gray-700/50 rounded-xl p-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
-                <IoRocketOutline className="mr-2 text-blue-400" />
-                Upcoming Milestones
-              </h2>
-              <div className="space-y-4">
-                {analyticsData.upcomingMilestones.length > 0 ? (
-                  analyticsData.upcomingMilestones.map((milestone, index) => (
-                    <div
-                      key={milestone.id || `${milestone.name}-${index}`}
-                      className="bg-gray-800/50 p-4 rounded-lg"
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <h3 className="text-white font-medium">
-                          {milestone.name}
-                        </h3>
-                        <span className="text-blue-400 text-sm">
-                          {milestone.progress}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-700 rounded-full h-2">
-                        <div
-                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
-                          style={{ width: `${milestone.progress}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="bg-gray-800/40 border border-gray-700/60 p-4 rounded-lg text-gray-300 text-sm">
-                    No milestones yet. Create one from your learning path to track progress.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Recent Achievements */}
-            <div className="bg-gray-700/50 rounded-xl p-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
-                <IoTrophyOutline className="mr-2 text-yellow-400" />
-                Recent Achievements
-              </h2>
-              <div className="space-y-4">
-                {analyticsData.recentAchievements.length > 0 ? (
-                  analyticsData.recentAchievements.map((achievement, index) => (
-                    <div
-                      key={achievement.id || `${achievement.name}-${index}`}
-                      className="bg-gray-800/50 p-4 rounded-lg flex items-start"
-                    >
-                      <div className="bg-yellow-400/20 p-2 rounded-full mr-3">
-                        <IoTrophyOutline className="text-yellow-400 text-xl" />
-                      </div>
-                      <div>
-                        <h3 className="text-white font-medium">
-                          {achievement.name}
-                        </h3>
-                        <p className="text-gray-400 text-sm">
-                          {achievement.description}
-                        </p>
-                        <p className="text-gray-500 text-xs mt-1">
-                          {achievement.date}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="bg-gray-800/40 border border-gray-700/60 p-4 rounded-lg text-gray-300 text-sm">
-                    No recent achievements yet. Keep learning to unlock your first badge.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* User Skills Section */}
-          <div className="mt-6">
-            <div className="mb-4">
-              <h2 className="text-xl font-semibold text-white flex items-center">
-                <IoBookOutline className="mr-2 text-blue-400" />
-                Your Skills Progress
-              </h2>
-            </div>
-            <UserSkills
-              skills={userSkills}
-              isLoading={isLoading}
-              error={null}
-            />
-          </div>
+          {/* Removed Milestones, Achievements, and Generic Skills Blocks per User Request */}
 
           {newAchievement && (
             <AchievementNotification

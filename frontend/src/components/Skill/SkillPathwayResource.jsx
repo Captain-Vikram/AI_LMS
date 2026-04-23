@@ -9,6 +9,8 @@ import {
   IoSparklesOutline,
   IoTimeOutline,
   IoTrophyOutline,
+  IoBookOutline,
+  IoOpenOutline,
 } from "react-icons/io5";
 import apiClient from "../../services/apiClient";
 import { API_ENDPOINTS } from "../../config/api";
@@ -88,39 +90,33 @@ const SkillPathwayResource = () => {
   const [quizFeedback, setQuizFeedback] = useState(null);
 
   const [infoMessage, setInfoMessage] = useState("");
-  const [stageQuizPrompt, setStageQuizPrompt] = useState("");
   const [hasAutoOpenedAssessment, setHasAutoOpenedAssessment] = useState(false);
 
-  const videoUrl = useMemo(
+  const resourceUrl = useMemo(
     () => normalizeResourceUrl(resource?.url || resource?.youtube_url || ""),
     [resource]
   );
-  const videoId = useMemo(() => extractYouTubeId(videoUrl), [videoUrl]);
+  const isVideo = resource?.type === 'video';
+  const youtubeId = useMemo(() => isVideo ? extractYouTubeId(resourceUrl) : null, [isVideo, resourceUrl]);
 
   const progressStatus = resourceProgress?.status;
-  const testsTaken = Number(resourceProgress?.tests_taken || 0);
   const passedCount = Number(resourceProgress?.passed_tests_count || 0);
   const passTarget = 2;
   const passProgress = Math.min(passedCount / passTarget, 1);
 
   const progressLabel = useMemo(() => {
-    if (progressStatus === "completed") return "Completed";
-    if (progressStatus === "in_progress") return "In Progress";
-    if (progressStatus === "unlocked") return "Unlocked";
-    if (progressStatus === "locked") return "Locked";
-    return "Not Started";
-  }, [progressStatus]);
+    if (passedCount >= 2) return "Completed";
+    return "In Progress";
+  }, [passedCount]);
 
   const statusConfig = useMemo(() => {
-    if (progressStatus === "completed")
+    if (passedCount >= 2)
       return { color: "text-emerald-300", bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: <IoCheckmarkCircle className="text-emerald-400" /> };
-    if (progressStatus === "in_progress")
-      return { color: "text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/30", icon: <IoTimeOutline className="text-amber-400" /> };
-    return { color: "text-gray-400", bg: "bg-gray-800/50", border: "border-gray-700", icon: <IoTimeOutline className="text-gray-500" /> };
-  }, [progressStatus]);
+    return { color: "text-amber-300", bg: "bg-amber-500/10", border: "border-amber-500/30", icon: <IoTimeOutline className="text-amber-400" /> };
+  }, [passedCount]);
 
-  const loadProgress = async (targetStudentId, selectedResourceId) => {
-    if (!targetStudentId || !pathwayId || !stageIndex) return;
+  const loadProgress = async (selectedResourceId) => {
+    if (!pathwayId || !stageIndex) return;
 
     try {
       const response = await apiClient.get(API_ENDPOINTS.PATHWAY_STAGE_DETAILS(pathwayId, stageIndex));
@@ -128,10 +124,7 @@ const SkillPathwayResource = () => {
       const resources = Array.isArray(tracker.resources) ? tracker.resources : [];
       const found = resources.find((item) => item.resource_id === selectedResourceId) || null;
       if (found) {
-        setResourceProgress({
-          ...found,
-          status: found.passed_tests_count >= 2 ? "completed" : "in_progress",
-        });
+        setResourceProgress(found);
       } else {
         setResourceProgress(null);
       }
@@ -163,45 +156,34 @@ const SkillPathwayResource = () => {
         ).trim();
         setStudentId(resolvedStudentId);
 
-        const modulePayload = stageResponse?.data?.tracker || null;
-        if (!modulePayload) {
+        const tracker = stageResponse?.data?.tracker || null;
+        if (!tracker) {
           throw new Error("Stage tracker not found");
         }
 
-        setStageQuizPrompt(String(stageResponse?.data?.quiz_prompt || "").trim());
         setModuleData({ name: `Stage ${stageIndex}` });
 
-        const moduleResources = Array.isArray(modulePayload.resources)
-          ? modulePayload.resources
-          : [];
-
-        const selectedResource = moduleResources.find(
-          (item) => getResourceId(item) === String(resourceId)
-        );
+        const moduleResources = Array.isArray(tracker.resources) ? tracker.resources : [];
+        const selectedResource = moduleResources.find((item) => getResourceId(item) === String(resourceId));
 
         if (!selectedResource) {
           throw new Error("Resource not found in this stage");
         }
 
         setResource(selectedResource);
+        setResourceProgress(selectedResource);
 
         if (resolvedStudentId) {
-          await Promise.all([
-            loadProgress(resolvedStudentId, resourceId),
-            (async () => {
-              try {
-                const chatResponse = await apiClient.get(
-                  `/api/resource/chat-history/${resourceId}/${resolvedStudentId}`
-                );
-                if (!isMounted) return;
-                setChatHistory(
-                  Array.isArray(chatResponse?.chat_history) ? chatResponse.chat_history : []
-                );
-              } catch {
-                if (isMounted) setChatHistory([]);
-              }
-            })(),
-          ]);
+          try {
+            const chatResponse = await apiClient.get(
+              `/api/resource/chat-history/${resourceId}/${resolvedStudentId}`
+            );
+            if (isMounted) {
+              setChatHistory(Array.isArray(chatResponse?.chat_history) ? chatResponse.chat_history : []);
+            }
+          } catch {
+            if (isMounted) setChatHistory([]);
+          }
         }
       } catch (err) {
         if (!isMounted) return;
@@ -222,41 +204,22 @@ const SkillPathwayResource = () => {
     setHasAutoOpenedAssessment(false);
   }, [pathwayId, stageIndex, resourceId]);
 
-  const toQuizSession = (response) => ({
-    quizAttemptId: response?.quiz_attempt_id,
-    questions: Array.isArray(response?.questions) ? response.questions : [],
-    totalPoints: Number(response?.total_points || 0),
-  });
-
   const handleSummary = async () => {
-    if (!resourceId || !videoUrl) return;
+    if (!resourceId || !resourceUrl) return;
 
     setSummaryLoading(true);
     setInfoMessage("");
 
     try {
-      let response;
-      let sourceLabel = "studio";
-
-      try {
-        response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
-          type: "summary",
-          resource_id: resourceId,
-          resource_url: videoUrl,
-          force_refresh: false,
-        });
-      } catch {
-        sourceLabel = "resource endpoint";
-        response = await apiClient.get(
-          `${API_ENDPOINTS.RESOURCE_SUMMARY_GET_OR_CREATE}?resource_id=${encodeURIComponent(
-            resourceId
-          )}&resource_url=${encodeURIComponent(videoUrl)}`
-        );
-      }
+      const response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
+        type: "summary",
+        resource_id: resourceId,
+        resource_url: resourceUrl,
+        force_refresh: false,
+      });
 
       setSummary(response?.summary || "Summary unavailable.");
-      const cacheMessage = response?.is_cached ? "Loaded cached summary." : "Generated new summary.";
-      setInfoMessage(`${cacheMessage} (${sourceLabel})`);
+      setInfoMessage(response?.is_cached ? "Loaded cached summary." : "Generated new summary.");
     } catch (err) {
       setInfoMessage(err?.message || "Failed to generate summary");
     } finally {
@@ -266,7 +229,7 @@ const SkillPathwayResource = () => {
 
   const handleAskQuestion = async (event) => {
     event.preventDefault();
-    if (!question.trim() || !studentId || !videoUrl) return;
+    if (!question.trim() || !studentId || !resourceUrl) return;
 
     setAskingQuestion(true);
     setInfoMessage("");
@@ -274,7 +237,7 @@ const SkillPathwayResource = () => {
     try {
       const response = await apiClient.post(`/api/resource/qa/ask`, {
         resource_id: resourceId,
-        resource_url: videoUrl,
+        resource_url: resourceUrl,
         student_id: studentId,
         module_id: moduleId,
         classroom_id: classroomId,
@@ -291,47 +254,43 @@ const SkillPathwayResource = () => {
   };
 
   const handleStartQuiz = async () => {
-    if (!videoUrl || !studentId) return;
-
+    setLoading(true);
     setInfoMessage("");
 
     try {
-      let response;
-      let sourceLabel = "studio";
+      const response = await apiClient.get(API_ENDPOINTS.PATHWAY_GENERATE_TESTS(pathwayId, stageIndex, resourceId));
+      if (response.status === 'success') {
+        const tests = response.tests;
+        // Logic: if passedCount < 1, show test_1, else show test_2
+        const testToTake = passedCount < 1 ? tests.test_1 : tests.test_2;
+        
+        const transformedQuestions = testToTake.questions.map((q, idx) => ({
+          id: `q-${idx}`,
+          question_text: q.q,
+          options: q.options,
+          correct_answer: q.answer,
+          points: 20
+        }));
 
-      try {
-        response = await apiClient.post(API_ENDPOINTS.STUDIO_GENERATE, {
-          type: "quiz",
-          resource_url: videoUrl,
-          resource_id: resourceId,
-          module_id: moduleId,
-          classroom_id: classroomId,
-          student_id: studentId,
-          pathway_quiz_prompt: stageQuizPrompt || undefined,
+        setQuizSession({
+          quizAttemptId: `pathway-test-${passedCount + 1}`,
+          questions: transformedQuestions,
+          totalPoints: 100,
+          rawTestData: testToTake
         });
-      } catch {
-        sourceLabel = "quiz endpoint";
-        response = await apiClient.post(API_ENDPOINTS.YOUTUBE_QUIZ_GENERATE, {
-          youtube_url: videoUrl,
-          resource_id: resourceId,
-          module_id: moduleId,
-          classroom_id: classroomId,
-          student_id: studentId,
-          pathway_quiz_prompt: stageQuizPrompt || undefined,
-        });
+        setInfoMessage(`Skill assessment ${passedCount + 1} generated.`);
       }
-
-      setQuizSession(toQuizSession(response));
-      setInfoMessage(`Quiz generated via ${sourceLabel}.`);
     } catch (err) {
-      setInfoMessage(err?.message || "Unable to generate quiz");
+      setInfoMessage(err?.message || "Unable to generate assessment");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     const shouldAutoOpenAssessment = searchParams.get("assessment") === "1";
     if (!shouldAutoOpenAssessment || hasAutoOpenedAssessment || loading) return;
-    if (!videoUrl || !studentId) return;
+    if (!resourceUrl || !studentId) return;
 
     setHasAutoOpenedAssessment(true);
     handleStartQuiz();
@@ -339,24 +298,49 @@ const SkillPathwayResource = () => {
     const updatedParams = new URLSearchParams(searchParams);
     updatedParams.delete("assessment");
     setSearchParams(updatedParams, { replace: true });
-  }, [searchParams, hasAutoOpenedAssessment, loading, videoUrl, studentId, setSearchParams, stageQuizPrompt]);
+  }, [searchParams, hasAutoOpenedAssessment, loading, resourceUrl, studentId, setSearchParams]);
 
   const handleSubmitQuiz = async (quizAttemptId, answers) => {
     setSubmittingQuiz(true);
     setInfoMessage("");
 
     try {
-      const response = await apiClient.post(API_ENDPOINTS.YOUTUBE_QUIZ_SUBMIT, {
-        quiz_attempt_id: quizAttemptId,
-        student_id: studentId,
-        answers,
+      // Grade locally
+      let score = 0;
+      const feedbackQuestions = quizSession.questions.map(q => {
+        const studentAns = answers.find(a => a.question_id === q.id)?.answer;
+        const isCorrect = String(studentAns).trim().toLowerCase() === String(q.correct_answer).trim().toLowerCase();
+        if (isCorrect) score += q.points;
+        return {
+          question_text: q.question_text,
+          your_answer: studentAns,
+          correct_answer: q.correct_answer,
+          is_correct: isCorrect,
+          points: isCorrect ? q.points : 0
+        };
+      });
+
+      const passed = score >= 80;
+      
+      // Submit to backend
+      const response = await apiClient.post(API_ENDPOINTS.PATHWAY_SUBMIT_TEST(pathwayId, stageIndex), {
+        resource_id: resourceId,
+        score_percent: score
       });
 
       setQuizSession(null);
-      setQuizFeedback(response);
-      await loadProgress(studentId, resourceId);
+      setQuizFeedback({
+        score_obtained: score,
+        total_points: 100,
+        score_percentage: score / 100,
+        passed,
+        ai_feedback: passed ? "Great job! You mastered this assessment." : "Keep studying and try again to reach 80%.",
+        correct_answers: feedbackQuestions
+      });
+      
+      await loadProgress(resourceId);
     } catch (err) {
-      setInfoMessage(err?.message || "Unable to submit quiz");
+      setInfoMessage(err?.message || "Unable to submit assessment");
     } finally {
       setSubmittingQuiz(false);
     }
@@ -371,7 +355,7 @@ const SkillPathwayResource = () => {
         </div>
         <div className="relative z-10 flex flex-col items-center space-y-4">
           <div className="w-12 h-12 border-4 border-t-cyan-500 border-b-indigo-500 border-l-transparent border-r-transparent rounded-full animate-spin"></div>
-          <p className="text-lg font-medium">Loading lesson...</p>
+          <p className="text-lg font-medium">Loading skill resource...</p>
         </div>
       </section>
     );
@@ -415,7 +399,7 @@ const SkillPathwayResource = () => {
           fallbackTo={`/skill-pathway/${pathwayId}/resources`}
         />
         <h1 className="mt-4 text-3xl md:text-4xl font-bold text-white tracking-tight">{resource.title || "Resource"}</h1>
-        <p className="mt-1.5 text-base font-medium text-emerald-400">{moduleData?.name || `Stage ${stageIndex}`}</p>
+        <p className="mt-1.5 text-base font-medium text-indigo-400">{moduleData?.name || `Stage ${stageIndex}`}</p>
       </header>
 
       {infoMessage && (
@@ -427,45 +411,50 @@ const SkillPathwayResource = () => {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
         <div className="xl:col-span-8 space-y-5">
           <div className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
-            {videoId ? (
-              <div className="aspect-video overflow-hidden rounded-lg border border-gray-700 bg-black">
-                <iframe
-                  title={resource.title || "Lesson video"}
-                  src={`https://www.youtube.com/embed/${videoId}`}
-                  className="h-full w-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
+            {isVideo ? (
+              youtubeId ? (
+                <div className="aspect-video overflow-hidden rounded-lg border border-gray-700 bg-black">
+                  <iframe
+                    title={resource.title || "Lesson video"}
+                    src={`https://www.youtube.com/embed/${youtubeId}`}
+                    className="h-full w-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-700 p-6 text-center">
+                   <p className="text-gray-400 mb-4 text-sm">This video lecture could not be embedded directly.</p>
+                   <a href={resourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg font-bold transition-all">
+                     <IoOpenOutline /> View on YouTube
+                   </a>
+                </div>
+              )
             ) : (
-              <div className="rounded-lg border border-dashed border-gray-700 p-6 text-sm text-gray-400">
-                Unable to embed this resource. Please verify the saved YouTube URL.
+              <div className="bg-gray-900/40 rounded-xl p-8 border border-gray-700 text-center">
+                 <IoBookOutline className="text-cyan-400 text-5xl mx-auto mb-4" />
+                 <h2 className="text-xl font-bold text-white mb-2">Article Workspace</h2>
+                 <p className="text-gray-400 mb-6 max-w-md mx-auto">DeepSearch has curated this comprehensive article to cover the stage subtopics. Open it in a new tab to study.</p>
+                 <a href={resourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3 rounded-lg font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105">
+                   <IoOpenOutline /> Read Full Article
+                 </a>
               </div>
             )}
 
             {/* Progress Card */}
-            <div className={`mt-4 rounded-xl border ${statusConfig.border} ${statusConfig.bg} p-4`}>
+            <div className={`mt-6 rounded-xl border ${statusConfig.border} ${statusConfig.bg} p-4`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   {statusConfig.icon}
                   <span className={`text-sm font-semibold ${statusConfig.color}`}>{progressLabel}</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                  <IoTimeOutline className="shrink-0" />
-                  <span>{testsTaken} attempt{testsTaken !== 1 ? "s" : ""} taken</span>
+                  <IoTrophyOutline className="text-emerald-400" />
+                  <span>{passedCount} / {passTarget} assessments passed</span>
                 </div>
               </div>
 
               <div className="mt-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-gray-400 flex items-center gap-1">
-                    <IoTrophyOutline className="text-emerald-400" />
-                    Tests passed
-                  </span>
-                  <span className="text-xs font-semibold text-emerald-300">
-                    {passedCount} / {passTarget}
-                  </span>
-                </div>
                 <div className="h-2 w-full rounded-full bg-gray-800 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
@@ -474,80 +463,85 @@ const SkillPathwayResource = () => {
                 </div>
                 {passedCount >= passTarget && (
                   <p className="mt-1.5 text-xs text-emerald-400 font-medium">
-                    ✓ Requirement met — this resource is complete.
+                    ✓ Requirement met — this resource is mastered.
                   </p>
                 )}
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-6 flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={handleSummary}
-                disabled={summaryLoading || !videoUrl}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
+                disabled={summaryLoading || !resourceUrl}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-all shadow-lg shadow-blue-600/20"
               >
                 {summaryLoading ? <IoRefreshOutline className="animate-spin" /> : <IoSparklesOutline />}
-                {summaryLoading ? "Generating Summary..." : "Generate Summary (Studio)"}
+                {summaryLoading ? "Generating..." : "AI Summary"}
               </button>
 
               <button
                 type="button"
                 onClick={handleStartQuiz}
-                disabled={!videoUrl}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60"
+                disabled={!resourceUrl || passedCount >= 2}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-60 transition-all shadow-lg shadow-indigo-600/20"
               >
                 <IoHelpCircleOutline />
-                Take Test (Studio)
+                {passedCount >= 2 ? "Mastered" : `Take Assessment ${passedCount + 1}`}
               </button>
             </div>
 
             {summary && (
-              <div className="mt-4 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3">
-                <p className="text-sm text-blue-100">{summary}</p>
+              <div className="mt-6 rounded-xl border border-blue-500/30 bg-blue-900/20 p-5 shadow-inner">
+                <h3 className="text-blue-300 font-bold mb-2 flex items-center gap-2 text-sm"><IoSparklesOutline /> AI Key Takeaways</h3>
+                <p className="text-sm text-blue-100 leading-relaxed">{summary}</p>
               </div>
             )}
           </div>
         </div>
 
-        <aside className="xl:col-span-4 rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5">
-          <h2 className="inline-flex items-center gap-2 text-lg font-semibold text-gray-100">
+        <aside className="xl:col-span-4 rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 flex flex-col h-full">
+          <h2 className="inline-flex items-center gap-2 text-lg font-semibold text-gray-100 mb-4">
             <IoChatbubbleEllipsesOutline className="text-cyan-300" />
-            Ask AI
+            AI Study Assistant
           </h2>
 
-          <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+          <div className="flex-1 max-h-[500px] space-y-3 overflow-y-auto pr-1 mb-4 scrollbar-thin scrollbar-thumb-gray-700">
             {chatHistory.length > 0 ? (
               chatHistory.map((item, index) => (
                 <article
                   key={`${item.asked_at || index}-${index}`}
-                  className="rounded-lg border border-gray-700 bg-gray-950/70 px-3 py-2"
+                  className="rounded-lg border border-gray-700 bg-gray-900/80 p-3 shadow-sm"
                 >
-                  <p className="text-xs text-cyan-200">Q: {item.question}</p>
-                  <p className="mt-1 text-sm text-gray-100">A: {item.answer}</p>
+                  <p className="text-xs font-bold text-cyan-400 mb-1">Question</p>
+                  <p className="text-sm text-gray-200 mb-3">{item.question}</p>
+                  <div className="h-px bg-gray-700/50 mb-2"></div>
+                  <p className="text-xs font-bold text-emerald-400 mb-1">Answer</p>
+                  <p className="text-sm text-gray-300 italic">{item.answer}</p>
                 </article>
               ))
             ) : (
-              <p className="rounded-lg border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">
-                Ask focused questions about this lesson. Each answer is stored in your resource chat history.
-              </p>
+              <div className="rounded-xl border border-dashed border-gray-700 p-8 text-center bg-gray-900/30">
+                 <IoChatbubbleEllipsesOutline className="text-gray-600 text-3xl mx-auto mb-3" />
+                 <p className="text-sm text-gray-400">Ask focused questions about this lesson to deepen your understanding.</p>
+              </div>
             )}
           </div>
 
-          <form onSubmit={handleAskQuestion} className="mt-4 space-y-2">
+          <form onSubmit={handleAskQuestion} className="space-y-3 mt-auto">
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               rows={3}
-              placeholder="Ask about a concept in this video..."
-              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-cyan-500 focus:outline-none"
+              placeholder="How does X relate to Y? Explain in detail..."
+              className="w-full rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-gray-100 focus:border-cyan-500 focus:outline-none transition-all"
             />
             <button
               type="submit"
-              disabled={askingQuestion || !question.trim() || !videoUrl}
-              className="w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60"
+              disabled={askingQuestion || !question.trim() || !resourceUrl}
+              className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 py-3 text-sm font-bold text-white transition-all shadow-lg shadow-cyan-600/20"
             >
-              {askingQuestion ? "Asking..." : "Ask Question"}
+              {askingQuestion ? "Analyzing..." : "Ask Question"}
             </button>
           </form>
         </aside>

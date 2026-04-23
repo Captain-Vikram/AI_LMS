@@ -251,6 +251,10 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
                   <p className="mt-1 text-sm font-medium text-gray-400">
                     {assessment?.status === "completed"
                       ? "Module completed successfully."
+                      : assessment?.status === "submitted"
+                      ? "Assessment submitted. Pending teacher review."
+                      : assessment?.status === "in_progress"
+                      ? "You have an assessment in progress."
                       : assessment?.published
                       ? "Complete all resources first to unlock."
                       : "Coming soon. Teacher has not published."}
@@ -261,13 +265,18 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
                   <span className="rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-400 border border-emerald-500/20">
                     SCORE: {Math.round(Number(assessment?.score || 0) * 100)}%
                   </span>
-                ) : canTakeFinal ? (
+                ) : assessment?.status === "submitted" ? (
+                  <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-500 border border-amber-500/20 uppercase">
+                    <div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    PENDING REVIEW
+                  </div>
+                ) : canTakeFinal && assessment?.assessment_id ? (
                   <button
                     type="button"
                     onClick={() => launchAssessment(moduleId, assessment.assessment_id)}
                     className="shrink-0 rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:bg-indigo-500"
                   >
-                    START TEST
+                    {assessment?.status === "in_progress" ? "RESUME TEST" : "START TEST"}
                   </button>
                 ) : null}
               </div>

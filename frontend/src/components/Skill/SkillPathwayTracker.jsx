@@ -21,15 +21,9 @@ const SkillPathwayTracker = () => {
     const fetchProgress = async () => {
       setLoading(true);
       try {
-        const pgRes = await apiClient.get(API_ENDPOINTS.PATHWAYS_MY_PROGRESS);
+        const pgRes = await apiClient.get(API_ENDPOINTS.PATHWAY_GET_PROGRESS(id));
         if (pgRes.status === 'success') {
-          const pathwayList = Array.isArray(pgRes?.data) ? pgRes.data : [];
-          const matched = pathwayList.find((p) => p?.pathway_id === id);
-          if (!matched) {
-            setError("You are not enrolled in this pathway.");
-            setLoading(false);
-            return;
-          }
+          const matched = pgRes.data;
           setDashboardData(matched);
           
           // Determine active stage
@@ -75,6 +69,20 @@ const SkillPathwayTracker = () => {
       alert("Failed generating resources: " + err.message);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleCompleteStage = async () => {
+    if (!window.confirm("Have you completed the project for this stage? This will advance you to the next stage.")) return;
+    
+    try {
+      const res = await apiClient.post(API_ENDPOINTS.PATHWAY_COMPLETE_STAGE(id, currentStageIndex));
+      if (res.status === 'success') {
+        alert(res.message);
+        window.location.reload();
+      }
+    } catch (err) {
+      alert("Error completing stage: " + err.message);
     }
   };
 
@@ -143,7 +151,13 @@ const SkillPathwayTracker = () => {
 
             <div className="bg-indigo-900/30 border border-indigo-700/50 rounded-xl p-5">
                <h3 className="text-lg font-semibold text-indigo-200 mb-3">Project Assessment</h3>
-               <p className="text-sm text-indigo-300/80 italic">{projectPrompt || "Follow along with the generated resources."}</p>
+               <p className="text-sm text-indigo-300/80 italic mb-4">{projectPrompt || "Follow along with the generated resources."}</p>
+               <button 
+                onClick={handleCompleteStage}
+                className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold transition-all"
+               >
+                 Mark Project as Completed
+               </button>
             </div>
          </div>
 

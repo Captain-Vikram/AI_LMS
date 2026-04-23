@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { IoDocumentTextOutline } from 'react-icons/io5';
-import ModuleAssessmentEditor from '../../components/Classroom/ModuleAssessmentEditor';
+import ModuleAssessmentWorkflowPrototype from '../../components/Classroom/ModuleAssessmentWorkflowPrototype';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
@@ -25,7 +25,6 @@ const normalizeClassroomRole = (rawRole) => {
 
 const ModuleAssessmentBuilderPage = () => {
   const { id: classroomId, moduleId } = useParams();
-  const navigate = useNavigate();
   const [publishMessage, setPublishMessage] = useState('');
   const [userRole] = useState(normalizeClassroomRole(localStorage.getItem('userRole')));
   const canManageModules = userRole === 'teacher' || userRole === 'admin';
@@ -87,7 +86,7 @@ const ModuleAssessmentBuilderPage = () => {
                 {getModuleName(activeModule)}
               </h1>
               <p className="mt-2 text-sm text-gray-300">
-                Generate an AI draft, refine questions, and publish the final assessment.
+                Build, edit, and publish a 4-mode assessment workflow with one final category.
               </p>
             </div>
             <AppBackButton
@@ -103,10 +102,17 @@ const ModuleAssessmentBuilderPage = () => {
           </div>
         ) : null}
 
-        <ModuleAssessmentEditor
-          classroomId={classroomId}
+        <ModuleAssessmentWorkflowPrototype
           moduleId={moduleId}
-          onPublished={() => setPublishMessage('Final assessment published successfully.')}
+          module={activeModule}
+          onPublished={(payload) => {
+            const category = payload?.response?.workflow?.final_category || payload?.final_category;
+            if (category) {
+              setPublishMessage(`Assessment workflow published with final category: ${category}.`);
+              return;
+            }
+            setPublishMessage('Assessment workflow published successfully.');
+          }}
         />
       </div>
     </GlassDashboardShell>
