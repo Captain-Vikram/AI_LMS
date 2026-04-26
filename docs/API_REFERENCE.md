@@ -188,11 +188,63 @@ Prefix: `/api/youtube-quiz`
 - `POST /generate`
 - `POST /submit`
 
-### Deep Research
+### Studio Orchestration
+
+Prefix: `/api/studio`
+
+- `POST /generate` (unifies summary and quiz workflows)
+- `POST /summary` (legacy/direct summary access)
+- `POST /quiz` (legacy/direct quiz access)
+
+### Deep Research & Recommendations
 
 Prefix: `/api/deepresearch`
 
-- `POST /recommendations`
+- `POST /recommendations` (generate skill resources)
+
+## Skill Pathways
+
+Prefix: `/api/pathways`
+
+- `GET /available` (list all available standalone pathways)
+- `GET /{pathway_id}` (get full blueprint of a specific pathway)
+- `POST /{pathway_id}/enroll` (enroll current user in a pathway)
+- `GET /progress/my-pathways` (get progress dashboard for all enrolled pathways)
+- `GET /progress/{pathway_id}` (get detailed progress for a specific pathway)
+- `GET /{pathway_id}/stage/{stage_index}` (fetch specific stage progress and topics)
+- `POST /{pathway_id}/stage/{stage_index}/complete` (manually mark a stage as completed)
+- `GET /{pathway_id}/stage/{stage_index}/resource/{resource_id}/tests` (generate tests for a resource)
+- `POST /{pathway_id}/stage/{stage_index}/generate-resources` (trigger AI generation of stage resources)
+- `POST /{pathway_id}/stage/{stage_index}/submit-test` (submit test results and auto-advance)
+
+## Module Assessment Workflow (Multi-Mode)
+
+Prefix: `/api/module-assessment/workflow`
+
+### Authoring
+
+- `POST /draft-generate` (generate initial multi-mode assessment draft)
+- `POST /generate-topics` (refresh AI topics/scenarios for a specific category)
+- `GET /module/{module_id}/latest` (get latest workflow for a module)
+- `GET /{workflow_id}` (get full workflow details)
+- `PATCH /{workflow_id}` (update workflow settings, categories, and topics)
+- `POST /{workflow_id}/finalize` (finalize and publish the assessment)
+- `POST /{workflow_id}/latex-template` (upload .tex template for research mode)
+- `GET /{workflow_id}/latex-template/download` (download the .tex template)
+
+### Submission
+
+- `POST /submission/start` (student begins the workflow assessment)
+- `POST /submission/{submission_id}/submit-scenario` (submit long-answer scenario responses)
+- `POST /submission/{submission_id}/submit-article-link` (submit public URL for article/blog mode)
+- `POST /submission/{submission_id}/submit-artifact` (upload PDF or LaTeX artifact)
+- `GET /submission/{submission_id}` (get submission details and grading status)
+- `GET /submission/{submission_id}/download` (download student artifact)
+
+### Moderation
+
+- `GET /pending-grades/{classroom_id}` (list submissions awaiting teacher review)
+- `PATCH /submission/{submission_id}/teacher-review` (submit final teacher points and comments)
 
 ## Portable RAG Backend
 

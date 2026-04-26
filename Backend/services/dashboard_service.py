@@ -2,6 +2,16 @@ from bson import ObjectId
 from datetime import datetime
 from typing import Any, Dict, List
 
+try:
+    from functions.utils import get_user_display_name
+except ImportError:
+    try:
+        from Backend.functions.utils import get_user_display_name
+    except ImportError:
+        def get_user_display_name(user):
+            if not user: return "Unknown"
+            return user.get("profile", {}).get("name") or user.get("name") or "Unknown"
+
 class DashboardService:
     def __init__(self, db):
         self.db = db
@@ -108,6 +118,36 @@ class DashboardService:
             limit=10,
         )
 
+        # Enhance with names and titles
+        raw_student_ids = list(set(s.get("student_id") for s in recent_submissions if s.get("student_id")))
+        student_query_ids = []
+        for sid in raw_student_ids:
+            student_query_ids.append(sid)
+            if not isinstance(sid, ObjectId):
+                try:
+                    student_query_ids.append(ObjectId(str(sid)))
+                except:
+                    pass
+
+        assignment_ids = list(set(s.get("assignment_id") for s in recent_submissions if s.get("assignment_id")))
+        assignment_query_ids = []
+        for aid in assignment_ids:
+            assignment_query_ids.append(aid)
+            if not isinstance(aid, ObjectId):
+                try:
+                    assignment_query_ids.append(ObjectId(str(aid)))
+                except:
+                    pass
+
+        students_map = {str(u["_id"]): get_user_display_name(u) 
+                        for u in self.db.users.find(
+                            {"_id": {"$in": student_query_ids}}, 
+                            {"name": 1, "profile": 1, "first_name": 1, "last_name": 1, "email": 1}
+                        )}
+        
+        assignments_map = {str(a["_id"]): a.get("title", "Untitled Assignment") 
+                           for a in self.db.assignments.find({"_id": {"$in": assignment_query_ids}}, {"title": 1})}
+
         # Get pending assignments
         pending_assignments = self._materialize_query(
             self.db.assignments.find(
@@ -146,6 +186,8 @@ class DashboardService:
                 {
                     "assignment_id": str(s.get("assignment_id")) if s.get("assignment_id") else None,
                     "student_id": str(s.get("student_id")) if s.get("student_id") else None,
+                    "student_name": students_map.get(str(s.get("student_id")), "Unknown Student"),
+                    "assignment_title": assignments_map.get(str(s.get("assignment_id")), "Untitled Assignment"),
                     "status": s.get("status"),
                     "submitted_date": self._to_iso(s.get("submitted_date")),
                 }
@@ -279,11 +321,18 @@ class DashboardService:
         if not teacher_id:
             return "Unknown"
         
-        teacher = self.db.users.find_one(
-            {"_id": ObjectId(teacher_id)},
-            {"profile": 1}
-        )
-        return teacher.get("profile", {}).get("name", "Unknown") if teacher else "Unknown"
+        try:
+            query_ids = [teacher_id]
+            if not isinstance(teacher_id, ObjectId):
+                query_ids.append(ObjectId(str(teacher_id)))
+            
+            teacher = self.db.users.find_one(
+                {"_id": {"$in": query_ids}},
+                {"name": 1, "profile": 1, "first_name": 1, "last_name": 1, "email": 1}
+            )
+            return get_user_display_name(teacher)
+        except:
+            return "Unknown"
 
     def get_classroom_overview(self, classroom_id: str) -> Dict:
         """Get high-level classroom statistics"""

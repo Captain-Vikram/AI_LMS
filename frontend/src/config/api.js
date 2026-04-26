@@ -23,6 +23,7 @@ export const API_ENDPOINTS = {
 
   ONBOARDING_TEACHER_SETUP: "/api/onboarding/teacher/setup",
   ONBOARDING_STUDENT_JOIN: "/api/onboarding/student/join",
+  ONBOARDING_COMPLETE_PROFILE: "/api/onboarding/complete-profile",
   ONBOARDING_TEACHER_PATHWAY: "/api/onboarding/teacher/pathway/", // append classroom id
 
   QUIZ_GENERATE: "/api/quiz/generate",

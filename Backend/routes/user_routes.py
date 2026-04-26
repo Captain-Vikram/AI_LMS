@@ -2,12 +2,11 @@ from datetime import datetime
 from typing import List, Optional
 
 from bson import ObjectId
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-import jwt
 
 from database import get_db
-from jwt_config import settings
+from functions.utils import get_current_user
 
 router = APIRouter(prefix="/api/user", tags=["user"])
 
@@ -32,24 +31,6 @@ class MilestoneUpdate(BaseModel):
     target_date: Optional[datetime] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
-
-
-def decode_user_id_from_auth_header(authorization: str) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    token = authorization.split(" ")[1]
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-
-        return user_id
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
 
 def _to_iso(value):
@@ -98,8 +79,8 @@ def _model_to_dict(model):
 
 
 @router.get("/milestones")
-async def get_user_milestones(authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def get_user_milestones(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     db = get_db()
 
     milestones = list(
@@ -116,8 +97,11 @@ async def get_user_milestones(authorization: str = Header(None)):
 
 
 @router.post("/milestones", status_code=status.HTTP_201_CREATED)
-async def create_user_milestone(payload: MilestoneCreate, authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def create_user_milestone(
+    payload: MilestoneCreate, 
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
     db = get_db()
 
     milestone_name = (payload.name or "").strip()
@@ -156,9 +140,9 @@ async def create_user_milestone(payload: MilestoneCreate, authorization: str = H
 async def update_user_milestone(
     milestone_id: str,
     payload: MilestoneUpdate,
-    authorization: str = Header(None),
+    current_user: dict = Depends(get_current_user),
 ):
-    user_id = decode_user_id_from_auth_header(authorization)
+    user_id = current_user["user_id"]
     db = get_db()
 
     try:
@@ -206,8 +190,11 @@ async def update_user_milestone(
 
 
 @router.delete("/milestones/{milestone_id}")
-async def delete_user_milestone(milestone_id: str, authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def delete_user_milestone(
+    milestone_id: str, 
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = current_user["user_id"]
     db = get_db()
 
     try:

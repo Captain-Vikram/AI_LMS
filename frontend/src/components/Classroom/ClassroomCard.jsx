@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiArrowRight, FiBook, FiLoader, FiUser, FiUsers } from 'react-icons/fi';
-import apiClient from '../../services/apiClient';
 import { API_ENDPOINTS } from '../../config/api';
 
 const ClassroomCard = ({ classroom, role }) => {
@@ -16,37 +15,18 @@ const ClassroomCard = ({ classroom, role }) => {
   const iconBgColor = isTeacher ? 'bg-blue-500/10' : 'bg-emerald-500/10';
   const iconColor = isTeacher ? 'text-blue-400' : 'text-emerald-400';
 
-  const handleOpenClassroom = async () => {
-    if (!classroomId || isOpening) {
+  const handleOpenClassroom = () => {
+    if (!classroomId) {
       return;
     }
-
-    setIsOpening(true);
-
-    try {
-      const response = await apiClient.post(
-        `${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${classroomId}`
-      );
-      const token = response?.access_token || response?.token;
-
-      if (token) {
-        localStorage.setItem('token', token);
-        localStorage.setItem('isLoggedIn', 'true');
-      }
-    } catch {
-      // Continue navigation even if token refresh fails.
-    } finally {
-      setIsOpening(false);
-      navigate(`/classroom/${classroomId}/dashboard`);
-    }
+    navigate(`/classroom/${classroomId}/dashboard`);
   };
 
   return (
     <button
       type="button"
       onClick={handleOpenClassroom}
-      disabled={isOpening}
-      className={`group block rounded-2xl bg-gradient-to-br p-5 transition-all duration-300 border border-gray-700/80 shadow-lg hover:shadow-2xl hover:-translate-y-1 ${cardColors}`}
+      className={`group block w-full text-left rounded-2xl bg-gradient-to-br p-5 transition-all duration-300 border border-gray-700/80 shadow-lg hover:shadow-2xl hover:-translate-y-1 ${cardColors}`}
     >
       <div className="flex items-start justify-between">
         <div className="space-y-2">
@@ -62,12 +42,8 @@ const ClassroomCard = ({ classroom, role }) => {
         </div>
       </div>
       <div className="mt-4 flex items-center justify-end text-sm text-cyan-400 group-hover:text-white transition-colors duration-300">
-        {isOpening ? 'Opening...' : 'Open Classroom'}
-        {isOpening ? (
-          <FiLoader className="ml-2 animate-spin" />
-        ) : (
-          <FiArrowRight className="ml-2 transform transition-transform duration-300 group-hover:translate-x-1" />
-        )}
+        Open Classroom
+        <FiArrowRight className="ml-2 transform transition-transform duration-300 group-hover:translate-x-1" />
       </div>
     </button>
   );

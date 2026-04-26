@@ -1,6 +1,6 @@
 import os
 from typing import Dict, List, Any, Optional
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
 import json
 from pydantic import ValidationError
 from models.quiz_models import QuizContent, MCQQuestion
@@ -11,7 +11,7 @@ def create_quiz_generator(api_key: str) -> Any:
     Creates a structured quiz generator using local LM Studio inference.
     """
     # Configure local adapter (api_key is optional and treated as API token if set).
-    genai.configure(api_key=api_key)
+    genai.resolve_model_name(os.getenv("LMSTUDIO_MODEL"))
 
     # Use the configured local model unless an explicit model override is provided.
     try:
@@ -26,7 +26,7 @@ def create_quiz_generator(api_key: str) -> Any:
     }
 
     # Create and return the model client
-    model = genai.GenerativeModel(
+    model = genai.GenerativeModelAsync(
         model_name=os.getenv("LMSTUDIO_MODEL"),
         generation_config=generation_config
     )
@@ -34,7 +34,7 @@ def create_quiz_generator(api_key: str) -> Any:
     return model
 
 
-def generate_quiz(
+async def generate_quiz(
         model: Any,
         primary_goal: str,
         selected_skills: List[str],
@@ -123,7 +123,7 @@ def generate_quiz(
 
     # Generate the response
     try:
-        response = model.generate_content(prompt)
+        response = await model.generate_content(prompt)
 
         # Extract JSON from the response
         response_text = response.text

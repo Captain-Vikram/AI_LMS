@@ -531,6 +531,87 @@ def ask_question_rag(resource_id: str, question: str, student_id: str) -> QAResp
 
 ---
 
+## 🚀 Advanced Technical Modules
+
+### Module 5: Multi-Mode Assessment Workflow
+
+**Purpose**: Orchestrate complex, multi-stage assessments (Scenario, Article, Research).  
+**Implementation**: `module_assessment_workflow_routes.py`
+
+```python
+async def submit_workflow_artifact(submission_id: str, file: UploadFile):
+    # 1. Securely store artifact (PDF/LaTeX)
+    file_path = await save_upload(file)
+    
+    # 2. Trigger AI Analysis (Async)
+    # Uses specialized prompts to evaluate research quality
+    analysis = await ai_service.analyze_artifact(file_path)
+    
+    # 3. Update Submission State
+    await db.assessment_submissions.update_one(
+        {"_id": ObjectId(submission_id)},
+        {"$set": {
+            "artifact_path": file_path,
+            "ai_pre_grading_notes": analysis,
+            "status": "pending_teacher_review"
+        }}
+    )
+```
+
+**Key Innovations**:
+- **State-based Progression**: Students move from Scenarios -> Articles -> Final Artifact.
+- **AI Pre-Grading**: Generates detailed rubrics for teachers before they even open the submission.
+- **LaTeX Integration**: Supports professional academic formatting for research tasks.
+
+### Module 6: Skill Pathways & Mastery Trees
+
+**Purpose**: Map long-term learning journeys with automated resource discovery.  
+**Implementation**: `skill_pathway_service.py`
+
+**Mastery Logic**:
+- Pathways are defined as directed acyclic graphs (DAGs) of skills.
+- Each skill node contains a "Mastery Test" generated dynamically.
+- Completion of a node unlocks child nodes across the entire pathway.
+
+### Module 7: Portable RAG & Personal Notebooks
+
+**Purpose**: Provide a private, user-specific knowledge base with AI Q&A.  
+**Implementation**: `handoff_fastapi/portable_rag_backend/`
+
+**Technical Stack**:
+- **Vector Engine**: ChromaDB (locally persisted).
+- **Audio Gen**: gTTS for "Audio Overviews" of personal notes.
+- **Ingestion**: Async pipeline for URL scraping and PDF parsing.
+
+---
+
+## ⚡ High-Performance Patterns
+
+### Async MongoDB (Motor)
+
+The system has transitioned to a fully non-blocking data layer:
+
+```python
+# Sequential (Slow)
+user = db.users.find_one({"_id": uid})
+profile = db.profiles.find_one({"user_id": uid})
+
+# Parallel Async (Fast - Quasar Pattern)
+user, profile = await asyncio.gather(
+    db.users.find_one({"_id": uid}),
+    db.profiles.find_one({"user_id": uid})
+)
+```
+
+### Intelligent Fallback Chain
+
+`llm_adapter_async.py` implements a robust reliability layer:
+1. **Local LM Studio** (Low latency, $0 cost)
+2. **Groq / Llama 3** (High speed fallback)
+3. **Google Gemini 1.5** (High reasoning fallback)
+
+---
+
 ## 🗄️ Database Optimization
 
 ### Indexes for Performance
@@ -1148,6 +1229,67 @@ Add Redis cache between frontend and database
 ├─ 1000x faster reads
 └─ Less load on database
 ```
+
+---
+
+## 🚀 Advanced Technical Modules
+
+### Module 5: Multi-Mode Assessment Workflow
+
+**Purpose**: Orchestrate complex, multi-stage assessments (Scenario, Article, Research).  
+**Implementation**: `Backend/routes/module_assessment_workflow_routes.py`
+
+**Key Innovations**:
+- **State-based Progression**: Students move from Scenarios -> Articles -> Final Artifact.
+- **AI Pre-Grading**: Generates detailed rubrics for teachers before they even open the submission.
+- **LaTeX Integration**: Supports professional academic formatting for research tasks.
+
+### Module 6: Skill Pathways & Mastery Trees
+
+**Purpose**: Map long-term learning journeys with automated resource discovery.  
+**Implementation**: `Backend/services/skill_pathway_service.py`
+
+**Mastery Logic**:
+- Pathways are defined as directed acyclic graphs (DAGs) of skills.
+- Each skill node contains a "Mastery Test" generated dynamically.
+- Completion of a node unlocks child nodes across the entire pathway.
+
+### Module 7: Portable RAG & Personal Notebooks
+
+**Purpose**: Provide a private, user-specific knowledge base with AI Q&A.  
+**Implementation**: `Backend/handoff_fastapi/portable_rag_backend/`
+
+**Technical Stack**:
+- **Vector Engine**: ChromaDB (locally persisted).
+- **Audio Gen**: gTTS for "Audio Overviews" of personal notes.
+- **Ingestion**: Async pipeline for URL scraping and PDF parsing.
+
+---
+
+## ⚡ High-Performance Patterns
+
+### Async MongoDB (Motor)
+
+The system has transitioned to a fully non-blocking data layer:
+
+```python
+# Sequential (Slow)
+user = db.users.find_one({"_id": uid})
+profile = db.profiles.find_one({"user_id": uid})
+
+# Parallel Async (Fast - Quasar Pattern)
+user, profile = await asyncio.gather(
+    db.users.find_one({"_id": uid}),
+    db.profiles.find_one({"user_id": uid})
+)
+```
+
+### Intelligent Fallback Chain
+
+`llm_adapter_async.py` implements a robust reliability layer:
+1. **Local LM Studio** (Low latency, $0 cost)
+2. **Groq / Llama 3** (High speed fallback)
+3. **Google Gemini 1.5** (High reasoning fallback)
 
 ---
 

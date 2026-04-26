@@ -3,12 +3,13 @@ import json
 import os
 import re
 from dotenv import load_dotenv
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
 from langchain_community.tools import TavilySearchResults
 from langchain_community.utilities import GoogleSerperAPIWrapper
-from duckduckgo_search import DDGS  # Install via `pip install duckduckgo-search`
-from duckduckgo_search.exceptions import DuckDuckGoSearchException
-import json
+# from duckduckgo_search import DDGS  # Install via `pip install duckduckgo-search`
+# from duckduckgo_search.exceptions import DuckDuckGoSearchException
+import asyncio
+
 def llm_serper(query):
     serper_key = os.getenv("SERPER_API_KEY")
     if not serper_key:
@@ -31,32 +32,15 @@ def tavily_search(query):
     """
     Perform a Tavily search and return relevant documents.
     """
-    tavily_tool = TavilySearchResults()
-    results = tavily_tool.run(query)
-    return results
-import time
-# def duckduckgo_search(query, max_results=5, retries=3, delay=2):
-#     for attempt in range(retries):
-#         try:
-#             with DDGS() as ddgs:
-#                 results = list(ddgs.text(query, max_results=max_results))
-#                 return [
-#                     {
-#                         "title": result.get("title", "No Title"),
-#                         "link": result.get("href", "No Link")
-#                     }
-#                     for result in results
-#                 ]
-#         except DuckDuckGoSearchException as e:
-#             print(f"Attempt {attempt+1} failed with error: {e}")
-#             if attempt < retries - 1:
-#                 print(f"Retrying in {delay} seconds...")
-#                 time.sleep(delay)
-#                 delay *= 2  # Exponential backoff
-#             else:
-#                 raise e
+    try:
+        tavily_tool = TavilySearchResults()
+        results = tavily_tool.run(query)
+        return results
+    except Exception as e:
+        print(f"Tavily search failed: {e}")
+        return []
 
-def generate_skill_resources(input_json):
+async def generate_skill_resources(input_json):
     """
     Takes JSON data (string or dict) as input, extracts skills from the 'skill_gaps' areas,
     generates a learning workflow for each skill via a generative model, retrieves Tavily documents,
@@ -91,15 +75,14 @@ def generate_skill_resources(input_json):
     # Extract skills from the JSON data
     improvement_areas = data.get("skill_gaps", {}).get("areas", [])
     skills = [area["skill"] for area in improvement_areas if "skill" in area]
-    # Configure the local LM Studio adapter.
-    genai.configure(base_url=os.getenv("LMSTUDIO_URL"))
+    
     generation_config = {
         "temperature": 0.2,       # More deterministic output
         "top_p": 0.95,
         "top_k": 64,
         "max_output_tokens": 3000 # Allows longer responses
     }
-    model = genai.GenerativeModel(
+    model = genai.GenerativeModelAsync(
         model_name=os.getenv("LMSTUDIO_MODEL"),
         generation_config=generation_config
     )
@@ -110,7 +93,7 @@ def generate_skill_resources(input_json):
         return cleaned_text
 
     # Helper function: generate a workflow (list of concepts) for a given skill
-    def generate_workflow(skill):
+    async def generate_workflow(skill):
         prompt = f"""Generate a structured JSON response for learning {skill}, listing essential concepts in a logical order. The response should follow this format:  
 {{
   "skill": "{skill}",
@@ -123,7 +106,7 @@ def generate_skill_resources(input_json):
 }}
 """
         try:
-            response = model.generate_content(prompt)
+            response = await model.generate_content(prompt)
             raw_text = response.text.strip()
             print(f"\nRaw response for {skill}:\n{raw_text}")
             return clean_json_response(raw_text)
@@ -143,7 +126,7 @@ def generate_skill_resources(input_json):
     result = []
     for skill in skills:
         print(f"\nGenerating workflow for: {skill}")
-        workflow_json = generate_workflow(skill)
+        workflow_json = await generate_workflow(skill)
 
         try:
             workflow_data = json.loads(workflow_json)
@@ -163,19 +146,20 @@ def generate_skill_resources(input_json):
 
         # Generate Tavily documents
         tavily_query = f"{skill} learning blogs"
+        # Tavily run is usually blocking, but for now we'll call it.
+        # Ideally we'd use an async search tool.
         tavily_docs = tavily_search(tavily_query)
 
-        # Generate DuckDuckGo links
+        # Generate links
         duckduckgo_query = f"find me blogs on topic {skill}"
-        #duckduckgo_links = duckduckgo_search(duckduckgo_query, max_results=5)
-        links=llm_serper(duckduckgo_query)
-        vertexta_ai_search=get_web_links(duckduckgo_query)
+        # llm_serper is also blocking
+        links = llm_serper(duckduckgo_query)
 
         # Append results for the current skill
         result.append({
             "skill": skill,
             "documents": tavily_docs,
-            "blogs":links
+            "blogs": links
         })
 
     return result

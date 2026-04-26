@@ -149,6 +149,7 @@ async def _generate_text_via_google_async(
         (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
         or (os.getenv("GOOGLE_FALLBACK_MODEL") or "").strip()
         or (os.getenv("GOOGLE_MODEL") or "").strip()
+        or (os.getenv("GEMINI_CHAT_MODEL") or "").strip()
         or DEFAULT_GOOGLE_MODEL
     )
     model = _normalize_google_model_name(configured_model)

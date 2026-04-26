@@ -1,3 +1,4 @@
+﻿from typing import Optional
 import json
 import os
 import re
@@ -7,12 +8,14 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from langchain_community.tools import YouTubeSearchTool
 
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
+from functions.youtube_quiz_functions import extract_video_id
 
 tool = YouTubeSearchTool()
 
 
-def respond_to_normal_query(query):
+async def respond_to_normal_query(query):
+    # YouTubeSearchTool run is usually blocking, but for now we'll call it.
     return tool.run(f"{query},20")
 
 
@@ -103,27 +106,40 @@ def _extract_skills(data: Dict[str, Any]) -> List[str]:
 
 
 def _build_youtube_search_link(skill: str, concept: str) -> str:
+    # We return empty if we can't find a direct link, to let the caller handle it or use a better fallback.
+    # But for compatibility, let's keep a valid search link but mark it.
     query = quote_plus(f"{skill} {concept} tutorial")
     return f"https://www.youtube.com/results?search_query={query}"
 
 
-def _build_youtube_tool_query(skill: str, concept: str, max_results: int = 1) -> str:
-    """
-    Build a YouTubeSearchTool query with a single trailing comma delimiter.
+def _extract_video_link(tool_output: str) -> Optional[str]:
+    """Extract a single valid video link from YouTubeSearchTool output."""
+    if not tool_output:
+        return None
 
-    The tool parses input in the shape "query,max_results". Concepts like
-    "IaaS, PaaS, SaaS" can otherwise introduce extra commas and crash parsing.
-    """
-    safe_skill = re.sub(r"[\r\n,]+", " ", str(skill or ""))
-    safe_concept = re.sub(r"[\r\n,]+", " ", str(concept or ""))
+    # Try parsing as list if it looks like one
+    if tool_output.startswith("[") and tool_output.endswith("]"):
+        try:
+            import ast
+            parsed = ast.literal_eval(tool_output)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                for item in parsed:
+                    if "watch?v=" in str(item):
+                        video_path = str(item).strip("'").strip('"')
+                        return f"https://www.youtube.com{video_path}"
+        except Exception:
+            pass
 
-    safe_skill = re.sub(r"\s+", " ", safe_skill).strip()
-    safe_concept = re.sub(r"\s+", " ", safe_concept).strip()
+    # Fallback to regex if parsing fails
+    import re
+    match = re.search(r"/watch\?v=[\w-]+", tool_output)
+    if match:
+        return f"https://www.youtube.com{match.group(0)}"
 
-    return f"{safe_skill} {safe_concept} course,{int(max_results)}"
+    return None
 
 
-def generate_skill_playlist(input_json, force_fallback: bool = False):
+async def generate_skill_playlist(input_json, force_fallback: bool = False):
     """
     Build YouTube recommendations for each skill with robust LLM fallbacks.
     """
@@ -145,8 +161,6 @@ def generate_skill_playlist(input_json, force_fallback: bool = False):
     if not skills:
         return []
 
-    genai.configure(base_url=os.getenv("LMSTUDIO_URL"))
-
     try:
         max_tokens = int(os.getenv("YOUTUBE_WORKFLOW_MAX_OUTPUT_TOKENS", "1500"))
     except ValueError:
@@ -162,7 +176,7 @@ def generate_skill_playlist(input_json, force_fallback: bool = False):
     model = None
     if not force_fallback:
         try:
-            model = genai.GenerativeModel(
+            model = genai.GenerativeModelAsync(
                 model_name=os.getenv("LMSTUDIO_MODEL"),
                 generation_config=generation_config,
             )
@@ -172,7 +186,7 @@ def generate_skill_playlist(input_json, force_fallback: bool = False):
     def clean_json_response(response_text: str) -> str:
         return re.sub(r"```json|```", "", (response_text or "")).strip()
 
-    def generate_workflow(skill: str) -> Dict[str, Any]:
+    async def generate_workflow(skill: str) -> Dict[str, Any]:
         if model is None:
             return {"skill": skill, "concepts": _fallback_concepts_for_skill(skill)}
 
@@ -186,7 +200,7 @@ Use 5 to 8 concise concepts.
 """
 
         try:
-            response = model.generate_content(prompt)
+            response = await model.generate_content(prompt)
             raw_text = (response.text or "").strip()
             print(f"\nRaw response for {skill}:\n{raw_text}")
             cleaned = clean_json_response(raw_text)
@@ -204,7 +218,15 @@ Use 5 to 8 concise concepts.
         for concept in concepts:
             try:
                 query = _build_youtube_tool_query(skill, concept, max_results=1)
-                link = youtube_tool.run(query)
+                tool_output = youtube_tool.run(query)
+                link = _extract_video_link(tool_output)
+                
+                if not link:
+                    # Try a more specific search query if the first one failed
+                    retry_query = f"{skill} {concept} complete tutorial course,1"
+                    tool_output_retry = youtube_tool.run(retry_query)
+                    link = _extract_video_link(tool_output_retry)
+                
                 if not link:
                     link = _build_youtube_search_link(skill, concept)
 
@@ -231,7 +253,7 @@ Use 5 to 8 concise concepts.
     result = []
     for skill in skills:
         print(f"\nGenerating workflow for: {skill}")
-        workflow_data = generate_workflow(skill)
+        workflow_data = await generate_workflow(skill)
         concepts = _normalize_concepts(workflow_data.get("concepts", []), skill)
         playlist = generate_playlist(skill, concepts)
         result.append({"skill": skill, "playlist": playlist})
@@ -284,3 +306,4 @@ Use 5 to 8 concise concepts.
 #         print(f"\nSkill: {item['skill']}")
 #         for concept in item["playlist"]:
 #             print(f"  - {concept['concept']}: {concept['youtube_link']}")
+

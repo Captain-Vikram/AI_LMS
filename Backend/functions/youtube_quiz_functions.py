@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Dict, List, Any, Optional
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
 from functions.transcript_utils import fetch_transcript_entries
 from pydantic import BaseModel, Field
 import re
@@ -87,9 +87,9 @@ def combine_transcriptions(transcriptions: List[Dict[str, str]]) -> str:
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def extract_core_topics(transcriptions: List[Dict[str, Any]],
-                        model_name: str = None,
-                        max_transcript_length: int = 15000) -> Dict[str, Any]:
+async def extract_core_topics(transcriptions: List[Dict[str, Any]],
+                              model_name: str = None,
+                              max_transcript_length: int = 15000) -> Dict[str, Any]:
     """
     Extract core topics with timestamp ranges from a list of transcription segments
 
@@ -104,9 +104,6 @@ def extract_core_topics(transcriptions: List[Dict[str, Any]],
     model_name = model_name or os.getenv("LMSTUDIO_MODEL")
 
     try:
-        # Configure local adapter for LM Studio.
-        genai.configure(base_url=os.getenv("LMSTUDIO_URL"))
-
         # Combine transcriptions into a single text
         full_transcript = combine_transcriptions(transcriptions)
 
@@ -125,7 +122,7 @@ def extract_core_topics(transcriptions: List[Dict[str, Any]],
         if len(timestamped_transcript) > max_transcript_length:
             timestamped_transcript = timestamped_transcript[:max_transcript_length] + "..."
 
-        model = genai.GenerativeModel(model_name)
+        model = genai.GenerativeModelAsync(model_name)
 
         # Configure generation parameters
         generation_config = {
@@ -160,7 +157,7 @@ def extract_core_topics(transcriptions: List[Dict[str, Any]],
         Return ONLY the JSON array with no additional text, markdown formatting, or code blocks.
         """
 
-        topics_response = model.generate_content(
+        topics_response = await model.generate_content(
             topics_prompt,
             generation_config=generation_config
         )
@@ -197,7 +194,7 @@ def extract_core_topics(transcriptions: List[Dict[str, Any]],
         Summary:
         """
 
-        summary_response = model.generate_content(
+        summary_response = await model.generate_content(
             summary_prompt,
             generation_config=generation_config
         )
@@ -222,7 +219,6 @@ class YouTubeQuizGenerator:
     def __init__(self, api_key=None):
         """Initialize the quiz generator with local LM Studio configuration."""
         self.api_key = api_key
-        genai.configure(base_url=os.getenv("LMSTUDIO_URL"))
         # Use a powerful model for generation
         self.generation_config = {
             "temperature": 0.2,  # Lower temperature for more deterministic output
@@ -230,7 +226,7 @@ class YouTubeQuizGenerator:
             "top_k": 64,
             "max_output_tokens": 8192,  # Allow for long responses with multiple questions
         }
-        self.model = genai.GenerativeModel(
+        self.model = genai.GenerativeModelAsync(
             model_name=os.getenv("LMSTUDIO_MODEL"),
             generation_config=self.generation_config
         )
@@ -271,7 +267,7 @@ class YouTubeQuizGenerator:
         # This is where you might add chunking logic for very long videos
         return full_text
 
-    def extract_topics_from_transcript(self, transcriptions, model_name=None):
+    async def extract_topics_from_transcript(self, transcriptions, model_name=None):
         """
         Extract core topics with timestamp ranges from transcript.
 
@@ -284,7 +280,7 @@ class YouTubeQuizGenerator:
         """
         try:
             # Use the extract_core_topics function
-            result = extract_core_topics(
+            result = await extract_core_topics(
                 transcriptions=transcriptions,
                 model_name=model_name
             )
@@ -297,7 +293,7 @@ class YouTubeQuizGenerator:
                 "summary": f"Error extracting core topics: {str(e)}"
             }
 
-    def generate_quiz_from_transcript(
+    async def generate_quiz_from_transcript(
         self,
         transcript_text,
         num_questions=5,
@@ -336,7 +332,7 @@ class YouTubeQuizGenerator:
         For each question:
         1. Make sure it tests understanding, not just recall
         2. Include one clear correct answer and three plausible but incorrect options
-        3. Provide a brief explanation for why the correct answer is right
+        3. Provide a brief explanation for the correct answer
 
         Return the result as a JSON object with the following structure:
         {{
@@ -357,7 +353,7 @@ class YouTubeQuizGenerator:
 
         # Generate the response
         try:
-            response = self.model.generate_content(prompt)
+            response = await self.model.generate_content(prompt)
             response_text = response.text
 
             # Extract JSON content
@@ -399,7 +395,7 @@ class YouTubeQuizGenerator:
 
         return {"questions": questions}
 
-    def generate_quiz_from_video_url(
+    async def generate_quiz_from_video_url(
         self,
         video_url,
         num_questions=5,
@@ -434,7 +430,7 @@ class YouTubeQuizGenerator:
         transcript_text = self.prepare_transcript_for_quiz(transcriptions)
 
         # Generate quiz
-        quiz = self.generate_quiz_from_transcript(
+        quiz = await self.generate_quiz_from_transcript(
             transcript_text,
             num_questions,
             difficulty,

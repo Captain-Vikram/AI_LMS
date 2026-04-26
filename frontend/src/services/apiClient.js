@@ -1,5 +1,11 @@
 import { apiUrl } from "../config/api";
 
+let getTokenFn = null;
+
+const setTokenGetter = (fn) => {
+  getTokenFn = fn;
+};
+
 const clearClientAuthState = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("isLoggedIn");
@@ -67,20 +73,25 @@ const buildErrorMessage = (responseBody, status) => {
 };
 
 const request = async (path, options = {}) => {
-  const token = localStorage.getItem("token");
-  const isFormData = options.body instanceof FormData;
-
-  if (token && isTokenExpired(token)) {
-    clearClientAuthState();
-    throw new Error("Session expired. Please login again.");
+  let { token, ...fetchOptions } = options;
+  
+  // Automatically get token if getter is registered and token not provided
+  if (!token && getTokenFn) {
+    try {
+      token = await getTokenFn();
+    } catch (err) {
+      console.warn("Failed to get authentication token", err);
+    }
   }
+
+  const isFormData = fetchOptions.body instanceof FormData;
 
   const headers = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
-    ...(options.headers || {}),
+    ...(fetchOptions.headers || {}),
   };
 
-  if (token && !headers.Authorization) {
+  if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
@@ -88,7 +99,7 @@ const request = async (path, options = {}) => {
 
   try {
     response = await fetch(apiUrl(path), {
-      ...options,
+      ...fetchOptions,
       headers,
     });
   } catch {
@@ -126,10 +137,6 @@ const request = async (path, options = {}) => {
     error.code = detail?.code;
     error.dependency = detail?.dependency;
 
-    if (response.status === 401) {
-      clearClientAuthState();
-    }
-
     throw error;
   }
 
@@ -154,4 +161,4 @@ const apiClient = {
 };
 
 export default apiClient;
-export { clearClientAuthState };
+export { clearClientAuthState, setTokenGetter };

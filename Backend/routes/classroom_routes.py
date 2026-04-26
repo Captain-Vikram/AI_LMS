@@ -18,7 +18,8 @@ from services.learning_module_service import LearningModuleService
 from functions.search_doc import generate_skill_resources
 from functions.youtube_education import generate_skill_playlist
 from functions.youtube_quiz_functions import extract_video_id
-from functions.utils import get_current_user, normalize_user_role
+from functions.utils import get_current_user, normalize_user_role, get_user_display_name
+from functions.cache_utils import cache_response
 from functions.link_preview import fetch_preview_image
 
 router = APIRouter(prefix="/api/classroom", tags=["classroom"])
@@ -26,6 +27,13 @@ router = APIRouter(prefix="/api/classroom", tags=["classroom"])
 
 class ResourceApprovalRequest(BaseModel):
     approved: bool
+
+
+class ManualResourceRequest(BaseModel):
+    title: str
+    url: str
+    resource_type: str  # 'youtube', 'article', 'blog'
+    skill: Optional[str] = "General"
 
 
 class ResourceEngagementRequest(BaseModel):
@@ -564,7 +572,7 @@ async def _parse_create_classroom_request(request: Request) -> Tuple[Dict[str, A
     return payload, None
 
 
-def _generate_ai_resource_bundle(
+async def _generate_ai_resource_bundle(
     assessment_seed: Dict[str, Any],
     source: str,
     approval_status: str,
@@ -573,15 +581,15 @@ def _generate_ai_resource_bundle(
     deepsearch_results: List[Dict[str, Any]] = []
 
     try:
-        playlists = generate_skill_playlist(assessment_seed)
+        playlists = await generate_skill_playlist(assessment_seed)
     except Exception:
         try:
-            playlists = generate_skill_playlist(assessment_seed, force_fallback=True)
+            playlists = await generate_skill_playlist(assessment_seed, force_fallback=True)
         except Exception:
             playlists = []
 
     try:
-        deepsearch_results = generate_skill_resources(assessment_seed)
+        deepsearch_results = await generate_skill_resources(assessment_seed)
     except Exception:
         deepsearch_results = []
 
@@ -740,6 +748,7 @@ async def _create_demo_teacher_classroom(db, current_user: dict) -> str:
 
 
 @router.get("")
+@cache_response(ttl=300, key_prefix="classroom_list")
 async def list_classrooms(current_user = Depends(get_current_user)):
     db = get_db()
     rbac = RBACService(db)
@@ -881,12 +890,24 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
 
     await _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
 
-    module_service = LearningModuleService(get_sync_db())
+    # Update user's onboarding and assessment status at the top level
+    await db.users.update_one(
+        {"_id": teacher_oid},
+        {
+            "$set": {
+                "onboarding_complete": True,
+                "assessment_complete": True,
+                "updated_date": datetime.utcnow(),
+            }
+        },
+    )
+
+    module_service = LearningModuleService(db)
     seeded_modules = []
     initial_module_names = _derive_initial_module_names(focus_areas, ai_resources)
 
     for module_name in initial_module_names:
-        seed_result = module_service.create_module(
+        seed_result = await module_service.create_module(
             classroom_id=classroom_id,
             name=module_name,
             description=f"AI-seeded module for {module_name}.",
@@ -1091,16 +1112,18 @@ async def get_classroom_activity_feed(
     )
 
     name_lookup: Dict[str, str] = {}
-    for user_id in user_ids:
-        user_name = "Unknown"
+    if user_ids:
         try:
-            user_oid = ObjectId(user_id)
-            user = await db.users.find_one({"_id": user_oid}, {"name": 1})
-            if user and user.get("name"):
-                user_name = str(user.get("name"))
+            user_oids = [ObjectId(uid) for uid in user_ids if ObjectId.is_valid(uid)]
+            # Fetch all fields needed for robust name resolution
+            users = await db.users.find(
+                {"_id": {"$in": user_oids}},
+                {"name": 1, "first_name": 1, "last_name": 1, "profile": 1, "email": 1}
+            ).to_list(None)
+            for user in users:
+                name_lookup[str(user["_id"])] = get_user_display_name(user)
         except Exception:
             pass
-        name_lookup[user_id] = user_name
 
     serialized = []
     for entry in entries:
@@ -1149,16 +1172,25 @@ async def get_pending_grading_count(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    pending_count = await db.assessment_submissions.count_documents(
+    # Count standard submissions
+    pending_standard = await db.assessment_submissions.count_documents(
         {
             "classroom_id": {"$in": [classroom_id, classroom_oid]},
             "grading_status": "pending_manual_grade",
         }
     )
 
+    # Count workflow submissions
+    pending_workflow = await db.module_assessment_workflow_submissions.count_documents(
+        {
+            "classroom_id": {"$in": [classroom_id, classroom_oid]},
+            "grading_status": "pending_teacher_review",
+        }
+    )
+
     return {
         "status": "success",
-        "pending_count": int(pending_count),
+        "pending_count": int(pending_standard + pending_workflow),
     }
 
 
@@ -1223,7 +1255,67 @@ async def update_resource_approval(
     }
 
 
+@router.post("/{classroom_id}/resources/manual")
+async def add_manual_resource(
+    classroom_id: str,
+    payload: ManualResourceRequest,
+    current_user = Depends(get_current_user),
+):
+    db = get_db()
+    rbac = RBACService(db)
+    role = normalize_user_role(current_user.get("role"))
+    
+    if role not in {"teacher", "admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can add resources manually")
+
+    try:
+        classroom_oid = ObjectId(classroom_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid classroom id")
+
+    if role != "admin" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the classroom teacher can add resources")
+
+    now = datetime.utcnow()
+    resource_id = secrets.token_hex(12)
+    
+    # Deriving thumbnail for youtube if possible
+    thumb = None
+    if payload.resource_type == "youtube":
+        vid = extract_video_id(payload.url)
+        if vid:
+            thumb = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+
+    new_resource = {
+        "resource_id": resource_id,
+        "title": payload.title,
+        "description": f"Manually added {payload.resource_type} resource.",
+        "url": _normalize_url(payload.url),
+        "resource_type": payload.resource_type,
+        "skill": payload.skill or "General",
+        "thumbnail_url": thumb,
+        "source": "teacher_manual",
+        "approval_status": "approved",  # Manually added by teacher, so auto-approve
+        "created_date": now,
+        "updated_date": now,
+        "approved_date": now,
+        "approved_by": str(current_user["user_id"]),
+    }
+
+    await db.classrooms.update_one(
+        {"_id": classroom_oid},
+        {"$push": {"ai_resources": new_resource}, "$set": {"updated_date": now}}
+    )
+
+    return {
+        "status": "success",
+        "message": "Resource added successfully",
+        "resource": _serialize_resource(new_resource)
+    }
+
+
 @router.get("/{classroom_id}")
+@cache_response(ttl=600, key_prefix="classroom")
 async def get_classroom(classroom_id: str, current_user = Depends(get_current_user)):
     db = get_db()
     rbac = RBACService(db)
@@ -1481,8 +1573,8 @@ async def auto_generate_modules_from_resources(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
     
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.auto_generate_modules_from_resources(
+    module_service = LearningModuleService(db)
+    result = await module_service.auto_generate_modules_from_resources(
         classroom_id,
         force_regenerate=force_regenerate
     )
@@ -1498,6 +1590,7 @@ async def auto_generate_modules_from_resources(
 
 
 @router.get("/{classroom_id}/modules")
+@cache_response(ttl=300, key_prefix="modules")
 async def get_classroom_modules(
     classroom_id: str,
     status_filter: Optional[str] = Query(None),
@@ -1528,12 +1621,12 @@ async def get_classroom_modules(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
     
-    module_service = LearningModuleService(get_sync_db())
+    module_service = LearningModuleService(db)
     
     # Include progress for students viewing their own progress
     show_progress = include_progress and current_user.get("role", "").lower() == "student"
     
-    result = module_service.get_classroom_modules(
+    result = await module_service.get_classroom_modules(
         classroom_id,
         status_filter=status_filter,
         include_progress=show_progress,
@@ -1566,8 +1659,8 @@ async def create_learning_module(
             detail="Only the classroom teacher can create modules",
         )
 
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.create_module(
+    module_service = LearningModuleService(db)
+    result = await module_service.create_module(
         classroom_id=classroom_id,
         name=payload.name,
         description=payload.description or "",
@@ -1603,8 +1696,8 @@ async def reorder_classroom_modules(
             detail="Only the classroom teacher can reorder modules",
         )
 
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.reorder_modules(classroom_id, payload.module_ids)
+    module_service = LearningModuleService(db)
+    result = await module_service.reorder_modules(classroom_id, payload.module_ids)
 
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", "Failed to reorder modules"))
@@ -1627,8 +1720,8 @@ async def get_approved_resources_for_module_assignment(
             detail="Not a member of this classroom",
         )
 
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.get_approved_resources_for_module_assignment(classroom_id)
+    module_service = LearningModuleService(db)
+    result = await module_service.get_approved_resources_for_module_assignment(classroom_id)
 
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", "Failed to load resources"))
@@ -1660,8 +1753,8 @@ async def assign_resources_to_module(
             detail="Only the classroom teacher can assign resources",
         )
 
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.add_resources_to_module(
+    module_service = LearningModuleService(db)
+    result = await module_service.add_resources_to_module(
         classroom_id=classroom_id,
         module_id=module_id,
         resource_ids=payload.resource_ids,
@@ -1673,7 +1766,45 @@ async def assign_resources_to_module(
     return result
 
 
+@router.delete("/{classroom_id}/modules/{module_id}/resources/{resource_id}")
+async def remove_resource_from_module(
+    classroom_id: str,
+    module_id: str,
+    resource_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Removes a resource from a learning module."""
+    db = get_db()
+    rbac = RBACService(db)
+    role = normalize_user_role(current_user.get("role"))
+
+    if role not in {"teacher", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can remove resources from modules",
+        )
+
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the classroom teacher can remove resources",
+        )
+
+    module_service = LearningModuleService(db)
+    result = await module_service.remove_resource_from_module(
+        classroom_id=classroom_id,
+        module_id=module_id,
+        resource_id=resource_id,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to remove resource"))
+
+    return result
+
+
 @router.get("/{classroom_id}/modules/{module_id}")
+@cache_response(ttl=300, key_prefix="module_detail")
 async def get_module_details(
     classroom_id: str,
     module_id: str,
@@ -1784,8 +1915,8 @@ async def get_module_progress(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid student id")
     
-    module_service = LearningModuleService(get_sync_db())
-    progress = module_service.get_module_progress(target_student_oid, module_oid)
+    module_service = LearningModuleService(db)
+    progress = await module_service.get_module_progress(target_student_oid, module_oid)
     
     return {
         "status": "success",
@@ -1851,14 +1982,49 @@ async def track_resource_engagement(
     if not resource_exists:
         raise HTTPException(status_code=404, detail="Resource not found in this module")
     
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.track_resource_engagement(
+    module_service = LearningModuleService(db)
+    result = await module_service.track_resource_engagement(
         current_user["user_id"],
         resource_id,
         module_id,
         engagement_data.dict()
     )
     
+    return result
+
+
+@router.delete("/{classroom_id}/modules/{module_id}")
+async def delete_learning_module(
+    classroom_id: str,
+    module_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Deletes a learning module from the classroom."""
+    db = get_db()
+    rbac = RBACService(db)
+    role = normalize_user_role(current_user.get("role"))
+
+    if role not in {"teacher", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can delete modules",
+        )
+
+    if role == "teacher" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the classroom teacher can delete modules",
+        )
+
+    module_service = LearningModuleService(db)
+    result = await module_service.delete_module(
+        classroom_id=classroom_id,
+        module_id=module_id,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to delete module"))
+
     return result
 
 
@@ -1897,7 +2063,7 @@ async def get_module_resource_analytics(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom or module id")
     
-    module_service = LearningModuleService(get_sync_db())
-    result = module_service.get_module_resource_analytics(classroom_id, module_id)
+    module_service = LearningModuleService(db)
+    result = await module_service.get_module_resource_analytics(classroom_id, module_id)
     
     return result

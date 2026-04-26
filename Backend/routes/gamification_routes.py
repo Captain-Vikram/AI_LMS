@@ -1,12 +1,11 @@
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
-import jwt
 
 from database import get_db
-from jwt_config import settings
+from functions.utils import get_current_user
 
 router = APIRouter(
     prefix="/api/gamification",
@@ -24,22 +23,6 @@ XP_REWARDS = {
     "learning_streak_day": 15,
     "contribute_to_community": 25,
 }
-
-
-def decode_user_id_from_auth_header(authorization: str) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-
-    token = authorization.replace("Bearer ", "")
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-        return user_id
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
 
 def calculate_login_streak(db, user_id_obj: ObjectId) -> int:
@@ -78,8 +61,8 @@ def _serialize_date(value):
 
 
 @router.get("/xp")
-async def get_user_xp(authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def get_user_xp(current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     user_id_obj = ObjectId(user_id)
 
     db = get_db()
@@ -112,8 +95,8 @@ async def get_user_xp(authorization: str = Header(None)):
 
 
 @router.post("/award-xp")
-async def award_xp(activity_data: Dict[str, Any], authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def award_xp(activity_data: Dict[str, Any], current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     db = get_db()
 
     activity_type = activity_data.get("activity_type")
@@ -170,8 +153,8 @@ async def award_xp(activity_data: Dict[str, Any], authorization: str = Header(No
 
 
 @router.get("/badges")
-async def get_user_badges(authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def get_user_badges(current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     db = get_db()
 
     all_badges = list(db.gamification.find({"resource_type": "badge"}))
@@ -216,8 +199,8 @@ async def get_user_badges(authorization: str = Header(None)):
 
 
 @router.get("/achievements/recent")
-async def get_recent_achievements(authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def get_recent_achievements(current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     db = get_db()
 
     user_data = db.users.find_one({"_id": ObjectId(user_id)})

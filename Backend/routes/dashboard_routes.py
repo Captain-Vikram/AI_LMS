@@ -5,10 +5,12 @@ from bson import ObjectId
 from services.dashboard_service import DashboardService
 from services.rbac_service import RBACService
 from functions.utils import get_current_user
+from functions.cache_utils import cache_response
 
 router = APIRouter(prefix="/api/classroom", tags=["dashboard"])
 
 @router.get("/{classroom_id}/dashboard")
+@cache_response(ttl=600, key_prefix="dashboard")
 async def get_classroom_dashboard(
     classroom_id: str,
     current_user = Depends(get_current_user)
@@ -43,6 +45,7 @@ async def get_classroom_dashboard(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{classroom_id}/overview")
+@cache_response(ttl=3600, key_prefix="overview")
 async def get_classroom_overview(
     classroom_id: str,
     current_user = Depends(get_current_user)

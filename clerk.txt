@@ -1,0 +1,224 @@
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\routes\analytics_routes.py", line 72, in <module>
+    async def get_dashboard_analytics(current_user = Depends(get_current_user)):
+                                                     ^^^^^^^
+NameError: name 'Depends' is not defined
+INFO:watchfiles.main:1 change detected
+WARNING:  WatchFiles detected changes in 'routes\analytics_routes.py'. Reloading...
+ ✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:watchfiles.main:9 changes detected
+INFO:     Started server process [18600]
+INFO:     Waiting for application startup.
+🚀 Initializing async database and cache connections...
+✅ Connected to MongoDB asynchronously
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:cache_utils:🔗 Connecting to Redis at redis://localhost:6379/0...
+INFO:cache_utils:✅ Connected to Redis successfully
+✅ Infrastructure initialized and ready for async operations
+INFO:     Application startup complete.
+INFO:watchfiles.main:1 change detected
+WARNING:  WatchFiles detected changes in 'routes\auth_routes.py'. Reloading...
+ INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+🛑 Shutting down database and cache connections...
+INFO:cache_utils:✅ Disconnected from Redis
+✅ Disconnected from MongoDB
+✅ Infrastructure connections closed
+INFO:     Application shutdown complete.
+INFO:     Finished server process [18600]
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:watchfiles.main:5 changes detected
+INFO:     Started server process [25360]
+INFO:     Waiting for application startup.
+🚀 Initializing async database and cache connections...
+✅ Connected to MongoDB asynchronously
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:cache_utils:🔗 Connecting to Redis at redis://localhost:6379/0...
+INFO:cache_utils:✅ Connected to Redis successfully
+✅ Infrastructure initialized and ready for async operations
+INFO:     Application startup complete.
+INFO:watchfiles.main:1 change detected
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+🛑 Shutting down database and cache connections...
+INFO:cache_utils:✅ Disconnected from Redis
+✅ Disconnected from MongoDB
+✅ Infrastructure connections closed
+INFO:     Application shutdown complete.
+INFO:     Finished server process [25360]
+INFO:     Stopping reloader process [11096]
+(.venv) PS C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend> python main.py
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:     Will watch for changes in these directories: ['C:\\Users\\konth\\Desktop\\project\\React\\Quasar_EduSaarthi-main\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [22996] using WatchFiles
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:     Started server process [15320]
+INFO:     Waiting for application startup.
+🚀 Initializing async database and cache connections...
+✅ Connected to MongoDB asynchronously
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:cache_utils:🔗 Connecting to Redis at redis://localhost:6379/0...
+INFO:cache_utils:✅ Connected to Redis successfully
+✅ Infrastructure initialized and ready for async operations
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+🛑 Shutting down database and cache connections...
+INFO:cache_utils:✅ Disconnected from Redis
+✅ Disconnected from MongoDB
+✅ Infrastructure connections closed
+INFO:     Application shutdown complete.
+INFO:     Finished server process [15320]
+INFO:     Stopping reloader process [22996]
+(.venv) PS C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend> python main.py
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:     Will watch for changes in these directories: ['C:\\Users\\konth\\Desktop\\project\\React\\Quasar_EduSaarthi-main\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [11824] using WatchFiles
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:     Started server process [11340]
+INFO:     Waiting for application startup.
+🚀 Initializing async database and cache connections...
+✅ Connected to MongoDB asynchronously
+✅ Phase 2 database indexes created successfully
+Migration 001 already applied, skipping
+INFO:cache_utils:🔗 Connecting to Redis at redis://localhost:6379/0...
+INFO:cache_utils:✅ Connected to Redis successfully
+✅ Infrastructure initialized and ready for async operations
+INFO:     Application startup complete.
+INFO:     127.0.0.1:62713 - "OPTIONS /api/auth/user-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "OPTIONS /api/auth/user-status HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: GET https://lasting-javelin-97.clerk.accounts.dev/.well-known/jwks.json "HTTP/1.1 200 OK"
+[75cf7a90-f0d2-4ef6-8c89-8ccbb54a0ffb] Unhandled backend error on /api/auth/user-status: object AsyncIOMotorDatabase can't be used in 'await' expression
+INFO:     127.0.0.1:62713 - "GET /api/auth/user-status HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 420, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 457, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 678, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\functions\utils.py", line 133, in get_current_user
+    db = await get_db()
+         ^^^^^^^^^^^^^^
+TypeError: object AsyncIOMotorDatabase can't be used in 'await' expression
+[f7ae6caf-d148-44e2-9f34-1c63c5b8f3c7] Unhandled backend error on /api/auth/user-status: object AsyncIOMotorDatabase can't be used in 'await' expression
+INFO:     127.0.0.1:58409 - "GET /api/auth/user-status HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 420, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\routing.py", line 457, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 678, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\konth\Desktop\project\React\Quasar_EduSaarthi-main\backend\functions\utils.py", line 133, in get_current_user
+    db = await get_db()
+         ^^^^^^^^^^^^^^
+TypeError: object AsyncIOMotorDatabase can't be used in 'await' expression

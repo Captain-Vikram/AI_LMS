@@ -419,8 +419,8 @@ const Dashboard = () => {
   };
 
   const verifyUserStatus = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!isLoaded) return false;
+    if (!isSignedIn) {
       navigate("/login");
       return false;
     }

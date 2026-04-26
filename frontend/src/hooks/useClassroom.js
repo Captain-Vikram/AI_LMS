@@ -526,6 +526,32 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
     [classroomId, fetchResources, enabled]
   );
 
+  const addManualResource = useCallback(
+    async (resourceData) => {
+      if (!enabled || !classroomId) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await apiClient.post(
+          `/api/classroom/${classroomId}/resources/manual`,
+          resourceData
+        );
+        if (response.status === 'success') {
+          await fetchResources('class');
+          return { success: true, resource: response.resource };
+        }
+        throw new Error(response.message || 'Failed to add resource');
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error adding resource';
+        setError(errorMessage);
+        return { success: false, message: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [classroomId, fetchResources, enabled]
+  );
+
   useEffect(() => {
     if (!enabled) {
       return;
@@ -545,6 +571,7 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
     loading,
     error,
     approveResource,
+    addManualResource,
     refresh: fetchResources,
   };
 };
@@ -901,6 +928,94 @@ export const useAssignResourcesToModule = (classroomId) => {
 
   return {
     assignResources,
+    loading,
+    error,
+  };
+};
+
+export const useRemoveResourceFromModule = (classroomId) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const removeResource = useCallback(
+    async (moduleId, resourceId) => {
+      if (!classroomId || !moduleId || !resourceId) {
+        return { success: false, message: 'Missing required parameters' };
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await apiClient.delete(
+          `/api/classroom/${classroomId}/modules/${moduleId}/resources/${resourceId}`
+        );
+
+        if (response.status === 'success') {
+          return {
+            success: true,
+            message: response.message || 'Resource removed successfully',
+          };
+        }
+
+        return { success: false, message: 'Failed to remove resource' };
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to remove resource';
+        setError(errorMessage);
+        return { success: false, message: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [classroomId]
+  );
+
+  return {
+    removeResource,
+    loading,
+    error,
+  };
+};
+
+export const useDeleteLearningModule = (classroomId) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const deleteModule = useCallback(
+    async (moduleId) => {
+      if (!classroomId || !moduleId) {
+        return { success: false, message: 'Missing classroom or module id' };
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await apiClient.delete(
+          `/api/classroom/${classroomId}/modules/${moduleId}`
+        );
+
+        if (response.status === 'success') {
+          return {
+            success: true,
+            message: response.message || 'Module deleted successfully',
+          };
+        }
+
+        return { success: false, message: 'Failed to delete module' };
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to delete module';
+        setError(errorMessage);
+        return { success: false, message: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [classroomId]
+  );
+
+  return {
+    deleteModule,
     loading,
     error,
   };

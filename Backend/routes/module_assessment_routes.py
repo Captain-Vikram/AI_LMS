@@ -6,6 +6,7 @@ import os
 import random
 import re
 import uuid
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
@@ -14,8 +15,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from database import db
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
 from functions.youtube_quiz_functions import extract_video_id, get_transcript
+from functions.utils import get_user_display_name
 from models.activity_feed import ActivityType
 
 load_dotenv(override=True)
@@ -215,7 +217,7 @@ def _build_module_context(module: Dict[str, Any]) -> str:
     return "\n\n".join(context_chunks)[:max_total_chars]
 
 
-def _generate_ai_draft_questions(
+async def _generate_ai_draft_questions(
     module: Dict[str, Any],
     num_questions: int,
     question_types: List[str],
@@ -242,7 +244,7 @@ def _generate_ai_draft_questions(
         "max_output_tokens": 8192,
     }
 
-    model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
+    model = genai.GenerativeModelAsync(model_name=model_name, generation_config=generation_config)
 
     prompt = f"""
 You are generating a final assessment draft for a classroom learning module.
@@ -279,7 +281,7 @@ Rules:
 - Do not include markdown or prose outside JSON.
 """
 
-    response = model.generate_content(prompt)
+    response = await model.generate_content(prompt)
     cleaned_payload = _clean_json_payload(response.text)
 
     try:
@@ -476,7 +478,7 @@ async def generate_draft_assessment(request: GenerateDraftRequest) -> Dict[str, 
         if not resources:
             raise HTTPException(status_code=400, detail="Module has no resources")
 
-        questions = _generate_ai_draft_questions(
+        questions = await _generate_ai_draft_questions(
             module=module,
             num_questions=request.num_questions,
             question_types=request.question_types,
@@ -659,7 +661,7 @@ async def publish_assessment(assessment_id: str) -> Dict[str, Any]:
 
 @router.post("/submission/start", response_model=Dict[str, Any])
 async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
-    """Start a student assessment attempt."""
+    """Start a student assessment attempt or load existing draft."""
     try:
         assessment = _find_by_id(db.module_assessments, request.assessment_id)
         if not assessment:
@@ -668,6 +670,18 @@ async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
         if not bool(assessment.get("is_published", False)):
             raise HTTPException(status_code=400, detail="Assessment not yet available")
 
+        # Check for existing submission (in-progress or submitted)
+        existing_submission = db.assessment_submissions.find_one(
+            {
+                "assessment_id": {"$in": [request.assessment_id, assessment.get("_id")]},
+                "student_id": request.student_id,
+            }
+        )
+
+        if existing_submission and existing_submission.get("submitted_at"):
+            if not bool(assessment.get("allow_retakes", False)):
+                raise HTTPException(status_code=400, detail="Retakes are not allowed for this assessment")
+        
         module_id = str(assessment.get("module_id") or "")
         total_resources = _module_resource_count(module_id)
         completed_resources = db.student_progress.count_documents(
@@ -684,18 +698,34 @@ async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
                 detail="You must complete all resources before taking the final assessment",
             )
 
-        if not bool(assessment.get("allow_retakes", False)):
-            existing_submission = db.assessment_submissions.find_one(
-                {
-                    "assessment_id": {"$in": [request.assessment_id, assessment.get("_id")]},
-                    "student_id": request.student_id,
-                    "submitted_at": {"$ne": None},
-                }
-            )
-            if existing_submission:
-                raise HTTPException(status_code=400, detail="Retakes are not allowed for this assessment")
-
         now = datetime.utcnow()
+        time_limit_minutes = _safe_points(assessment.get("time_limit_minutes"), 60) or 60
+        
+        if existing_submission and not existing_submission.get("submitted_at"):
+            # Load existing in-progress submission
+            submission_id = str(existing_submission["_id"])
+            started_at = existing_submission.get("started_at", now)
+            expires_at = started_at + timedelta(minutes=time_limit_minutes)
+            
+            # Map answers for frontend
+            saved_answers = {}
+            for ans in existing_submission.get("answers", []):
+                if isinstance(ans, dict) and ans.get("question_id"):
+                    saved_answers[str(ans["question_id"])] = ans.get("student_answer") or ""
+
+            questions = list(assessment.get("questions", []))
+            
+            return {
+                "submission_id": submission_id,
+                "questions": [_serialize_question_for_student(question) for question in questions],
+                "time_limit_minutes": time_limit_minutes,
+                "started_at": started_at.isoformat(),
+                "expires_at": expires_at.isoformat(),
+                "draft_answers": saved_answers,
+                "is_resumed": True
+            }
+
+        # Create NEW submission
         submission = {
             "assessment_id": request.assessment_id,
             "student_id": request.student_id,
@@ -719,7 +749,6 @@ async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
         if bool(assessment.get("shuffle_questions", True)) and questions:
             random.shuffle(questions)
 
-        time_limit_minutes = _safe_points(assessment.get("time_limit_minutes"), 60) or 60
         expires_at = now + timedelta(minutes=time_limit_minutes)
 
         return {
@@ -728,6 +757,8 @@ async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
             "time_limit_minutes": time_limit_minutes,
             "started_at": now.isoformat(),
             "expires_at": expires_at.isoformat(),
+            "draft_answers": {},
+            "is_resumed": False
         }
 
     except HTTPException:
@@ -735,6 +766,43 @@ async def start_assessment(request: StartAssessmentRequest) -> Dict[str, Any]:
     except Exception as e:
         print(f"Error starting assessment: {e}")
         raise HTTPException(status_code=500, detail=f"Error starting assessment: {str(e)}")
+
+
+@router.post("/submission/{submission_id}/save-draft")
+async def save_assessment_draft(submission_id: str, request: SubmitAssessmentRequest) -> Dict[str, Any]:
+    """Save student answers as a draft without submitting."""
+    try:
+        submission = _find_by_id(db.assessment_submissions, submission_id)
+        if not submission:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        if submission.get("submitted_at"):
+            raise HTTPException(status_code=400, detail="Cannot save draft for already submitted assessment")
+
+        draft_results = []
+        for answer in request.answers:
+            draft_results.append({
+                "question_id": str(answer.get("question_id") or ""),
+                "student_answer": str(answer.get("answer") or ""),
+                "saved_at": datetime.utcnow()
+            })
+
+        db.assessment_submissions.update_one(
+            {"_id": submission.get("_id")},
+            {"$set": {"answers": draft_results, "updated_at": datetime.utcnow()}},
+        )
+
+        return {
+            "status": "success",
+            "message": "Draft answers saved.",
+            "saved_count": len(draft_results)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error saving assessment draft: {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving draft: {str(e)}")
 
 
 @router.post("/submission/{submission_id}/submit")
@@ -874,44 +942,105 @@ async def submit_assessment(submission_id: str, request: SubmitAssessmentRequest
 
 
 @router.get("/pending-grades/{classroom_id}")
-async def get_pending_submissions(classroom_id: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Get all submissions pending manual grading for a classroom."""
+async def get_pending_submissions(classroom_id: str, status: str = "pending") -> Dict[str, List[Dict[str, Any]]]:
+    """Get all submissions (pending or graded) for a classroom, covering both standard and workflow types."""
     try:
         classroom_candidates = _id_candidates(classroom_id)
-        submissions = list(
-            db.assessment_submissions.find(
-                {
-                    "classroom_id": {"$in": classroom_candidates},
-                    "grading_status": "pending_manual_grade",
-                }
-            ).sort("submitted_at", 1)
+        
+        if status == "graded":
+            standard_filter = {
+                "classroom_id": {"$in": classroom_candidates},
+                "grading_status": "fully_graded",
+            }
+            workflow_filter = {
+                "classroom_id": {"$in": classroom_candidates},
+                "grading_status": "fully_graded",
+            }
+        else:
+            standard_filter = {
+                "classroom_id": {"$in": classroom_candidates},
+                "grading_status": "pending_manual_grade",
+            }
+            workflow_filter = {
+                "classroom_id": {"$in": classroom_candidates},
+                "grading_status": "pending_teacher_review",
+            }
+
+        standard_submissions = list(
+            db.assessment_submissions.find(standard_filter).sort("submitted_at", -1 if status == "graded" else 1)
         )
 
-        pending: List[Dict[str, Any]] = []
-        for submission in submissions:
-            student = db.users.find_one({"_id": {"$in": _id_candidates(submission.get("student_id"))}})
+        results: List[Dict[str, Any]] = []
+        
+        for submission in standard_submissions:
+            student = db.users.find_one(
+                {"_id": {"$in": _id_candidates(submission.get("student_id"))}},
+                {"name": 1, "first_name": 1, "last_name": 1, "profile": 1, "email": 1}
+            )
             assessment = _find_by_id(db.module_assessments, str(submission.get("assessment_id")))
             pending_questions = submission.get("pending_manual_questions") or []
 
-            pending.append(
+            results.append(
                 {
                     "submission_id": str(submission.get("_id")),
-                    "student_name": (student or {}).get("name", "Unknown"),
+                    "student_name": get_user_display_name(student),
                     "student_id": str(submission.get("student_id") or ""),
                     "module_title": (assessment or {}).get("title", "Unknown"),
                     "submitted_at": submission.get("submitted_at").isoformat()
                     if isinstance(submission.get("submitted_at"), datetime)
-                    else submission.get("submitted_at"),
+                    else (submission.get("submitted_at") or ""),
                     "auto_graded_score": _safe_points(submission.get("auto_graded_score"), 0),
                     "pending_questions_count": len(pending_questions),
+                    "type": "standard",
+                    "status": submission.get("grading_status"),
+                    "final_score": submission.get("total_score", 0) if status == "graded" else None,
+                    "score_percentage": submission.get("score_percentage", 0) if status == "graded" else None,
                 }
             )
 
-        return {"pending_submissions": pending}
+        workflow_submissions = list(
+            db.module_assessment_workflow_submissions.find(workflow_filter).sort("submitted_at", -1 if status == "graded" else 1)
+        )
+        
+        for submission in workflow_submissions:
+            student = db.users.find_one(
+                {"_id": {"$in": _id_candidates(submission.get("student_id"))}},
+                {"name": 1, "first_name": 1, "last_name": 1, "profile": 1, "email": 1}
+            )
+            workflow = _find_by_id(db.module_assessment_workflows, str(submission.get("workflow_id")))
+            module_title = "Unknown Workflow"
+            if workflow:
+                module = _find_by_id(db.learning_modules, str(workflow.get("module_id")))
+                if module:
+                    module_title = f"{module.get('name', 'Module')} - {submission.get('category', '').upper()}"
+                else:
+                    module_title = f"Workflow - {submission.get('category', '').upper()}"
+
+            results.append(
+                {
+                    "submission_id": str(submission.get("_id")),
+                    "student_name": get_user_display_name(student),
+                    "student_id": str(submission.get("student_id") or ""),
+                    "module_title": module_title,
+                    "submitted_at": submission.get("submitted_at").isoformat()
+                    if isinstance(submission.get("submitted_at"), datetime)
+                    else (submission.get("submitted_at") or ""),
+                    "auto_graded_score": _safe_points(submission.get("ai_score"), 0),
+                    "pending_questions_count": 1 if status != "graded" else 0,
+                    "type": "workflow",
+                    "status": submission.get("grading_status"),
+                    "final_score": submission.get("total_score", 0) if status == "graded" else None,
+                    "score_percentage": submission.get("score_percentage", 0) if status == "graded" else None,
+                    "category": submission.get("category"),
+                }
+            )
+
+        results.sort(key=lambda x: x["submitted_at"] or "", reverse=(status == "graded"))
+        return {"pending_submissions" if status == "pending" else "graded_submissions": results}
 
     except Exception as e:
-        print(f"Error fetching pending grades: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching pending grades: {str(e)}")
+        print(f"Error fetching submissions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching submissions: {str(e)}")
 
 
 @router.get("/submission/{submission_id}")
@@ -931,27 +1060,33 @@ async def get_submission_details(submission_id: str) -> Dict[str, Any]:
         if isinstance(answer, dict)
     }
 
+    all_questions: List[Dict[str, Any]] = []
     manual_questions: List[Dict[str, Any]] = []
+
     for question in assessment.get("questions", []):
         question_id = str(question.get("id") or "")
         if not question_id:
             continue
+        
         question_type = str(question.get("type") or "").strip().lower()
-        if not _question_requires_manual_grade(question_type):
-            continue
-
         answer = answers_by_question_id.get(question_id, {})
-        manual_questions.append(
-            {
-                "question_id": question_id,
-                "question_text": question.get("question_text"),
-                "type": question_type,
-                "max_points": _safe_points(question.get("points"), 0),
-                "student_answer": answer.get("student_answer", ""),
-                "points_awarded": _safe_points(answer.get("points_awarded"), 0),
-                "teacher_comment": answer.get("teacher_comment"),
-            }
-        )
+        
+        question_entry = {
+            "question_id": question_id,
+            "question_text": question.get("question_text"),
+            "type": question_type,
+            "max_points": _safe_points(question.get("points"), 0),
+            "student_answer": answer.get("student_answer") or answer.get("answer") or "",
+            "points_awarded": _safe_points(answer.get("points_awarded"), 0),
+            "teacher_comment": answer.get("teacher_comment"),
+            "is_manual": _question_requires_manual_grade(question_type),
+            "correct_answer": question.get("correct_answer"),
+            "is_correct": answer.get("is_correct"),
+        }
+
+        all_questions.append(question_entry)
+        if question_entry["is_manual"]:
+            manual_questions.append(question_entry)
 
     return {
         "submission_id": str(submission.get("_id")),
@@ -963,6 +1098,7 @@ async def get_submission_details(submission_id: str) -> Dict[str, Any]:
         "grading_status": submission.get("grading_status"),
         "teacher_feedback": submission.get("teacher_feedback"),
         "manual_questions": manual_questions,
+        "all_questions": all_questions,
     }
 
 

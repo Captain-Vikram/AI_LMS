@@ -9,28 +9,51 @@ from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
 from database_async import get_db
 from models.user_models import UserRegistration, UserLogin
 from jwt_config import settings
-from functions.utils import get_current_user, normalize_user_role
+from functions.utils import get_current_user, normalize_user_role, verify_clerk_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def decode_user_id_from_auth_header(authorization: str) -> str:
-    """Extract and validate the current user id from a Bearer token."""
+async def decode_user_id_from_auth_header(authorization: str) -> str:
+    """Extract and validate the current user id from a Bearer token (Clerk)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     token = authorization.split(" ")[1]
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-
-        return user_id
-    except jwt.PyJWTError:
+    payload = await verify_clerk_token(token)
+    
+    # We need to map Clerk sub to our local database _id
+    clerk_id = payload.get("sub")
+    if not clerk_id:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
+        
+    db = get_db()
+    user = await db.users.find_one({"clerk_id": clerk_id})
+    if not user:
+        # Fallback to email for migration
+        email = payload.get("email")
+        if email:
+            user = await db.users.find_one({"email": email})
+            if user:
+                await db.users.update_one({"_id": user["_id"]}, {"$set": {"clerk_id": clerk_id}})
+        
+        if not user:
+            # Auto-create user if not found (lazy sync)
+            new_user_data = {
+                "clerk_id": clerk_id,
+                "email": payload.get("email"),
+                "first_name": payload.get("given_name", "User"),
+                "last_name": payload.get("family_name", ""),
+                "role": "student",
+                "registration_date": datetime.utcnow(),
+                "onboarding_complete": False,
+                "assessment_complete": False,
+                "status": "active"
+            }
+            result = await db.users.insert_one(new_user_data)
+            return str(result.inserted_id)
+
+    return str(user["_id"])
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -143,43 +166,23 @@ async def register(user: UserRegistration):
 @router.post("/update-onboarding-status")
 async def update_onboarding_status(
     status: dict,
-    authorization: str = Header(None)
+    current_user: dict = Depends(get_current_user)
 ):
-    # Check for the Authorization header
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = ObjectId(current_user["user_id"])
     
-    # Extract the token
-    token = authorization.split(" ")[1]
+    # Update the user's onboarding status (ASYNC)
+    db = get_db()
+    users_collection = db.users
     
-    try:
-        # Decode the token to get user_id
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
+    update_result = await users_collection.update_one(
+        {"_id": user_id},
+        {"$set": {"onboarding_complete": status.get("onboarding_complete", True)}}
+    )
+    
+    if update_result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
         
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-            
-        # Convert user_id string to ObjectId
-        from bson import ObjectId
-        user_id = ObjectId(user_id)
-        
-        # Update the user's onboarding status (ASYNC)
-        db = get_db()
-        users_collection = db.users
-        
-        update_result = await users_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"onboarding_complete": status.get("onboarding_complete", True)}}
-        )
-        
-        if update_result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        return {"message": "Onboarding status updated successfully"}
-        
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    return {"message": "Onboarding status updated successfully"}
 
 @router.post("/login")
 async def login(credentials: UserLogin):
@@ -225,6 +228,9 @@ async def login(credentials: UserLogin):
     # Get onboarding status and assessment status
     onboarding_complete = user.get("onboarding_complete", False)
     assessment_complete = user.get("assessment_complete", False)
+    
+    from functions.background_warming import trigger_cache_warming
+    trigger_cache_warming(str(user["_id"]), normalized_role)
     
     return {
         "message": "User logged in successfully", 
@@ -272,87 +278,63 @@ async def set_active_classroom(classroom_id: str, current_user = Depends(get_cur
     return {"access_token": new_token, "token_type": "bearer"}
 
 @router.get("/user-profile")
-async def get_user_profile(authorization: str = Header(None)):
-    # Check for the Authorization header
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    user_id_obj = ObjectId(user_id)
     
-    # Extract the token
-    token = authorization.split(" ")[1]
+    # Get the user data
+    db = get_db()
+    users_collection = db.users
+    profiles_collection = db.user_profiles
     
-    try:
-        # Decode the token to get user_id
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-            
-        # Convert user_id string to ObjectId
-        user_id_obj = ObjectId(user_id)
-        
-        # Get the user data
-        db = get_db()
-        users_collection = db.users
-        profiles_collection = db.user_profiles
-        
-        # First try to get from profiles collection for richer data (ASYNC)
-        user_profile = await profiles_collection.find_one({"user_id": user_id_obj})
-        
-        # If no profile exists, get basic data from users collection (ASYNC)
-        if not user_profile:
-            user = await users_collection.find_one({"_id": user_id_obj})
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
-                
-            return {
-                "id": user_id,
-                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-                "firstName": user.get("first_name"),
-                "lastName": user.get("last_name"),
-                "email": user.get("email"),
-                "location": user.get("location"),
-                "role": normalize_user_role(user.get("role")),
-                "joinedDate": user.get("registration_date").strftime("%B %Y") if user.get("registration_date") else None,
-                "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user.get("last_login") else None,
-                "onboardingComplete": user.get("onboarding_complete", False),
-                "assessmentComplete": user.get("assessment_complete", False)
-            }
-        
-        # Return enriched profile data (ASYNC)
+    # First try to get from profiles collection for richer data (ASYNC)
+    user_profile = await profiles_collection.find_one({"user_id": user_id_obj})
+    
+    # If no profile exists, get basic data from users collection (ASYNC)
+    if not user_profile:
         user = await users_collection.find_one({"_id": user_id_obj})
-        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
         return {
             "id": user_id,
-            "name": f"{user_profile.get('first_name', '')} {user_profile.get('last_name', '')}".strip(),
-            "firstName": user_profile.get("first_name"),
-            "lastName": user_profile.get("last_name"),
-            "email": user.get("email") if user else None,
-            "location": user_profile.get("location"),
-            "role": normalize_user_role(user_profile.get("role") if user_profile else user.get("role") if user else None),
-            "bio": user_profile.get("bio"),
-            "skills": user_profile.get("skills", []),
-            "joinedDate": user.get("registration_date").strftime("%B %Y") if user and user.get("registration_date") else None,
-            "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user and user.get("last_login") else "Today",
-            "onboardingComplete": user.get("onboarding_complete", False) if user else False,
-            "assessmentComplete": user.get("assessment_complete", False) if user else False
+            "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+            "firstName": user.get("first_name"),
+            "lastName": user.get("last_name"),
+            "email": user.get("email"),
+            "location": user.get("location"),
+            "role": normalize_user_role(user.get("role")),
+            "joinedDate": user.get("registration_date").strftime("%B %Y") if user.get("registration_date") else None,
+            "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user.get("last_login") else None,
+            "onboardingComplete": user.get("onboarding_complete", False),
+            "assessmentComplete": user.get("assessment_complete", False)
         }
-            
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve user data: {str(e)}")
+    
+    # Return enriched profile data (ASYNC)
+    user = await users_collection.find_one({"_id": user_id_obj})
+    
+    return {
+        "id": user_id,
+        "name": f"{user_profile.get('first_name', '')} {user_profile.get('last_name', '')}".strip(),
+        "firstName": user_profile.get("first_name"),
+        "lastName": user_profile.get("last_name"),
+        "email": user.get("email") if user else None,
+        "location": user_profile.get("location"),
+        "role": normalize_user_role(user_profile.get("role") if user_profile else user.get("role") if user else None),
+        "bio": user_profile.get("bio"),
+        "skills": user_profile.get("skills", []),
+        "joinedDate": user.get("registration_date").strftime("%B %Y") if user and user.get("registration_date") else None,
+        "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user and user.get("last_login") else "Today",
+        "onboardingComplete": user.get("onboarding_complete", False) if user else False,
+        "assessmentComplete": user.get("assessment_complete", False) if user else False
+    }
 
 
 @router.get("/user-status")
-async def get_user_status(authorization: str = Header(None)):
+async def get_user_status(current_user: dict = Depends(get_current_user)):
     """Return backend-trusted onboarding/assessment completion status for the current user."""
-    user_id = decode_user_id_from_auth_header(authorization)
-
-    try:
-        user_object_id = ObjectId(user_id)
-    except InvalidId:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    user_id = current_user["user_id"]
+    user_object_id = ObjectId(user_id)
 
     try:
         db = get_db()
@@ -384,53 +366,32 @@ async def get_user_status(authorization: str = Header(None)):
     except PyMongoError:
         raise HTTPException(status_code=503, detail="Database error while loading user status")
     
-# Add this to your auth_routes.py file
 
 @router.post("/update-assessment-status")
 async def update_assessment_status(
     status: dict,
-    authorization: str = Header(None)
+    current_user: dict = Depends(get_current_user)
 ):
-    # Check for the Authorization header
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = ObjectId(current_user["user_id"])
     
-    # Extract the token
-    token = authorization.split(" ")[1]
+    # Update the user's assessment status (ASYNC)
+    db = get_db()
+    users_collection = db.users
     
-    try:
-        # Decode the token to get user_id
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
+    update_result = await users_collection.update_one(
+        {"_id": user_id},
+        {"$set": {"assessment_complete": status.get("assessment_complete", True)}}
+    )
+    
+    if update_result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
         
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-            
-        # Convert user_id string to ObjectId if needed
-        from bson import ObjectId
-        user_id = ObjectId(user_id)
-        
-        # Update the user's assessment status (ASYNC)
-        db = get_db()
-        users_collection = db.users
-        
-        update_result = await users_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"assessment_complete": status.get("assessment_complete", True)}}
-        )
-        
-        if update_result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        return {"message": "Assessment status updated successfully"}
-        
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    return {"message": "Assessment status updated successfully"}
     
 @router.get("/login-activity")
-async def get_login_activity(authorization: str = Header(None)):
+async def get_login_activity(current_user: dict = Depends(get_current_user)):
     """Get user's login activity for the past week"""
-    user_id = decode_user_id_from_auth_header(authorization)
+    user_id = current_user["user_id"]
 
     db = get_db()
 
@@ -460,5 +421,3 @@ async def get_login_activity(authorization: str = Header(None)):
         })
 
     return {"weekly_activity": weekly_activity}
-    
-    

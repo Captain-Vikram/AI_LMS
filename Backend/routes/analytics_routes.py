@@ -1,29 +1,14 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from bson import ObjectId
-import jwt
 
 from database import get_db
-from jwt_config import settings
+from functions.utils import get_current_user, normalize_user_role
+from services.classroom_analytics_service import ClassroomAnalyticsService
+from services.rbac_service import RBACService
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
-
-
-def decode_user_id_from_auth_header(authorization: str) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    token = authorization.split(" ")[1]
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-        return user_id
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
 
 def _to_iso(value):
@@ -69,11 +54,12 @@ def _build_weekly_activity_percentages(login_logs):
 
 
 @router.get("/dashboard")
-async def get_dashboard_analytics(authorization: str = Header(None)):
-    user_id = decode_user_id_from_auth_header(authorization)
+async def get_dashboard_analytics(current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
     user_id_obj = ObjectId(user_id)
 
     db = get_db()
+    # current_user already contains user info, but we might need full user doc for badges etc.
     user = db.users.find_one({"_id": user_id_obj})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -187,13 +173,6 @@ async def get_dashboard_analytics(authorization: str = Header(None)):
         "upcomingMilestones": upcoming_milestones,
         "recent_achievements": recent_achievements,
     }
-
-
-# Classroom analytics endpoints (Phase 2)
-from fastapi import Depends
-from services.classroom_analytics_service import ClassroomAnalyticsService
-from services.rbac_service import RBACService
-from functions.utils import get_current_user, normalize_user_role
 
 
 @router.get("/classroom/{classroom_id}")

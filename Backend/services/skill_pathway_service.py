@@ -3,7 +3,7 @@ import os
 import re
 from urllib.parse import quote_plus, urlparse, parse_qs
 from typing import List, Dict, Any
-from functions.llm_adapter import generate_text
+from functions.llm_adapter_async import generate_text_async
 
 
 def _extract_youtube_candidates(raw_value: Any) -> List[str]:
@@ -20,32 +20,46 @@ def _extract_youtube_candidates(raw_value: Any) -> List[str]:
     if not text:
         return []
 
-    try:
-        import ast
+    # Handle string representation of list: "['/watch?v=...', '/watch?v=...']"
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            import ast
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, str) and item.strip():
+                        candidates.append(item.strip())
+                if candidates:
+                    return candidates
+        except Exception:
+            pass
 
-        parsed = ast.literal_eval(text)
-        if isinstance(parsed, list):
-            for item in parsed:
-                if isinstance(item, str) and item.strip():
-                    candidates.append(item.strip())
-            if candidates:
-                return candidates
-    except Exception:
-        pass
-
+    # Match full URLs
     url_matches = re.findall(r"https?://[^\s'\"]+", text)
     if url_matches:
-        return [url.strip() for url in url_matches if url.strip()]
+        for url in url_matches:
+            candidates.append(url.strip())
 
-    if text.startswith("http"):
-        return [text]
+    # Match relative YouTube paths: /watch?v=... or watch?v=...
+    relative_matches = re.findall(r"(?:/)?watch\?v=[a-zA-Z0-9_-]{11}", text)
+    for rel in relative_matches:
+        full_url = "https://www.youtube.com" + (rel if rel.startswith("/") else "/" + rel)
+        if full_url not in candidates:
+            candidates.append(full_url)
 
-    return []
+    if not candidates and text.startswith("http"):
+        candidates.append(text)
+
+    return candidates
 
 
 def _is_youtube_shorts_url(url: str) -> bool:
     parsed = urlparse(str(url or "").strip())
     host = parsed.netloc.lower().replace("www.", "")
+
+    # If it's a relative URL, it's probably not a shorts URL if it starts with /watch
+    if not host:
+        return "/shorts/" in parsed.path.lower()
 
     if host not in {"youtube.com", "m.youtube.com", "youtube-nocookie.com", "youtu.be"}:
         return False
@@ -60,13 +74,16 @@ def _normalize_youtube_watch_url(url: str) -> str:
     if not raw_url:
         return ""
 
+    if raw_url.startswith("/watch") or raw_url.startswith("watch?v="):
+        raw_url = "https://www.youtube.com" + (raw_url if raw_url.startswith("/") else "/" + raw_url)
+
     parsed = urlparse(raw_url)
     host = parsed.netloc.lower().replace("www.", "")
 
     video_id = ""
     if host == "youtu.be":
         video_id = parsed.path.strip("/")
-    elif host in {"youtube.com", "m.youtube.com", "youtube-nocookie.com"}:
+    elif host in {"youtube.com", "m.youtube.com", "youtube-nocookie.com"} or not host:
         path_parts = [part for part in parsed.path.split("/") if part]
         if parsed.path.startswith("/watch"):
             video_id = parse_qs(parsed.query).get("v", [""])[0]
@@ -83,7 +100,8 @@ def _pick_non_shorts_youtube_url(raw_result: Any) -> str:
     candidates = _extract_youtube_candidates(raw_result)
     for candidate in candidates:
         normalized = _normalize_youtube_watch_url(candidate)
-        if not _is_youtube_shorts_url(candidate) and not _is_youtube_shorts_url(normalized):
+        # Ensure it's a real video URL and not a search page
+        if "watch?v=" in normalized and not _is_youtube_shorts_url(normalized):
             return normalized
     return ""
 
@@ -157,7 +175,7 @@ class SkillPathwayService:
 
         # 5. Generate via LLM
         try:
-            raw_response = generate_text(
+            raw_response = await generate_text_async(
                 prompt_or_messages=[{"role": "user", "content": prompt}],
                 generation_config={"temperature": 0.3, "max_tokens": 1500}
             )
@@ -264,7 +282,7 @@ class SkillPathwayService:
         """
         
         try:
-            raw_response = generate_text(
+            raw_response = await generate_text_async(
                 prompt_or_messages=[{"role": "user", "content": prompt}],
                 generation_config={"temperature": 0.2, "max_tokens": 2000}
             )

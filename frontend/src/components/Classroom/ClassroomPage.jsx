@@ -119,22 +119,8 @@ const ClassroomPage = () => {
   }, [id]);
 
   /* enter */
-  const enterClassroom = useCallback(async () => {
-    setActionLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.post(`${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${id}`);
-      const token = res.access_token || res.token;
-      if (token) {
-        localStorage.setItem('token', token);
-        localStorage.setItem('isLoggedIn', 'true');
-      }
-      navigate(`/classroom/${id}/dashboard`);
-    } catch (e) {
-      setError(e.message || 'Failed to enter classroom');
-    } finally {
-      setActionLoading(false);
-    }
+  const enterClassroom = useCallback(() => {
+    navigate(`/classroom/${id}/dashboard`);
   }, [id, navigate]);
 
   /* copy */

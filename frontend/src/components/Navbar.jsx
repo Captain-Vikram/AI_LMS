@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { SignInButton, SignUpButton, UserButton, SignedIn, SignedOut, useAuth } from "@clerk/clerk-react";
 import useNavbarVisibility from "../hooks/useNavbarVisibility";
 import { navbarVariants, childVariants } from "../animations/navbarAnimations";
 
@@ -10,8 +11,7 @@ const Navbar = () => {
   const [hoveredItem, setHoveredItem] = useState(null);
   const navRefs = useRef({});
   const navigate = useNavigate();
-  // Check if user is logged in
-  const isLoggedIn = localStorage.getItem('isLoggedIn');
+  const { isSignedIn } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const hiddenRouteMatchers = [
@@ -32,7 +32,7 @@ const Navbar = () => {
   const navItems = [
     { name: "Home", to: "/" },
     { name: "Features", to: "/#features", isScroll: true },
-    ...(isLoggedIn ? [{ name: "Classrooms", to: "/classrooms" }] : []),
+    ...(isSignedIn ? [{ name: "Classrooms", to: "/classrooms" }] : []),
     { name: "Contact", to: "/contact" },
   ];
 
@@ -144,20 +144,11 @@ const Navbar = () => {
                 </motion.div>
               ))}
 
-              { isLoggedIn ? (
-                <RouterLink to="/signout">
-                  <motion.button
-                    className="bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-2))] text-slate-950 px-6 py-2 rounded-full text-lg font-semibold ml-4 border border-white/25 cursor-pointer shadow-[0_12px_28px_rgba(34,211,238,0.28)]"
-                    whileHover={{ color: "#fff", backgroundColor: "#4f8cff" }}
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ duration: 0.1 }}
-                    variants={childVariants}
-                  >
-                    Sign Out
-                  </motion.button>
-                </RouterLink>
-              ) : (
-                <RouterLink to="/login">
+              <SignedIn>
+                <UserButton afterSignOutUrl="/" />
+              </SignedIn>
+              <SignedOut>
+                <SignInButton mode="modal">
                   <motion.button
                     className="bg-[linear-gradient(135deg,var(--color-accent),var(--color-accent-2))] text-slate-950 px-6 py-2 rounded-full text-lg font-semibold ml-4 border border-white/25 cursor-pointer shadow-[0_12px_28px_rgba(34,211,238,0.28)]"
                     whileHover={{ color: "#fff", backgroundColor: "#4f8cff" }}
@@ -167,8 +158,8 @@ const Navbar = () => {
                   >
                     Login
                   </motion.button>
-                </RouterLink>
-              )}
+                </SignInButton>
+              </SignedOut>
             </div>
 
             {/* Mobile menu panel */}
@@ -194,11 +185,16 @@ const Navbar = () => {
                       ))}
 
                       <div className="mt-2">
-                        {isLoggedIn ? (
-                          <RouterLink to="/signout" onClick={() => setMobileOpen(false)} className="block rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-center font-semibold text-slate-950">Sign Out</RouterLink>
-                        ) : (
-                          <RouterLink to="/login" onClick={() => setMobileOpen(false)} className="block rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-center font-semibold text-slate-950">Login</RouterLink>
-                        )}
+                        <SignedIn>
+                          <UserButton afterSignOutUrl="/" />
+                        </SignedIn>
+                        <SignedOut>
+                          <SignInButton mode="modal">
+                            <button className="w-full rounded-md bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-center font-semibold text-slate-950">
+                              Login
+                            </button>
+                          </SignInButton>
+                        </SignedOut>
                       </div>
                     </nav>
                   </div>

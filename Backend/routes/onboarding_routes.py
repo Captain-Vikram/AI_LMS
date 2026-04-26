@@ -2,17 +2,17 @@ from datetime import datetime, timedelta
 import json
 import re
 import secrets
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 import jwt
 from pydantic import BaseModel
 
-from database import get_db
-from functions.llm_adapter import generate_text
+from database_async import get_db
+from functions.llm_adapter_async import generate_text_async
 from services.rbac_service import RBACService
-from functions.utils import get_current_user, normalize_user_role
+from functions.utils import get_current_user, normalize_user_role, verify_clerk_token
 from jwt_config import settings
 
 
@@ -24,19 +24,85 @@ async def get_current_user_id(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
-    token = authorization.replace("Bearer ", "")
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return user_id
-    except jwt.PyJWTError:
+    token = authorization.split(" ")[1]
+    payload = await verify_clerk_token(token)
+    
+    clerk_id = payload.get("sub")
+    if not clerk_id:
         raise HTTPException(status_code=401, detail="Invalid token")
+        
+    db = get_db()
+    user = await db.users.find_one({"clerk_id": clerk_id})
+    if not user:
+        # Auto-sync user
+        new_user_data = {
+            "clerk_id": clerk_id,
+            "email": payload.get("email"),
+            "first_name": payload.get("given_name", "User"),
+            "last_name": payload.get("family_name", ""),
+            "role": "student",
+            "registration_date": datetime.utcnow(),
+            "onboarding_complete": False,
+            "assessment_complete": False,
+            "status": "active"
+        }
+        result = await db.users.insert_one(new_user_data)
+        return str(result.inserted_id)
+
+    return str(user["_id"])
 
 
 class StudentJoinRequest(BaseModel):
     enrollment_code: str
+
+
+class ProfileCompleteRequest(BaseModel):
+    first_name: str
+    last_name: str
+    role: str
+
+
+@router.post("/complete-profile")
+async def complete_profile(
+    payload: ProfileCompleteRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_db()
+    user_oid = ObjectId(current_user["user_id"])
+    
+    role = normalize_user_role(payload.role)
+    
+    await db.users.update_one(
+        {"_id": user_oid},
+        {
+            "$set": {
+                "first_name": payload.first_name,
+                "last_name": payload.last_name,
+                "role": role,
+                "updated_date": datetime.utcnow()
+            }
+        }
+    )
+    
+    # Also update or create profile in user_profiles collection
+    await db.user_profiles.update_one(
+        {"user_id": user_oid},
+        {
+            "$set": {
+                "first_name": payload.first_name,
+                "last_name": payload.last_name,
+                "role": role,
+                "updated_at": datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "status": "success",
+        "message": "Profile updated successfully",
+        "role": role
+    }
 
 
 def _extract_json_object(raw_text: str) -> Optional[Dict[str, Any]]:
@@ -117,7 +183,7 @@ def _subject_regex(subject: str) -> str:
     return rf"^\s*{re.escape(subject.strip())}\s*$"
 
 
-def _extract_text_from_pdf(pdf_bytes: bytes, max_pages: int = 10) -> str:
+def _extract_text_from_pdf(pdf_bytes: bytes, max_pages: int = 20) -> str:
     if not pdf_bytes:
         return ""
 
@@ -135,8 +201,10 @@ def _extract_text_from_pdf(pdf_bytes: bytes, max_pages: int = 10) -> str:
         document.close()
 
         extracted = "\n".join(text_parts)
+        # Clean up excessive newlines while preserving structure
         extracted = re.sub(r"\n{3,}", "\n\n", extracted)
-        return extracted[:12000]
+        # Use more context for better understanding
+        return extracted[:16000]
     except Exception:
         return ""
 
@@ -151,7 +219,7 @@ def _sanitize_pathway(pathway: Dict[str, Any], subject: str, grade_level: str, t
         modules = fallback["modules"]
 
     cleaned_modules = []
-    for idx, module in enumerate(modules[:12], start=1):
+    for idx, module in enumerate(modules[:15], start=1): # Allow more modules
         if not isinstance(module, dict):
             continue
         cleaned_modules.append(
@@ -177,7 +245,7 @@ def _sanitize_pathway(pathway: Dict[str, Any], subject: str, grade_level: str, t
     }
 
 
-def _generate_teacher_pathway(
+async def _generate_teacher_pathway(
     subject: str,
     grade_level: str,
     classroom_description: str,
@@ -186,40 +254,52 @@ def _generate_teacher_pathway(
     curriculum_excerpt: str,
 ) -> Dict[str, Any]:
     prompt = f"""
-You are an expert instructional designer helping a teacher set up a classroom pathway.
+You are an elite Instructional Designer. Your task is to analyze a teacher's requirements and an optional curriculum/syllabus to create a structured, high-quality educational pathway.
 
-Generate a concise classroom pathway JSON for:
+CONTEXT:
 - Subject: {subject}
-- Grade level: {grade_level}
-- Classroom description: {classroom_description}
-- Teacher goals: {teaching_goals}
-- Preferred pace: {preferred_pace}
+- Grade Level: {grade_level}
+- Classroom Description: {classroom_description}
+- Primary Teaching Goals: {teaching_goals}
+- Desired Pace: {preferred_pace}
 
-Curriculum excerpt (optional source material):
-{curriculum_excerpt[:4000] if curriculum_excerpt else "No curriculum excerpt provided."}
+CURRICULUM/SYLLABUS DATA (Optional source of truth):
+---
+{curriculum_excerpt[:12000] if curriculum_excerpt else "No specific curriculum provided. Use general pedagogical best practices for this subject and grade level."}
+---
+
+INSTRUCTIONS:
+1. If curriculum data is provided, STRICTLY follow its modules, topics, and sequence. Do not hallucinate topics not in the syllabus unless they are necessary prerequisites.
+2. Structure the pathway into weekly modules (1 to 12 weeks).
+3. For each module, define:
+   - A clear Title.
+   - The primary Concept/Focus.
+   - 3-4 specific Activities (e.g., discussions, labs, practice).
+   - A relevant Assessment method.
+4. Ensure the objectives are measurable and align with the subject standards.
 
 Return ONLY valid JSON with this exact structure:
 {{
-  "summary": "string",
-  "objectives": ["string", "string"],
+  "summary": "Overall vision for this classroom",
+  "objectives": ["Goal 1", "Goal 2", "Goal 3"],
   "modules": [
     {{
       "week": 1,
-      "title": "string",
-      "focus": "string",
-      "activities": ["string", "string"],
-      "assessment": "string"
+      "title": "Module Title",
+      "focus": "Key concept or skill",
+      "activities": ["Activity 1", "Activity 2"],
+      "assessment": "Type of formative/summative check"
     }}
   ],
-  "teacher_notes": "string"
+  "teacher_notes": "Pedagogical advice for the teacher"
 }}
 """
 
     try:
-        raw = generate_text(
+        raw = await generate_text_async(
             prompt_or_messages=[{"role": "user", "content": prompt}],
-            generation_config={"temperature": 0.2, "max_tokens": 1400},
-            timeout=60,
+            generation_config={"temperature": 0.2, "max_tokens": 2500},
+            timeout=90,
         )
         parsed = _extract_json_object(raw)
         if parsed:
@@ -252,7 +332,7 @@ async def teacher_onboarding_setup(
     if not classroom_name.strip() or not subject.strip() or not grade_level.strip():
         raise HTTPException(status_code=400, detail="classroom_name, subject, and grade_level are required")
 
-    duplicate_subject = db.classrooms.find_one(
+    duplicate_subject = await db.classrooms.find_one(
         {
             "teacher_id": user_oid,
             "subject": {"$regex": _subject_regex(subject), "$options": "i"},
@@ -283,10 +363,10 @@ async def teacher_onboarding_setup(
             "content_type": curriculum_pdf.content_type,
             "size_bytes": len(pdf_bytes),
             "uploaded_at": datetime.utcnow(),
-            "text_excerpt": curriculum_excerpt[:4000],
+            "text_excerpt": curriculum_excerpt[:8000],
         }
 
-    ai_pathway = _generate_teacher_pathway(
+    ai_pathway = await _generate_teacher_pathway(
         subject=subject.strip(),
         grade_level=grade_level.strip(),
         classroom_description=classroom_description.strip(),
@@ -317,15 +397,15 @@ async def teacher_onboarding_setup(
         "updated_date": datetime.utcnow(),
     }
 
-    result = db.classrooms.insert_one(classroom_doc)
+    result = await db.classrooms.insert_one(classroom_doc)
     classroom_id = str(result.inserted_id)
 
-    membership_exists = db.users.find_one(
+    membership_exists = await db.users.find_one(
         {"_id": user_oid, "classroom_memberships.classroom_id": classroom_id},
         {"_id": 1},
     )
     if not membership_exists:
-        db.users.update_one(
+        await db.users.update_one(
             {"_id": user_oid},
             {
                 "$push": {
@@ -341,7 +421,7 @@ async def teacher_onboarding_setup(
             },
         )
 
-    db.users.update_one(
+    await db.users.update_one(
         {"_id": user_oid},
         {
             "$set": {
@@ -353,7 +433,7 @@ async def teacher_onboarding_setup(
         },
     )
 
-    db.teacher_onboarding.update_one(
+    await db.teacher_onboarding.update_one(
         {"user_id": user_oid},
         {
             "$set": {
@@ -392,7 +472,7 @@ async def student_join_onboarding(
         raise HTTPException(status_code=400, detail="Enrollment code is required")
 
     db = get_db()
-    classroom = db.classrooms.find_one(
+    classroom = await db.classrooms.find_one(
         {
             "enrollment_code": {
                 "$regex": f"^{re.escape(enrollment_code)}$",
@@ -418,7 +498,7 @@ async def student_join_onboarding(
     # Student flow remains unchanged.
     if not (is_teacher or is_co_teacher):
         if join_as_co_teacher:
-            db.classrooms.update_one(
+            await db.classrooms.update_one(
                 {"_id": classroom_oid},
                 {
                     "$addToSet": {"co_teachers": current_user["user_id"]},
@@ -426,15 +506,15 @@ async def student_join_onboarding(
                 },
             )
         else:
-            db.classrooms.update_one(
+            await db.classrooms.update_one(
                 {"_id": classroom_oid},
                 {"$addToSet": {"students": user_oid}},
             )
 
-    user_doc = db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
+    user_doc = await db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
     memberships = user_doc.get("classroom_memberships", [])
     if not isinstance(memberships, list):
-        db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": []}})
+        await db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": []}})
         memberships = []
 
     membership_index = next(
@@ -452,9 +532,9 @@ async def student_join_onboarding(
         memberships[membership_index]["assessment_complete"] = True
         if not memberships[membership_index].get("joined_date"):
             memberships[membership_index]["joined_date"] = datetime.utcnow()
-        db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": memberships}})
+        await db.users.update_one({"_id": user_oid}, {"$set": {"classroom_memberships": memberships}})
     else:
-        db.users.update_one(
+        await db.users.update_one(
             {"_id": user_oid},
             {
                 "$push": {
@@ -471,7 +551,7 @@ async def student_join_onboarding(
         )
 
     role_to_set = "student" if normalized_role not in {"teacher", "admin"} else normalized_role
-    db.users.update_one(
+    await db.users.update_one(
         {"_id": user_oid},
         {
             "$set": {
@@ -487,10 +567,11 @@ async def student_join_onboarding(
     # Co-teacher joins should not initialize student progress rows.
     if membership_role == "student":
         try:
-            modules = list(db.learning_modules.find(
+            cursor = db.learning_modules.find(
                 {"classroom_id": classroom_oid},
                 sort=[("created_at", 1)]
-            ))
+            )
+            modules = await cursor.to_list(length=100)
             
             for module_idx, module in enumerate(modules):
                 module_oid = module["_id"]
@@ -522,7 +603,7 @@ async def student_join_onboarding(
                     }
                     
                     # Upsert to avoid duplicates if student rejoins
-                    db.student_progress.update_one(
+                    await db.student_progress.update_one(
                         {
                             "student_id": str(user_oid),
                             "classroom_id": classroom_id,
@@ -555,15 +636,12 @@ async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(ge
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid classroom id")
 
-    classroom = db.classrooms.find_one({"_id": classroom_oid})
+    classroom = await db.classrooms.find_one({"_id": classroom_oid})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    requester_oid = ObjectId(current_user["user_id"])
-    normalized_role = normalize_user_role(current_user.get("role"))
-
     # Allow primary teacher, co-teachers, or admins
-    if normalized_role != "admin" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
+    if normalize_user_role(current_user.get("role")) != "admin" and not await rbac.is_teacher(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=403, detail="Only classroom teacher can view the full pathway")
 
     return {
@@ -574,19 +652,12 @@ async def get_teacher_pathway(classroom_id: str, current_user: dict = Depends(ge
     }
 
 
-# Legacy onboarding endpoint (kept for backward compatibility)
-# Removed: /save endpoint (dead code - OnboardingData not used in module system)
-
-
 @router.get("/status")
 async def get_onboarding_status(user_id: str = Depends(get_current_user_id)):
     db = get_db()
-    user = db.users.find_one({"_id": ObjectId(user_id)})
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     return {"onboarding_complete": user.get("onboarding_complete", False)}
-
-
-# Removed: /user-skills endpoint (dead code - not used by frontend or module system)

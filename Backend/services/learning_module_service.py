@@ -1,9 +1,10 @@
 """
-Learning Module Service
+Learning Module Service (Async Optimized)
 Handles module creation, resource linking, and progress tracking
 """
 
 import re
+import asyncio
 from bson import ObjectId
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -25,7 +26,7 @@ class LearningModuleService:
     def __init__(self, db):
         self.db = db
 
-    def auto_generate_modules_from_resources(
+    async def auto_generate_modules_from_resources(
         self,
         classroom_id: str,
         force_regenerate: bool = False
@@ -50,7 +51,7 @@ class LearningModuleService:
             }
 
         # Get classroom and its resources
-        classroom = self.db.classrooms.find_one(
+        classroom = await self.db.classrooms.find_one(
             {"_id": classroom_oid},
             {
                 "ai_resources": 1,
@@ -95,7 +96,7 @@ class LearningModuleService:
         created_count = 0
         updated_count = 0
 
-        existing_modules = list(self.db.learning_modules.find({"classroom_id": classroom_oid}))
+        existing_modules = await self.db.learning_modules.find({"classroom_id": classroom_oid}).to_list(None)
         existing_modules_by_name: Dict[str, Dict[str, Any]] = {}
         highest_order = 0
 
@@ -160,7 +161,7 @@ class LearningModuleService:
                     module_was_updated = len(new_resources) > 0
 
                 if force_regenerate or module_was_updated:
-                    self.db.learning_modules.update_one(
+                    await self.db.learning_modules.update_one(
                         {"_id": existing_module["_id"]},
                         {
                             "$set": {
@@ -179,7 +180,7 @@ class LearningModuleService:
                     )
                     updated_count += 1
 
-                self._link_resources_to_module(
+                await self._link_resources_to_module(
                     classroom_oid,
                     resources,
                     module_id,
@@ -216,9 +217,9 @@ class LearningModuleService:
                 "published_date": datetime.utcnow(),
             }
 
-            result = self.db.learning_modules.insert_one(module_doc)
+            result = await self.db.learning_modules.insert_one(module_doc)
 
-            self._link_resources_to_module(
+            await self._link_resources_to_module(
                 classroom_oid,
                 resources,
                 str(result.inserted_id),
@@ -248,7 +249,7 @@ class LearningModuleService:
             "modules": generated_modules,
         }
 
-    def create_module(
+    async def create_module(
         self,
         classroom_id: str,
         name: str,
@@ -264,15 +265,16 @@ class LearningModuleService:
         if not str(name or "").strip():
             return {"status": "error", "message": "Module name is required"}
 
-        classroom_exists = self.db.classrooms.find_one({"_id": classroom_oid}, {"_id": 1})
+        classroom_exists = await self.db.classrooms.find_one({"_id": classroom_oid}, {"_id": 1})
         if not classroom_exists:
             return {"status": "error", "message": "Classroom not found"}
 
         module_name = re.sub(r"\s+", " ", str(name).strip())
         module_key = self._normalize_text_key(module_name)
-        existing_modules = list(
-            self.db.learning_modules.find({"classroom_id": classroom_oid}, {"name": 1, "subject": 1})
-        )
+        existing_modules = await self.db.learning_modules.find(
+            {"classroom_id": classroom_oid}, {"name": 1, "subject": 1}
+        ).to_list(None)
+        
         duplicate_exists = any(
             self._normalize_text_key(item.get("name")) == module_key
             or self._normalize_text_key(item.get("subject")) == module_key
@@ -284,7 +286,7 @@ class LearningModuleService:
                 "message": "A module with this name already exists in the classroom",
             }
 
-        latest_module = self.db.learning_modules.find_one(
+        latest_module = await self.db.learning_modules.find_one(
             {"classroom_id": classroom_oid},
             sort=[("order", -1)],
         )
@@ -309,7 +311,7 @@ class LearningModuleService:
             "published_date": datetime.utcnow(),
         }
 
-        self.db.learning_modules.insert_one(module_doc)
+        await self.db.learning_modules.insert_one(module_doc)
 
         return {
             "status": "success",
@@ -317,7 +319,7 @@ class LearningModuleService:
             "module": self._module_to_dict(module_doc),
         }
 
-    def reorder_modules(
+    async def reorder_modules(
         self,
         classroom_id: str,
         module_ids: List[str],
@@ -344,12 +346,10 @@ class LearningModuleService:
         except Exception:
             return {"status": "error", "message": "module_ids must contain valid module IDs"}
 
-        modules = list(
-            self.db.learning_modules.find(
-                {"classroom_id": classroom_oid, "_id": {"$in": module_oids}},
-                {"_id": 1},
-            )
-        )
+        modules = await self.db.learning_modules.find(
+            {"classroom_id": classroom_oid, "_id": {"$in": module_oids}},
+            {"_id": 1},
+        ).to_list(None)
 
         if len(modules) != len(module_oids):
             return {
@@ -358,20 +358,21 @@ class LearningModuleService:
             }
 
         timestamp = datetime.utcnow()
+        # Use bulk write for efficiency if possible, or sequential async updates
         for order_index, module_oid in enumerate(module_oids, start=1):
-            self.db.learning_modules.update_one(
+            await self.db.learning_modules.update_one(
                 {"_id": module_oid, "classroom_id": classroom_oid},
                 {"$set": {"order": order_index, "updated_date": timestamp}},
             )
 
-        refreshed = self.get_classroom_modules(classroom_id)
+        refreshed = await self.get_classroom_modules(classroom_id)
         return {
             "status": "success",
             "message": "Modules reordered successfully",
             "modules": refreshed.get("modules", []),
         }
 
-    def get_approved_resources_for_module_assignment(
+    async def get_approved_resources_for_module_assignment(
         self,
         classroom_id: str,
     ) -> Dict[str, Any]:
@@ -381,7 +382,7 @@ class LearningModuleService:
         except Exception:
             return {"status": "error", "message": "Invalid classroom ID"}
 
-        classroom = self.db.classrooms.find_one(
+        classroom = await self.db.classrooms.find_one(
             {"_id": classroom_oid},
             {
                 "ai_resources": 1,
@@ -442,7 +443,7 @@ class LearningModuleService:
             "total_resources": len(approved_resources),
         }
 
-    def add_resources_to_module(
+    async def add_resources_to_module(
         self,
         classroom_id: str,
         module_id: str,
@@ -458,13 +459,13 @@ class LearningModuleService:
         if not resource_ids:
             return {"status": "error", "message": "resource_ids cannot be empty"}
 
-        module = self.db.learning_modules.find_one(
+        module = await self.db.learning_modules.find_one(
             {"_id": module_oid, "classroom_id": classroom_oid}
         )
         if not module:
             return {"status": "error", "message": "Module not found in classroom"}
 
-        classroom = self.db.classrooms.find_one(
+        classroom = await self.db.classrooms.find_one(
             {"_id": classroom_oid},
             {"ai_resources": 1},
         )
@@ -532,7 +533,7 @@ class LearningModuleService:
             added_count += 1
 
         if added_count > 0:
-            self.db.learning_modules.update_one(
+            await self.db.learning_modules.update_one(
                 {"_id": module_oid, "classroom_id": classroom_oid},
                 {
                     "$set": {
@@ -544,14 +545,14 @@ class LearningModuleService:
                 },
             )
 
-        self._link_resources_to_module(
+        await self._link_resources_to_module(
             classroom_oid,
             valid_resources,
             module_id,
             module_name=module.get("name"),
         )
 
-        refreshed_module = self.db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
+        refreshed_module = await self.db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
         return {
             "status": "success",
             "message": "Resources assigned to module",
@@ -561,7 +562,115 @@ class LearningModuleService:
             "module": self._module_to_dict(refreshed_module) if refreshed_module else None,
         }
 
-    def get_classroom_modules(
+    async def remove_resource_from_module(
+        self,
+        classroom_id: str,
+        module_id: str,
+        resource_id: str,
+    ) -> Dict[str, Any]:
+        """Removes a resource from a learning module and unlinks it in the classroom."""
+        try:
+            classroom_oid = ObjectId(classroom_id)
+            module_oid = ObjectId(module_id)
+        except Exception:
+            return {"status": "error", "message": "Invalid classroom or module ID"}
+
+        module = await self.db.learning_modules.find_one(
+            {"_id": module_oid, "classroom_id": classroom_oid}
+        )
+        if not module:
+            return {"status": "error", "message": "Module not found in classroom"}
+
+        resources = list(module.get("resources", []))
+        new_resources = [
+            r for r in resources 
+            if (r.get("id") or r.get("resource_id")) != resource_id
+        ]
+
+        if len(new_resources) == len(resources):
+            return {"status": "error", "message": "Resource not found in module"}
+
+        # Re-order remaining resources
+        for i, r in enumerate(new_resources):
+            r["order"] = i
+
+        await self.db.learning_modules.update_one(
+            {"_id": module_oid, "classroom_id": classroom_oid},
+            {
+                "$set": {
+                    "resources": new_resources,
+                    "estimated_hours": self._estimate_hours(new_resources),
+                    "difficulty_level": self._estimate_difficulty(new_resources),
+                    "updated_date": datetime.utcnow(),
+                }
+            },
+        )
+
+        # Unlink in classroom document
+        await self.db.classrooms.update_one(
+            {"_id": classroom_oid},
+            {
+                "$set": {
+                    "ai_resources.$[elem].module_id": None,
+                    "ai_resources.$[elem].module_name": None
+                }
+            },
+            array_filters=[{"elem.resource_id": resource_id}]
+        )
+
+        return {
+            "status": "success",
+            "message": "Resource removed from module",
+            "resource_id": resource_id
+        }
+
+
+    async def delete_module(
+        self,
+        classroom_id: str,
+        module_id: str,
+    ) -> Dict[str, Any]:
+        """Deletes a learning module and unlinks its resources from the classroom."""
+        try:
+            classroom_oid = ObjectId(classroom_id)
+            module_oid = ObjectId(module_id)
+        except Exception:
+            return {"status": "error", "message": "Invalid classroom or module ID"}
+
+        # Check if module exists
+        module = await self.db.learning_modules.find_one(
+            {"_id": module_oid, "classroom_id": classroom_oid}
+        )
+        if not module:
+            return {"status": "error", "message": "Module not found in classroom"}
+
+        # Delete the module
+        delete_result = await self.db.learning_modules.delete_one(
+            {"_id": module_oid, "classroom_id": classroom_oid}
+        )
+
+        if delete_result.deleted_count == 0:
+            return {"status": "error", "message": "Failed to delete module"}
+
+        # Unlink resources in the classroom document
+        await self.db.classrooms.update_one(
+            {"_id": classroom_oid},
+            {
+                "$set": {
+                    "ai_resources.$[elem].module_id": None,
+                    "ai_resources.$[elem].module_name": None
+                }
+            },
+            array_filters=[{"elem.module_id": module_id}]
+        )
+
+        return {
+            "status": "success",
+            "message": "Module deleted successfully",
+            "module_id": module_id
+        }
+
+    async def get_classroom_modules(
         self,
         classroom_id: str,
         status_filter: Optional[str] = None,
@@ -570,15 +679,7 @@ class LearningModuleService:
     ) -> Dict[str, Any]:
         """
         Retrieves all modules for a classroom with optional progress tracking.
-        
-        Args:
-            classroom_id: ID of the classroom
-            status_filter: Filter by module status (draft, published, archived)
-            include_progress: Whether to include student progress
-            student_id: ID of student for progress tracking
-            
-        Returns:
-            Dictionary with modules and statistics
+        Optimized with batch progress lookups.
         """
         try:
             classroom_oid = ObjectId(classroom_id)
@@ -593,7 +694,7 @@ class LearningModuleService:
         if status_filter:
             query["status"] = status_filter
 
-        modules = list(self.db.learning_modules.find(query).sort("order", 1))
+        modules = await self.db.learning_modules.find(query).sort("order", 1).to_list(None)
 
         if not modules:
             return {
@@ -603,23 +704,49 @@ class LearningModuleService:
                 "total": 0
             }
 
-        # Convert ObjectIds to strings
+        # Optimized Batch Progress Lookup
+        student_progress_map = {}
+        if include_progress and student_id:
+            try:
+                student_oid = ObjectId(student_id)
+                module_ids = [m["_id"] for m in modules]
+                
+                # Fetch all engagements for this student in these modules in one query
+                all_engagements = await self.db.resource_engagement.find({
+                    "student_id": student_oid,
+                    "module_id": {"$in": module_ids}
+                }).to_list(None)
+                
+                # Group engagements by module_id
+                engagements_by_module = {}
+                for eng in all_engagements:
+                    m_id = str(eng["module_id"])
+                    engagements_by_module.setdefault(m_id, []).append(eng)
+                
+                # Pre-calculate progress for each module
+                for module in modules:
+                    m_id_str = str(module["_id"])
+                    module_engagements = engagements_by_module.get(m_id_str, [])
+                    student_progress_map[m_id_str] = self._calculate_module_progress_from_data(
+                        module, module_engagements
+                    )
+            except Exception as e:
+                print(f"Error pre-calculating batch progress: {e}")
+
         result_modules = []
         for module in modules:
             module_dict = self._module_to_dict(module)
-
-            # Add progress if requested
             if include_progress and student_id:
-                try:
-                    student_oid = ObjectId(student_id)
-                    progress = self.get_module_progress(
-                        student_oid,
-                        module["_id"]
-                    )
-                    module_dict["student_progress"] = progress
-                except Exception:
-                    pass
-
+                module_dict["student_progress"] = student_progress_map.get(
+                    str(module["_id"]),
+                    {
+                        "module_id": str(module["_id"]),
+                        "progress_percentage": 0,
+                        "resources_completed": 0,
+                        "total_resources": len(module.get("resources", [])),
+                        "status": "not_started"
+                    }
+                )
             result_modules.append(module_dict)
 
         return {
@@ -629,25 +756,15 @@ class LearningModuleService:
             "total": len(result_modules)
         }
 
-    def get_module_progress(
+    async def get_module_progress(
         self,
         student_id: ObjectId,
         module_id: ObjectId
     ) -> Dict[str, Any]:
         """
         Calculates student progress on a specific module based on resource tests.
-        
-        Args:
-            student_id: ObjectId of the student
-            module_id: ObjectId of the module
-            
-        Returns:
-            Dictionary with progress statistics
         """
-        # Get module to see how many resources it has
-        module = self.db.learning_modules.find_one(
-            {"_id": module_id}
-        )
+        module = await self.db.learning_modules.find_one({"_id": module_id})
 
         if not module:
             return {
@@ -659,6 +776,20 @@ class LearningModuleService:
                 "status": "not_started"
             }
 
+        engagements = await self.db.resource_engagement.find({
+            "student_id": student_id,
+            "module_id": module_id,
+        }).to_list(None)
+
+        return self._calculate_module_progress_from_data(module, engagements)
+
+    def _calculate_module_progress_from_data(
+        self,
+        module: Dict[str, Any],
+        engagements: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Helper to calculate progress from pre-fetched data."""
+        module_id = module["_id"]
         resources = module.get("resources", [])
         total_resources = len(resources)
 
@@ -671,16 +802,6 @@ class LearningModuleService:
                 "average_score": 0,
                 "status": "completed"
             }
-
-        # Check resource engagement for this student.
-        engagements = list(
-            self.db.resource_engagement.find(
-                {
-                    "student_id": student_id,
-                    "module_id": module_id,
-                }
-            )
-        )
 
         # Keep latest engagement per resource_id.
         engagements_by_resource_id: Dict[str, Dict[str, Any]] = {}
@@ -752,25 +873,14 @@ class LearningModuleService:
             "completion_requirement": "Each module resource must be attempted and scored at least 80%",
         }
 
-    def track_resource_engagement(
+    async def track_resource_engagement(
         self,
         student_id: str,
         resource_id: str,
         module_id: str,
         engagement_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Tracks student engagement with a specific resource.
-        
-        Args:
-            student_id: ID of the student
-            resource_id: ID of the resource
-            module_id: ID of the module containing the resource
-            engagement_data: Dictionary with engagement metrics (viewed, duration, test_score, etc.)
-            
-        Returns:
-            Status dictionary
-        """
+        """Tracks student engagement with a specific resource."""
         try:
             student_oid = ObjectId(student_id)
             module_oid = ObjectId(module_id)
@@ -787,7 +897,7 @@ class LearningModuleService:
             "viewed": engagement_data.get("viewed", False),
             "view_duration_seconds": engagement_data.get("view_duration_seconds", 0),
             "completion_percentage": engagement_data.get("completion_percentage", 0),
-            "test_score": engagement_data.get("test_score"),  # Can be None if no test yet
+            "test_score": engagement_data.get("test_score"),
             "test_attempts": engagement_data.get("test_attempts", 0),
             "rating": engagement_data.get("rating"),
             "helpful": engagement_data.get("helpful"),
@@ -795,8 +905,7 @@ class LearningModuleService:
             "updated_at": datetime.utcnow(),
         }
 
-        # Use upsert to create or update
-        result = self.db.resource_engagement.update_one(
+        result = await self.db.resource_engagement.update_one(
             {
                 "student_id": student_oid,
                 "resource_id": resource_id,
@@ -812,49 +921,42 @@ class LearningModuleService:
             "action": "upserted" if result.upserted_id else "updated"
         }
 
-    def get_module_resource_analytics(
+    async def get_module_resource_analytics(
         self,
         classroom_id: str,
         module_id: str
     ) -> Dict[str, Any]:
-        """
-        Gets analytics for resources in a module across all students.
-        
-        Args:
-            classroom_id: ID of the classroom
-            module_id: ID of the module
-            
-        Returns:
-            Dictionary with resource analytics
-        """
+        """Gets analytics for resources in a module across all students."""
         try:
             classroom_oid = ObjectId(classroom_id)
             module_oid = ObjectId(module_id)
         except Exception:
-            return {
-                "status": "error",
-                "message": "Invalid IDs"
-            }
+            return {"status": "error", "message": "Invalid IDs"}
 
-        # Get module
-        module = self.db.learning_modules.find_one(
+        module = await self.db.learning_modules.find_one(
             {"_id": module_oid, "classroom_id": classroom_oid}
         )
 
         if not module:
-            return {
-                "status": "error",
-                "message": "Module not found in classroom"
-            }
+            return {"status": "error", "message": "Module not found in classroom"}
 
         resources = module.get("resources", [])
         resource_analytics = []
 
+        # Optimized: Fetch ALL engagements for this module once
+        all_module_engagements = await self.db.resource_engagement.find(
+            {"module_id": module_oid}
+        ).to_list(None)
+        
+        # Group by resource_id
+        engagements_by_resource = {}
+        for eng in all_module_engagements:
+            r_id = str(eng["resource_id"])
+            engagements_by_resource.setdefault(r_id, []).append(eng)
+
         for resource in resources:
-            resource_id = resource.get("id") or resource.get("resource_id")
-            engagements = list(self.db.resource_engagement.find(
-                {"resource_id": resource_id, "module_id": module_oid}
-            ))
+            resource_id = str(resource.get("id") or resource.get("resource_id"))
+            engagements = engagements_by_resource.get(resource_id, [])
 
             if not engagements:
                 analytics = {
@@ -880,7 +982,7 @@ class LearningModuleService:
                     "students_completed": completed_count,
                     "average_score": round(avg_score, 2),
                     "total_students": len(engagements),
-                    "engagement_rate": round((viewed_count / len(engagements) * 100), 2) if engagements else 0
+                    "engagement_rate": round((viewed_count / len(engagements) * 100), 2)
                 }
 
             resource_analytics.append(analytics)
@@ -896,26 +998,18 @@ class LearningModuleService:
     # ==================== Helper Methods ====================
 
     def _normalize_text_key(self, value: Any) -> str:
-        """Normalizes text for stable matching and lookup."""
+        """Standardizes text for robust comparison and matching."""
         text = str(value or "").strip().lower()
-        text = re.sub(r"[^a-z0-9]+", " ", text)
+        # Remove special characters and collapse whitespace
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
         return re.sub(r"\s+", " ", text).strip()
 
     def _tokenize_for_match(self, value: Any) -> List[str]:
         """Tokenizes text while dropping low-signal connector words."""
         stop_words = {
-            "the",
-            "and",
-            "for",
-            "with",
-            "from",
-            "into",
-            "module",
-            "unit",
-            "chapter",
-            "topic",
-            "lesson",
-            "part",
+            "the", "and", "for", "with", "from", "into", "module", "unit",
+            "chapter", "topic", "lesson", "part", "intro", "introduction",
+            "basics", "basics of", "fundamental", "fundamentals", "advanced",
         }
         normalized = self._normalize_text_key(value)
         if not normalized:
@@ -928,17 +1022,13 @@ class LearningModuleService:
         ]
 
     def _extract_syllabus_module_names(self, classroom: Dict[str, Any]) -> List[str]:
-        """Extracts module-like names from classroom syllabus metadata."""
+        """Extracts module-like names from classroom syllabus metadata with improved structural awareness."""
         module_names: List[str] = []
         seen = set()
 
         def add_module_name(candidate: Any):
             cleaned = re.sub(r"\s+", " ", str(candidate or "").strip(" .:-\n\t•"))
-            if not cleaned:
-                return
-            if len(cleaned) < 4 or len(cleaned) > 90:
-                return
-            if len(cleaned.split()) > 10:
+            if not cleaned or len(cleaned) < 4 or len(cleaned) > 100 or len(cleaned.split()) > 12:
                 return
 
             key = self._normalize_text_key(cleaned)
@@ -948,55 +1038,56 @@ class LearningModuleService:
             seen.add(key)
             module_names.append(cleaned)
 
-        # Prioritize explicit focus areas first.
+        # 1. Subject focus areas (usually teacher-defined)
         for focus_area in classroom.get("subject_focus_areas", []):
             add_module_name(focus_area)
 
-        # Extract short heading-like lines from syllabus excerpt.
-        curriculum_excerpt = (
-            (classroom.get("curriculum_metadata") or {}).get("text_excerpt") or ""
-        )
-
+        # 2. Extract from curriculum metadata (populated during onboarding)
+        curriculum_excerpt = (classroom.get("curriculum_metadata") or {}).get("text_excerpt") or ""
         skip_prefixes = (
-            "learning outcome",
-            "learning outcomes",
-            "outcome",
-            "outcomes",
-            "assessment",
-            "assessments",
-            "reference",
-            "references",
-            "objective",
-            "objectives",
-            "contents",
-            "syllabus",
+            "learning outcome", "learning outcomes", "outcome", "outcomes",
+            "assessment", "assessments", "reference", "references",
+            "objective", "objectives", "contents", "syllabus", "page",
         )
+        
+        # Look for structural module/unit markers
+        structure_patterns = [
+            r"^(?:module|unit|chapter|lesson|section|week)\s*\d+\s*[:\-.]\s*(.*)$",
+            r"^\d+[\)\.\-:]\s*(.*)$",
+        ]
 
         for raw_line in curriculum_excerpt.splitlines():
-            line = re.sub(r"\s+", " ", raw_line).strip()
+            line = raw_line.strip()
             if not line:
                 continue
 
-            line = re.sub(r"^\d+[\)\.\-:]\s*", "", line)
-            line = re.sub(
-                r"^(module|unit|chapter)\s*\d+\s*[:\-]\s*",
-                "",
-                line,
-                flags=re.IGNORECASE,
-            )
-            line = line.strip(" -•\t")
-
-            if not line:
-                continue
-            if line.lower().startswith(skip_prefixes):
-                continue
-
-            alpha_count = sum(1 for character in line if character.isalpha())
-            if alpha_count < 4:
+            matched = False
+            for pattern in structure_patterns:
+                m = re.match(pattern, line, flags=re.IGNORECASE)
+                if m:
+                    extracted = m.group(1).strip()
+                    if extracted:
+                        add_module_name(extracted)
+                        matched = True
+                        break
+            
+            if matched:
                 continue
 
-            add_module_name(line)
-            if len(module_names) >= 16:
+            # Fallback for clean lines that aren't outcomes/objectives
+            line_cleaned = re.sub(r"^\d+[\)\.\-:]\s*", "", line)
+            line_cleaned = re.sub(r"^(module|unit|chapter|week)\s*\d+\s*[:\-]\s*", "", line_cleaned, flags=re.IGNORECASE).strip(" -•\t")
+
+            if not line_cleaned or line_cleaned.lower().startswith(skip_prefixes):
+                continue
+
+            # Ensure it's not a fragmented line or a long paragraph
+            alpha_count = sum(1 for character in line_cleaned if character.isalpha())
+            if alpha_count < 5 or len(line_cleaned.split()) > 12:
+                continue
+
+            add_module_name(line_cleaned)
+            if len(module_names) >= 20:
                 break
 
         return module_names
@@ -1006,7 +1097,7 @@ class LearningModuleService:
         skill: str,
         syllabus_modules: List[str],
     ) -> Optional[str]:
-        """Matches a noisy skill label to the closest syllabus module name."""
+        """Matches a noisy skill label to the closest syllabus module name with hybrid similarity and higher precision."""
         if not syllabus_modules:
             return None
 
@@ -1014,11 +1105,12 @@ class LearningModuleService:
         if not skill_key:
             return None
 
-        # First pass: exact normalized name match.
+        # 1. Exact normalized match
         for module_name in syllabus_modules:
             if self._normalize_text_key(module_name) == skill_key:
                 return module_name
 
+        # 2. Fuzzy Token & Sequence similarity
         skill_tokens = set(self._tokenize_for_match(skill))
         best_module = None
         best_score = 0.0
@@ -1027,19 +1119,22 @@ class LearningModuleService:
             module_key = self._normalize_text_key(module_name)
             module_tokens = set(self._tokenize_for_match(module_name))
 
+            # Token overlap (Jaccard-like)
             overlap = len(skill_tokens & module_tokens)
             token_score = overlap / max(1, len(skill_tokens))
+            
+            # Sequence ratio
             sequence_score = SequenceMatcher(None, skill_key, module_key).ratio()
-            combined_score = max(token_score, sequence_score * 0.8)
+            
+            # Hybrid score: prioritize token overlap for technical modules
+            combined_score = max(token_score * 1.05, sequence_score * 0.9)
 
             if combined_score > best_score:
                 best_score = combined_score
                 best_module = module_name
 
-        if best_score >= 0.32:
-            return best_module
-
-        return None
+        # Threshold increased to 0.45 for better reliability
+        return best_module if best_score >= 0.45 else None
 
     def _resource_to_assignment_dict(self, resource: Dict[str, Any]) -> Dict[str, Any]:
         """Serializes a classroom resource for module assignment responses."""
@@ -1064,19 +1159,11 @@ class LearningModuleService:
         """Groups resources by their skill field"""
         groups = {}
         for resource in resources:
-            if not isinstance(resource, dict):
-                continue
-
-            # Only include approved resources
-            if resource.get("approval_status") != "approved":
+            if not isinstance(resource, dict) or resource.get("approval_status") != "approved":
                 continue
 
             skill = resource.get("skill", "General")
-            if skill not in groups:
-                groups[skill] = []
-
-            groups[skill].append(resource)
-
+            groups.setdefault(skill, []).append(resource)
         return groups
 
     def _generate_objectives_from_resources(
@@ -1097,15 +1184,12 @@ class LearningModuleService:
                 "bloom_level": "application"
             }
         ]
-
-        # Add more specific objectives if there are enough resources
         if len(resources) > 4:
             objectives.append({
                 "title": f"Analyze {skill} problems",
                 "description": f"Analyze complex problems using {skill} knowledge",
                 "bloom_level": "analysis"
             })
-
         return objectives
 
     def _prepare_module_resources(
@@ -1115,16 +1199,14 @@ class LearningModuleService:
         """Converts classroom resources to module resources format"""
         module_resources = []
         for idx, resource in enumerate(resources):
-            module_resource = {
+            module_resources.append({
                 "id": resource.get("resource_id", f"res_{idx}"),
                 "title": resource.get("title", "Untitled"),
                 "resource_type": resource.get("resource_type", "link"),
                 "url": resource.get("url", ""),
                 "description": resource.get("description", ""),
                 "order": idx
-            }
-            module_resources.append(module_resource)
-
+            })
         return module_resources
 
     def _estimate_hours(
@@ -1132,20 +1214,8 @@ class LearningModuleService:
         resources: List[Dict[str, Any]]
     ) -> float:
         """Estimates module hours based on resource count and types"""
-        base_hours = {
-            "video": 0.5,
-            "document": 0.25,
-            "link": 0.2,
-            "quiz": 0.15,
-            "article": 0.3
-        }
-
-        total_hours = 0.0
-        for resource in resources:
-            resource_type = resource.get("resource_type", "link")
-            hours = base_hours.get(resource_type, 0.25)
-            total_hours += hours
-
+        base_hours = {"video": 0.5, "document": 0.25, "link": 0.2, "quiz": 0.15, "article": 0.3}
+        total_hours = sum(base_hours.get(r.get("resource_type", "link"), 0.25) for r in resources)
         return round(total_hours, 1)
 
     def _estimate_difficulty(
@@ -1153,15 +1223,11 @@ class LearningModuleService:
         resources: List[Dict[str, Any]]
     ) -> str:
         """Estimates module difficulty based on resources"""
-        # Simple heuristic: if many resources, likely more complex
-        if len(resources) > 8:
-            return "hard"
-        elif len(resources) > 4:
-            return "medium"
-        else:
-            return "easy"
+        if len(resources) > 8: return "hard"
+        if len(resources) > 4: return "medium"
+        return "easy"
 
-    def _link_resources_to_module(
+    async def _link_resources_to_module(
         self,
         classroom_oid: ObjectId,
         resources: List[Dict[str, Any]],
@@ -1170,21 +1236,15 @@ class LearningModuleService:
     ) -> None:
         """Updates classroom resources to link them to the module"""
         resource_ids = [r.get("resource_id") for r in resources if r.get("resource_id")]
-
         if resource_ids:
-            # Update each resource with proper array filter
             for resource_id in resource_ids:
-                set_payload = {
-                    "ai_resources.$[elem].module_id": module_id,
-                }
+                set_payload = {"ai_resources.$[elem].module_id": module_id}
                 if module_name:
                     set_payload["ai_resources.$[elem].module_name"] = module_name
 
-                self.db.classrooms.update_one(
+                await self.db.classrooms.update_one(
                     {"_id": classroom_oid},
-                    {
-                        "$set": set_payload
-                    },
+                    {"$set": set_payload},
                     array_filters=[{"elem.resource_id": resource_id}]
                 )
 

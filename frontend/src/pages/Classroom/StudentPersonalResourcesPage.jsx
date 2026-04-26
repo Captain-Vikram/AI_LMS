@@ -114,6 +114,54 @@ const toSafeFileName = (value) => {
   return cleaned || 'report';
 };
 
+const deriveLearnerProfile = (messages = [], latestMessage = '') => {
+  const recentUserMessages = (Array.isArray(messages) ? messages : [])
+    .filter((m) => m?.role === 'user' && typeof m?.content === 'string' && m.content.trim())
+    .slice(-6)
+    .map((m) => m.content.trim());
+
+  const sample = [...recentUserMessages, String(latestMessage || '').trim()].filter(Boolean).join(' ');
+  const words = sample.split(/\s+/).filter(Boolean);
+  const avgWords = recentUserMessages.length
+    ? recentUserMessages.reduce((sum, text) => sum + text.split(/\s+/).filter(Boolean).length, 0) / recentUserMessages.length
+    : words.length;
+
+  const informalPattern = /\b(pls|plz|bro|sis|ya|u|btw|lol|hey|thx|thanks yaar)\b/i;
+  const concisePattern = /\b(short|brief|quick|in points|bullet|summary|tldr)\b/i;
+  const beginnerPattern = /\b(simple|easy|beginner|basic|eli5|step by step)\b/i;
+  const advancedPattern = /\b(advanced|deep|detailed|technical|in depth|rigorous)\b/i;
+
+  const tone = informalPattern.test(sample) ? 'friendly and conversational' : 'professional and supportive';
+  const complexity = beginnerPattern.test(sample)
+    ? 'beginner-friendly'
+    : advancedPattern.test(sample)
+      ? 'advanced'
+      : avgWords <= 10
+        ? 'simple'
+        : avgWords >= 22
+          ? 'detailed'
+          : 'intermediate';
+  const brevity = concisePattern.test(sample) ? 'concise' : 'balanced';
+
+  return { tone, complexity, brevity };
+};
+
+const buildAdaptiveInstruction = (messages = [], latestMessage = '') => {
+  const profile = deriveLearnerProfile(messages, latestMessage);
+
+  return [
+    'Adaptive response instructions:',
+    '- Infer the user type from the latest request and recent chat history.',
+    '- Match the user\'s language style from their latest message (including mixed-language usage if present).',
+    `- Keep tone ${profile.tone}.`,
+    `- Keep explanation level ${profile.complexity}.`,
+    `- Keep response style ${profile.brevity}.`,
+    '- Personalize to the user\'s question-specific need and intent.',
+    '- Keep content grounded in retrieved notebook context only.',
+    '- If the task asks for a strict format (like JSON), return only that format with no extra text.',
+  ].join('\n');
+};
+
 /* ─────────────────────────────────────────────────────────────
    STYLE INJECTION — scoped design tokens + animations
 ───────────────────────────────────────────────────────────────*/
@@ -1208,7 +1256,11 @@ const StudentPersonalResourcesPage = () => {
     const message = chatInput.trim(); setChatInput(''); setChatError(''); setSendingChat(true);
     setChatMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: 'user', content: message }]);
     try {
-      const res = await apiClient.post(portablePath(`/chat/sessions/${chatSessionId}/messages`), { message, retrieval_k: 6 });
+      const adaptiveInstruction = buildAdaptiveInstruction(chatMessages, message);
+      const res = await apiClient.post(portablePath(`/chat/sessions/${chatSessionId}/messages`), {
+        message: `${adaptiveInstruction}\n\nUser request:\n${message}`,
+        retrieval_k: 6,
+      });
       const answer = res?.answer || 'No response generated.';
       const citationCount = Array.isArray(res?.citation_map) ? res.citation_map.length : 0;
       setChatMessages((prev) => [...prev, { id: `assistant-${Date.now()}`, role: 'assistant', content: answer, citationCount }]);
@@ -1229,8 +1281,10 @@ const StudentPersonalResourcesPage = () => {
 
     if (!activeSessionId) throw new Error('Unable to create Studio chat session.');
 
+    const adaptiveInstruction = buildAdaptiveInstruction(chatMessages, message);
+
     const response = await apiClient.post(portablePath(`/chat/sessions/${activeSessionId}/messages`), {
-      message,
+      message: `${adaptiveInstruction}\n\nTask:\n${message}`,
       retrieval_k: retrievalK,
       temperature: 0.2,
     });

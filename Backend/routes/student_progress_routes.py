@@ -69,8 +69,6 @@ async def get_student_progress(
 
         resources = [item for item in module.get("resources", []) if isinstance(item, dict)]
         resources.sort(key=_resource_order)
-        if not resources:
-            raise HTTPException(status_code=404, detail="Module or resources not found")
 
         # Build response for each resource
         resources_data = []

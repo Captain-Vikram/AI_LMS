@@ -9,6 +9,16 @@ import {
   IoPeopleOutline,
   IoRefreshOutline,
   IoSettingsOutline,
+  IoAdd,
+  IoInformationCircleOutline,
+  IoLayersOutline,
+  IoArrowUpOutline,
+  IoArrowDownOutline,
+  IoStatsChartOutline,
+  IoTimeOutline,
+  IoCreateOutline,
+  IoSparklesOutline,
+  IoTrashOutline,
 } from 'react-icons/io5';
 import {
   useAssignResourcesToModule,
@@ -18,6 +28,8 @@ import {
   useLearningModules,
   useModuleApprovedResources,
   useReorderLearningModules,
+  useDeleteLearningModule,
+  useRemoveResourceFromModule,
 } from '../../hooks/useClassroom';
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
@@ -93,7 +105,6 @@ const getApprovalStatusLabel = (status) => {
   return 'Pending';
 };
 
-// ─── Status pill styles ───────────────────────────────────────────────────────
 const statusPillClasses = {
   approved: 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
   rejected: 'border border-rose-500/40 bg-rose-500/10 text-rose-400',
@@ -116,7 +127,6 @@ const getSortedModules = (modules = []) =>
     return getModuleName(a).localeCompare(getModuleName(b));
   });
 
-// ─── Resource card (modern glassmorphic) ────────────────────────────────────
 const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey }) => {
   const resourceId = resource?.resource_id;
   const status = String(resource?.approval_status || 'pending').toLowerCase();
@@ -139,7 +149,6 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
 
   return (
     <Wrapper {...wrapperProps} className={`group relative flex flex-col justify-between rounded-2xl border border-white/5 bg-white/[0.02] p-5 backdrop-blur-md transition-all duration-300 ${neonGlow}`}>
-      {/* Thumbnail (if available) */}
       {resource?.thumbnail_url ? (
         <div className="mb-3">
           <img
@@ -229,11 +238,11 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
   );
 };
 
-// ─── Resource section (grid with fade reveal) ───────────────────────────────
 const ResourceSection = ({ groupKey, label, items, actionPendingId, onApprove, onReject }) => {
+  const [expanded, setExpanded] = useState(false);
+  
   if (!items.length) return null;
 
-  const [expanded, setExpanded] = useState(false);
   const visibleLimit = 6;
   const visibleItems = expanded ? items : items.slice(0, visibleLimit);
   const hasMore = items.length > visibleLimit;
@@ -299,32 +308,36 @@ const ResourceSection = ({ groupKey, label, items, actionPendingId, onApprove, o
   );
 };
 
-// ─── Stat card ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, value, colorClass, borderClass }) => (
-  <div className={`rounded-xl border ${borderClass} bg-gray-900/60 p-4`}>
-    <p className={`text-[10.5px] font-medium uppercase tracking-widest ${colorClass} opacity-70`}>
-      {label}
-    </p>
-    <p className={`mt-2 font-mono text-3xl font-semibold tabular-nums ${colorClass}`}>{value}</p>
+const StatCard = ({ label, value, icon: Icon, colorClass, borderClass }) => (
+  <div className={`group relative rounded-2xl border ${borderClass} bg-gray-900/40 p-5 backdrop-blur-sm transition-all duration-300 hover:bg-gray-900/60`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${colorClass} opacity-60`}>
+          {label}
+        </p>
+        <p className={`mt-1 font-mono text-3xl font-black tabular-nums ${colorClass}`}>{value}</p>
+      </div>
+      <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 transition-transform group-hover:scale-110`}>
+        <Icon className={`text-xl ${colorClass}`} />
+      </div>
+    </div>
   </div>
 );
 
-// ─── Filter chip ──────────────────────────────────────────────────────────────
 const FilterChip = ({ label, active, activeClass, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`rounded-full border px-3.5 py-1 text-xs font-medium transition-colors ${
+    className={`rounded-full border px-4 py-1.5 text-xs font-bold transition-all ${
       active
         ? activeClass
-        : 'border-white/10 bg-transparent text-gray-400 hover:border-white/20 hover:text-gray-300'
+        : 'border-white/5 bg-white/5 text-gray-500 hover:border-white/10 hover:text-gray-300'
     }`}
   >
     {label}
   </button>
 );
 
-// ─── Main page ────────────────────────────────────────────────────────────────
 const LearningModulesPage = () => {
   const { id: classroomId } = useParams();
   const location = useLocation();
@@ -344,6 +357,14 @@ const LearningModulesPage = () => {
   const [resourceActionMessage, setResourceActionMessage] = useState('');
   const [resourceActionError, setResourceActionError] = useState('');
 
+  const [isManualResourceModalOpen, setIsManualResourceModalOpen] = useState(false);
+  const [manualResourceData, setManualResourceData] = useState({
+    title: '',
+    url: '',
+    resource_type: 'youtube',
+    skill: 'General',
+  });
+
   const { modules, loading: modulesLoading, error: modulesError, refresh: refreshModules } =
     useLearningModules(classroomId);
   const { studentProgress, loading: analyticsLoading } = useClassroomAnalytics(classroomId);
@@ -353,6 +374,7 @@ const LearningModulesPage = () => {
     loading: classResourcesLoading,
     error: classResourcesError,
     approveResource,
+    addManualResource,
     refresh: refreshClassResources,
   } = useClassroomResources(classroomId, 'class', isResourceHubRoute && canManageModules);
   const { createModule, loading: creatingModule, error: createModuleError } =
@@ -367,6 +389,8 @@ const LearningModulesPage = () => {
   } = useModuleApprovedResources(classroomId, canManageModules);
   const { assignResources, loading: assigningResources, error: assignResourcesError } =
     useAssignResourcesToModule(classroomId);
+  const { deleteModule, loading: deletingModule } = useDeleteLearningModule(classroomId);
+  const { removeResource: removeResourceFromModule, loading: removingResource } = useRemoveResourceFromModule(classroomId);
 
   const orderedModules = useMemo(() => getSortedModules(modules), [modules]);
   const activeModule = useMemo(
@@ -469,6 +493,32 @@ const LearningModulesPage = () => {
     if (result?.success) refreshModules();
   };
 
+  const handleDeleteModule = async (moduleId) => {
+    if (!window.confirm('Are you sure you want to remove this module? Resources will be unlinked.')) return;
+    const result = await deleteModule(moduleId);
+    if (result?.success) {
+      setManagementMessage('Module removed successfully.');
+      refreshModules();
+      if (activeModuleForResources === moduleId) {
+        setActiveModuleForResources(null);
+        setSelectedResourceIds([]);
+      }
+      return;
+    }
+    setManagementMessage(result?.message || 'Failed to remove module.');
+  };
+
+  const handleRemoveResource = async (moduleId, resourceId) => {
+    if (!window.confirm('Are you sure you want to remove this resource from the module?')) return;
+    const result = await removeResourceFromModule(moduleId, resourceId);
+    if (result?.success) {
+      setManagementMessage('Resource removed from module.');
+      refreshModules();
+      return;
+    }
+    setManagementMessage(result?.message || 'Failed to remove resource.');
+  };
+
   const handleOpenResourcePicker = (moduleId) => {
     if (activeModuleForResources === moduleId) {
       setActiveModuleForResources(null);
@@ -503,6 +553,7 @@ const LearningModulesPage = () => {
     if (!resourceId) return;
     setResourceActionPendingId(resourceId);
     setResourceActionMessage('');
+    setResourceActionMessage('');
     setResourceActionError('');
     try {
       await approveResource(resourceId, approved);
@@ -514,102 +565,142 @@ const LearningModulesPage = () => {
     }
   };
 
+  const handleAddManualResource = async (e) => {
+    e.preventDefault();
+    if (!manualResourceData.title.trim() || !manualResourceData.url.trim()) {
+      setResourceActionError('Title and URL are required.');
+      return;
+    }
+    const result = await addManualResource({
+      title: manualResourceData.title.trim(),
+      url: manualResourceData.url.trim(),
+      resource_type: manualResourceData.resource_type,
+      skill: manualResourceData.skill.trim() || 'General',
+    });
+    if (result?.success) {
+      setResourceActionMessage('Resource added successfully.');
+      setIsManualResourceModalOpen(false);
+      setManualResourceData({
+        title: '',
+        url: '',
+        resource_type: 'youtube',
+        skill: 'General',
+      });
+      refreshClassResources('class');
+      return;
+    }
+    setResourceActionError(result?.message || 'Failed to add resource.');
+  };
+
   const renderModuleActions = canManageModules
     ? (module) => {
         const moduleId = getModuleId(module);
         const idx = orderedModules.findIndex((m) => getModuleId(m) === moduleId);
         const isActive = moduleId === activeModuleForResources;
         return (
-          <>
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => handleMoveModule(moduleId, -1)}
               disabled={idx <= 0 || reorderingModules}
-              className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:border-cyan-500 disabled:opacity-50"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-gray-400 transition-all hover:border-cyan-500/50 hover:text-cyan-400 disabled:opacity-30"
+              title="Move Up"
             >
-              Up
+              <IoArrowUpOutline />
             </button>
             <button
               type="button"
               onClick={() => handleMoveModule(moduleId, 1)}
               disabled={idx < 0 || idx >= orderedModules.length - 1 || reorderingModules}
-              className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:border-cyan-500 disabled:opacity-50"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-gray-400 transition-all hover:border-cyan-500/50 hover:text-cyan-400 disabled:opacity-30"
+              title="Move Down"
             >
-              Down
+              <IoArrowDownOutline />
             </button>
             <button
               type="button"
               onClick={() => handleOpenResourcePicker(moduleId)}
-              className={`rounded border px-2 py-1 text-[11px] ${
+              className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${
                 isActive
-                  ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200'
-                  : 'border-gray-600 text-gray-300 hover:border-cyan-500'
+                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
+                  : 'border-white/5 bg-white/5 text-gray-400 hover:border-emerald-500/50 hover:text-emerald-400'
               }`}
             >
-              {isActive ? 'Close' : 'Add'}
+              <IoAdd className="text-sm" />
+              {isActive ? 'Active' : 'Add'}
             </button>
             <button
               type="button"
               onClick={() => navigate(`/classroom/${classroomId}/modules/${moduleId}/assessment-builder`)}
-              className="rounded border border-gray-600 px-2 py-1 text-[11px] text-gray-300 hover:border-purple-500"
+              className="flex h-7 items-center gap-1.5 rounded-lg border border-white/5 bg-white/5 px-2.5 text-[10px] font-black uppercase tracking-widest text-gray-400 transition-all hover:border-purple-500/50 hover:text-purple-400"
             >
-              Assessment
+              <IoStatsChartOutline className="text-[10px]" />
+              Assess
             </button>
-          </>
+            <button
+              type="button"
+              onClick={() => handleDeleteModule(moduleId)}
+              disabled={deletingModule}
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-gray-400 transition-all hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-30"
+              title="Remove Module"
+            >
+              <IoTrashOutline />
+            </button>
+          </div>
         );
       }
     : null;
 
-  // ── Guards ──────────────────────────────────────────────────────────────────
   if (isResourceHubRoute && !canManageModules)
     return <Navigate to={`/classroom/${classroomId}/personal-resources`} replace />;
 
-  // ── Resource Hub (Teacher) ──────────────────────────────────────────────────
   if (isResourceHubRoute && canManageModules) {
     const summary = classResourceSummary || { total: 0, approved: 0, pending: 0, rejected: 0 };
 
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
-        <div className="space-y-5">
+        <div className="space-y-6">
           <AppBackButton
             label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
           />
 
-          {/* ── Header band ────────────────────────────────────────────────── */}
-          <div className="relative overflow-hidden rounded-2xl border border-purple-500/20 bg-gradient-to-br from-[#1a1230] via-[#130f1e] to-[#0d1520] p-7 shadow-2xl">
-            {/* Glow orb */}
-            <div className="pointer-events-none absolute -right-10 -top-14 h-56 w-56 rounded-full bg-purple-600/10 blur-3xl" />
+          <div className="relative overflow-hidden rounded-3xl border border-white/5 bg-gray-900/40 p-8 backdrop-blur-md shadow-2xl">
+            <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-purple-600/10 blur-[100px]" />
+            <div className="pointer-events-none absolute -left-20 -bottom-20 h-80 w-80 rounded-full bg-cyan-600/10 blur-[100px]" />
 
-            <div className="relative flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[3px] text-purple-400">
-                  Teacher Resource Hub
-                </p>
-                <h1 className="mt-2 text-2xl font-semibold text-gray-100">
+                <div className="flex items-center gap-2 mb-2">
+                   <div className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" />
+                   <p className="text-[10px] font-black uppercase tracking-[0.3em] text-purple-400">
+                     Management Hub
+                   </p>
+                </div>
+                <h1 className="text-4xl font-black tracking-tight text-white">
                   Classroom Resource Review
                 </h1>
-                <p className="mt-2 max-w-lg text-sm leading-relaxed text-gray-400">
-                  Review incoming AI resources, approve what fits your syllabus, and reject low-quality entries.
+                <p className="mt-2 max-w-xl text-base text-gray-400">
+                  Audit incoming AI-generated materials, verify syllabus alignment, and certify content for module distribution.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => navigate(`/classroom/${classroomId}/dashboard`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/20"
+                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-bold text-gray-200 transition-all hover:bg-white/10 hover:scale-105 active:scale-95"
                 >
                   <IoGridOutline /> Dashboard
                 </button>
                 <button
                   onClick={() => navigate(`/classroom/${classroomId}/modules`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-5 text-sm font-bold text-emerald-300 transition-all hover:bg-emerald-500/20 hover:scale-105 active:scale-95"
                 >
                   <IoBookOutline /> Modules
                 </button>
                 <button
                   onClick={() => refreshClassResources('class')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-500/20"
+                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-purple-500/20 bg-purple-500/10 px-5 text-sm font-bold text-purple-300 transition-all hover:bg-purple-500/20 hover:scale-105 active:scale-95"
                 >
                   <IoRefreshOutline /> Refresh
                 </button>
@@ -617,31 +708,31 @@ const LearningModulesPage = () => {
             </div>
           </div>
 
-          {/* ── Feedback banner ─────────────────────────────────────────────── */}
           {(resourceActionMessage || resourceActionError || classResourcesError) && (
             <div
-              className={`rounded-xl border p-4 text-sm ${
+              className={`rounded-2xl border p-5 animate-in slide-in-from-top-4 duration-300 ${
                 resourceActionError || classResourcesError
-                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  ? 'border-rose-500/30 bg-rose-500/5 text-rose-300'
+                  : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300'
               }`}
             >
-              {resourceActionError || classResourcesError || resourceActionMessage}
+              <div className="flex items-center gap-3">
+                <IoInformationCircleOutline className="text-xl" />
+                <p className="text-sm font-medium">{resourceActionError || classResourcesError || resourceActionMessage}</p>
+              </div>
             </div>
           )}
 
-          {/* ── Stat cards ──────────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Total" value={Number(summary.total || 0)} colorClass="text-cyan-400" borderClass="border-cyan-500/20" />
-            <StatCard label="Approved" value={Number(summary.approved || 0)} colorClass="text-emerald-400" borderClass="border-emerald-500/20" />
-            <StatCard label="Pending" value={Number(summary.pending || 0)} colorClass="text-amber-400" borderClass="border-amber-500/20" />
-            <StatCard label="Rejected" value={Number(summary.rejected || 0)} colorClass="text-rose-400" borderClass="border-rose-500/20" />
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <StatCard label="Total Hub" value={Number(summary.total || 0)} icon={IoLayersOutline} colorClass="text-gray-200" borderClass="border-white/5" />
+            <StatCard label="Approved" value={Number(summary.approved || 0)} icon={IoCheckmarkCircleOutline} colorClass="text-emerald-400" borderClass="border-emerald-500/20" />
+            <StatCard label="Pending" value={Number(summary.pending || 0)} icon={IoTimeOutline} colorClass="text-amber-400" borderClass="border-amber-500/20" />
+            <StatCard label="Rejected" value={Number(summary.rejected || 0)} icon={IoCloseCircleOutline} colorClass="text-rose-400" borderClass="border-rose-500/20" />
           </div>
 
-          {/* ── Filters ─────────────────────────────────────────────────────── */}
-          <div className="rounded-xl border border-white/[0.07] bg-gray-900/60 px-5 py-4 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-[10.5px] uppercase tracking-widest text-gray-500">Status</span>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-white/5 bg-white/[0.02] px-6 py-4 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Filter Status</span>
               {[
                 { value: 'all', label: 'All' },
                 { value: 'pending', label: 'Pending' },
@@ -652,16 +743,18 @@ const LearningModulesPage = () => {
                   key={opt.value}
                   label={opt.label}
                   active={resourceFilter === opt.value}
-                  activeClass="border-purple-500/40 bg-purple-500/15 text-purple-300"
+                  activeClass="border-purple-500/50 bg-purple-500/20 text-purple-200"
                   onClick={() => setResourceFilter(opt.value)}
                 />
               ))}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-[10.5px] uppercase tracking-widest text-gray-500">Type</span>
+            <div className="h-6 w-px bg-white/5 hidden md:block" />
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-gray-500">Content Type</span>
               {[
-                { value: 'all', label: 'All links' },
+                { value: 'all', label: 'Any' },
                 { value: 'youtube', label: 'YouTube' },
                 { value: 'article', label: 'Articles' },
                 { value: 'blog', label: 'Blogs' },
@@ -670,25 +763,134 @@ const LearningModulesPage = () => {
                   key={opt.value}
                   label={opt.label}
                   active={linkCategoryFilter === opt.value}
-                  activeClass="border-cyan-500/40 bg-cyan-500/15 text-cyan-300"
+                  activeClass="border-cyan-500/50 bg-cyan-500/20 text-cyan-200"
                   onClick={() => setLinkCategoryFilter(opt.value)}
                 />
               ))}
+              
+              {canManageModules && (
+                <button
+                  onClick={() => setIsManualResourceModalOpen(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-400 transition-all hover:bg-purple-500/20"
+                  title="Add Custom Resource"
+                >
+                  <IoAdd size={18} />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* ── Resource list ────────────────────────────────────────────────── */}
+          {/* ── Manual Resource Modal ────────────────────────────────────── */}
+          {isManualResourceModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0B0F19] p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                     <div className="h-10 w-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400">
+                        <IoAdd className="text-2xl" />
+                     </div>
+                     <h3 className="text-xl font-black text-gray-100">Add Custom Resource</h3>
+                  </div>
+                  <button
+                    onClick={() => setIsManualResourceModalOpen(false)}
+                    className="text-gray-500 hover:text-gray-200 transition-colors"
+                  >
+                    <IoCloseCircleOutline size={28} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddManualResource} className="space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">
+                      Resource Title
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={manualResourceData.title}
+                      onChange={(e) => setManualResourceData({ ...manualResourceData, title: e.target.value })}
+                      placeholder="e.g. Advanced React Patterns"
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-gray-700 focus:border-purple-500/50 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">
+                      Resource URL
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      value={manualResourceData.url}
+                      onChange={(e) => setManualResourceData({ ...manualResourceData, url: e.target.value })}
+                      placeholder="https://youtube.com/... or https://blog..."
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-gray-700 focus:border-purple-500/50 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">
+                        Type
+                      </label>
+                      <select
+                        value={manualResourceData.resource_type}
+                        onChange={(e) => setManualResourceData({ ...manualResourceData, resource_type: e.target.value })}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white focus:border-purple-500/50 focus:outline-none appearance-none cursor-pointer"
+                      >
+                        <option value="youtube" className="bg-[#0B0F19]">YouTube</option>
+                        <option value="article" className="bg-[#0B0F19]">Article</option>
+                        <option value="blog" className="bg-[#0B0F19]">Blog</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">
+                        Skill Tag
+                      </label>
+                      <input
+                        type="text"
+                        value={manualResourceData.skill}
+                        onChange={(e) => setManualResourceData({ ...manualResourceData, skill: e.target.value })}
+                        placeholder="General"
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-gray-700 focus:border-purple-500/50 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsManualResourceModalOpen(false)}
+                      className="flex-1 rounded-2xl border border-white/10 bg-transparent py-3.5 text-sm font-black text-gray-400 transition-colors hover:bg-white/5"
+                    >
+                      CANCEL
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 rounded-2xl bg-purple-600 py-3.5 text-sm font-black text-white transition-all hover:bg-purple-500 hover:shadow-[0_0_30px_rgba(168,85,247,0.3)]"
+                    >
+                      ADD RESOURCE
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           {classResourcesLoading ? (
-            <LoadingState message="Loading classroom resources..." />
+            <LoadingState message="Scanning classroom resources..." />
           ) : visibleClassResources.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center">
-              <p className="text-gray-300">No resources match this filter.</p>
-              <p className="mt-1.5 text-sm text-gray-500">
-                Try switching filters or generate new resources from your dashboard.
+            <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-white/5 p-20 text-center bg-white/[0.01]">
+              <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center mb-6">
+                 <IoLayersOutline className="text-3xl text-gray-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-300">Archive Empty</h3>
+              <p className="mt-2 max-w-xs text-sm text-gray-500 leading-relaxed">
+                No resources match your current workspace filters. Try broadening your criteria.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {groupedResourceLinks.map((group) => (
                 <ResourceSection
                   key={group.key}
@@ -707,17 +909,15 @@ const LearningModulesPage = () => {
     );
   }
 
-  // ── Loading / Error ────────────────────────────────────────────────────────
   if (modulesLoading)
-    return <GlassDashboardShell contentClassName="max-w-7xl"><LoadingState message="Loading curriculum modules..." /></GlassDashboardShell>;
+    return <GlassDashboardShell contentClassName="max-w-7xl"><LoadingState message="Mapping curriculum modules..." /></GlassDashboardShell>;
   if (modulesError)
     return <GlassDashboardShell contentClassName="max-w-7xl"><ErrorState message={modulesError} /></GlassDashboardShell>;
 
-  // ── Student view ───────────────────────────────────────────────────────────
   if (!canManageModules)
     return (
       <GlassDashboardShell contentClassName="max-w-7xl">
-        <div className="space-y-4">
+        <div className="space-y-6">
           <AppBackButton
             label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
@@ -727,192 +927,365 @@ const LearningModulesPage = () => {
       </GlassDashboardShell>
     );
 
-  // ── Teacher modules view ───────────────────────────────────────────────────
   return (
     <GlassDashboardShell contentClassName="max-w-7xl">
-      <div className="space-y-6">
+      <div className="space-y-8 pb-20">
         <AppBackButton
           label="Back to Dashboard"
           fallbackTo={`/classroom/${classroomId}/dashboard`}
         />
 
-        <div className="rounded-2xl border border-slate-700/70 bg-gradient-to-r from-slate-900 via-gray-900 to-slate-800 p-6 shadow-2xl">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-cyan-300">
-                {canManageModules ? 'Teacher and Admin Modules' : 'Student Modules'}
-              </p>
-              <h1 className="mt-2 text-3xl font-bold text-gray-100">Learning Curriculum</h1>
-              <p className="mt-2 text-sm text-gray-300">
-                {modules.length} modules available across your classroom pathway.
-              </p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8 relative overflow-hidden rounded-3xl border border-white/5 bg-gray-900/40 p-10 backdrop-blur-md shadow-2xl">
+            <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-cyan-600/10 blur-[100px]" />
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                   <div className="h-1.5 w-1.5 rounded-full bg-cyan-500 animate-pulse" />
+                   <p className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-400">
+                     Curriculum Core
+                   </p>
+                </div>
+                <h1 className="text-4xl font-black tracking-tight text-white">Learning Modules</h1>
+                <p className="mt-2 max-w-md text-base text-gray-400 leading-relaxed">
+                  Orchestrate your classroom's educational journey by structuring modules and assigning verified resources.
+                </p>
+              </div>
+              
+              <div className="flex flex-col gap-2">
+                <button onClick={() => navigate(`/classroom/${classroomId}/dashboard`)} className="group flex h-11 items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-6 text-sm font-bold text-gray-200 transition-all hover:bg-white/10 hover:scale-105 active:scale-95">
+                  <IoGridOutline className="group-hover:text-cyan-400 transition-colors" /> Dashboard
+                </button>
+                <div className="flex gap-2">
+                   <button onClick={() => navigate(`/classroom/${classroomId}/roster`)} className="group flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 text-sm font-bold text-emerald-300 transition-all hover:bg-emerald-500/20 hover:scale-105">
+                     <IoPeopleOutline /> Roster
+                   </button>
+                   <button onClick={() => navigate(`/classroom/${classroomId}/settings`)} className="group flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-gray-300 transition-all hover:bg-white/10 hover:scale-105">
+                     <IoSettingsOutline />
+                   </button>
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-              <button onClick={() => navigate(`/classroom/${classroomId}/dashboard`)} className="inline-flex items-center justify-center gap-1 rounded-lg bg-cyan-500 px-3 py-2 font-medium text-white transition-colors hover:bg-cyan-600">
-                <IoGridOutline /> Dashboard
-              </button>
-              <button onClick={() => navigate(`/classroom/${classroomId}/roster`)} className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 font-medium text-white transition-colors hover:bg-emerald-600">
-                <IoPeopleOutline /> Roster
-              </button>
-              <button onClick={() => navigate(`/classroom/${classroomId}/settings`)} className="inline-flex items-center justify-center gap-1 rounded-lg bg-gray-700 px-3 py-2 font-medium text-white transition-colors hover:bg-gray-600">
-                <IoSettingsOutline /> Settings
-              </button>
-            </div>
+          </div>
+
+          <div className="lg:col-span-4 grid grid-cols-1 gap-4">
+             <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-6 backdrop-blur-sm relative group overflow-hidden">
+                <IoLayersOutline className="absolute -right-4 -bottom-4 text-8xl text-cyan-500/5 transition-transform group-hover:scale-110" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500/60 mb-2">Structure</p>
+                <p className="text-3xl font-black text-white">{modules.length} <span className="text-lg font-bold text-cyan-400/60 ml-1">Modules</span></p>
+             </div>
+             <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-6 backdrop-blur-sm relative group overflow-hidden">
+                <IoTimeOutline className="absolute -right-4 -bottom-4 text-8xl text-purple-500/5 transition-transform group-hover:scale-110" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-purple-500/60 mb-2">Duration</p>
+                <p className="text-3xl font-black text-white">{totalEstimatedHours.toFixed(1)} <span className="text-lg font-bold text-purple-400/60 ml-1">Hours</span></p>
+             </div>
           </div>
         </div>
 
         {managementMessage && (
-          <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-4">
-            <p className="text-sm text-blue-100">{managementMessage}</p>
+          <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/5 p-5 animate-in fade-in duration-300">
+            <div className="flex items-center gap-3 text-cyan-300">
+               <IoInformationCircleOutline className="text-xl" />
+               <p className="text-sm font-medium">{managementMessage}</p>
+            </div>
           </div>
         )}
 
         {(createModuleError || reorderModulesError || approvedResourcesError || assignResourcesError) && (
-          <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4">
-            <p className="text-sm text-red-200">
-              {createModuleError || reorderModulesError || approvedResourcesError || assignResourcesError}
-            </p>
+          <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5 animate-in fade-in duration-300">
+            <div className="flex items-center gap-3 text-rose-300">
+               <IoCloseCircleOutline className="text-xl" />
+               <p className="text-sm font-medium">{createModuleError || reorderModulesError || approvedResourcesError || assignResourcesError}</p>
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
-            <p className="text-xs text-cyan-200/80">Total Modules</p>
-            <p className="mt-1 text-2xl font-bold text-cyan-100">{modules.length}</p>
-          </div>
-          <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
-            <p className="text-xs text-blue-200/80">Estimated Hours</p>
-            <p className="mt-1 text-2xl font-bold text-blue-100">{totalEstimatedHours.toFixed(1)}</p>
-          </div>
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
-            <p className="text-xs text-emerald-200/80">
-              {canManageModules ? 'Class Completion Signal' : 'My Completion'}
-            </p>
-            <p className="mt-1 text-2xl font-bold text-emerald-100">{completionPercentage}%</p>
-          </div>
-        </div>
-
         {canManageModules && (
-          <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-6">
-            <h2 className="text-xl font-semibold text-gray-100">Manage Modules</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              Create modules manually, reorder them, and attach approved resources to any module.
-            </p>
-            <form onSubmit={handleCreateModule} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
-              <input type="text" value={newModuleName} onChange={(e) => setNewModuleName(e.target.value)} placeholder="Module name" className="rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none md:col-span-4" />
-              <input type="text" value={newModuleDescription} onChange={(e) => setNewModuleDescription(e.target.value)} placeholder="Module description (optional)" className="rounded-lg border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none md:col-span-6" />
-              <button type="submit" disabled={creatingModule} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-60 md:col-span-2">
-                {creatingModule ? 'Adding...' : 'Add Module'}
+          <div className="relative group rounded-3xl border border-white/5 bg-white/[0.01] p-8 transition-all hover:bg-white/[0.02]">
+            <div className="flex items-center gap-3 mb-6">
+               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400">
+                  <IoCreateOutline className="text-xl" />
+               </div>
+               <div>
+                  <h2 className="text-lg font-black text-gray-100">Manual Module Construction</h2>
+                  <p className="text-xs text-gray-500 font-medium">Seed new learning blocks directly into the curriculum sequence.</p>
+               </div>
+            </div>
+            
+            <form onSubmit={handleCreateModule} className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-end">
+              <div className="lg:col-span-4 space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">Module Identity</label>
+                <input 
+                  type="text" 
+                  value={newModuleName} 
+                  onChange={(e) => setNewModuleName(e.target.value)} 
+                  placeholder="e.g. Advanced Thermodynamics" 
+                  className="w-full rounded-2xl border border-white/5 bg-gray-950/60 px-4 py-3.5 text-sm text-white placeholder-gray-700 transition-all focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none" 
+                />
+              </div>
+              <div className="lg:col-span-6 space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 ml-1">Scope & Objectives</label>
+                <input 
+                  type="text" 
+                  value={newModuleDescription} 
+                  onChange={(e) => setNewModuleDescription(e.target.value)} 
+                  placeholder="Summarize the core learning outcomes..." 
+                  className="w-full rounded-2xl border border-white/5 bg-gray-950/60 px-4 py-3.5 text-sm text-white placeholder-gray-700 transition-all focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none" 
+                />
+              </div>
+              <button 
+                type="submit" 
+                disabled={creatingModule} 
+                className="lg:col-span-2 group relative h-12 inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-600 px-6 text-sm font-black text-white transition-all hover:bg-cyan-500 active:scale-95 disabled:opacity-50"
+              >
+                {creatingModule ? (
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  <>
+                    <IoAdd className="text-lg" /> 
+                    ADD UNIT
+                  </>
+                )}
+                <div className="absolute inset-0 rounded-2xl bg-cyan-400/0 blur-xl group-hover:bg-cyan-400/10 transition-all" />
               </button>
             </form>
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-          <div className="xl:col-span-8 rounded-xl border border-gray-700 bg-gray-900/50 p-6">
-            <h2 className="text-xl font-semibold text-gray-100">Published Modules</h2>
-            <p className="mt-1 text-sm text-gray-400">Open any module card for objectives, resources, and difficulty details.</p>
-            <div className="mt-5">
-              <ModuleList modules={modules} loading={modulesLoading} moduleActions={renderModuleActions} />
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-12">
+          <div className="xl:col-span-8 space-y-6">
+            <div className="rounded-3xl border border-white/5 bg-gray-900/20 p-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-xl font-black text-white">Active Curriculum</h2>
+                  <p className="mt-1 text-xs text-gray-500 font-medium tracking-wide">Manage the sequential learning path and resource mapping.</p>
+                </div>
+                <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-gray-600">
+                   <IoLayersOutline />
+                </div>
+              </div>
+              
+              <div className="min-h-[400px]">
+                <ModuleList 
+                  modules={modules} 
+                  loading={modulesLoading} 
+                  moduleActions={renderModuleActions} 
+                  activeModuleId={activeModuleForResources}
+                  onRemoveResource={canManageModules ? handleRemoveResource : null}
+                  activeModuleContent={
+                    activeModule && (
+                      <div className="space-y-8">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                               <div className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse" />
+                               <h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-purple-400">
+                                 Mapping Workspace
+                               </h3>
+                            </div>
+                            <h2 className="text-xl font-black text-white">
+                              Map Resources
+                            </h2>
+                          </div>
+                          <div className="flex gap-2">
+                             <button type="button" onClick={refreshApprovedResources} className="flex h-9 items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-4 text-xs font-bold text-gray-300 hover:bg-white/10 transition-all">
+                              <IoRefreshOutline className={approvedResourcesLoading ? 'animate-spin' : ''} />
+                             </button>
+                             <button type="button" onClick={() => { setSelectedResourceIds([]); setActiveModuleForResources(null); }} className="flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-bold text-gray-400 hover:bg-white/10 transition-all">
+                              <IoCloseCircleOutline /> Exit
+                             </button>
+                          </div>
+                        </div>
+
+                        {approvedResourcesLoading ? (
+                          <div className="flex flex-col items-center justify-center py-10 bg-white/[0.01] rounded-2xl border border-white/5">
+                             <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-purple-500 border-r-purple-500/30 mb-3" />
+                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Scanning Catalog...</p>
+                          </div>
+                        ) : assignableCategories.length === 0 ? (
+                          <div className="rounded-2xl border-2 border-dashed border-white/5 p-10 text-center bg-white/[0.01]">
+                             <IoLayersOutline className="mx-auto text-3xl text-gray-700 mb-4" />
+                             <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed font-medium">
+                               All certified resources are already mapped. Generate more from the Resource Hub.
+                             </p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {assignableCategories.map((category, i) => (
+                              <div key={`${category.category}-${i}`} className="flex flex-col rounded-2xl border border-white/5 bg-gray-900/40 p-5 backdrop-blur-sm">
+                                <div className="flex items-center gap-2 mb-4">
+                                   <div className="h-1 w-1 rounded-full bg-purple-400" />
+                                   <h4 className="text-[9px] font-black uppercase tracking-widest text-purple-400/80">{category.category}</h4>
+                                </div>
+                                
+                                <div className="space-y-2 flex-1 overflow-y-auto max-h-[250px] pr-1 custom-scrollbar">
+                                  {(category.resources || []).map((resource) => {
+                                    const isSelected = selectedResourceIds.includes(resource.resource_id);
+                                    return (
+                                      <label 
+                                        key={resource.resource_id} 
+                                        className={`group flex items-start gap-3 rounded-xl border p-3 transition-all cursor-pointer ${
+                                          isSelected 
+                                            ? 'border-purple-500 bg-purple-500/10' 
+                                            : 'border-white/5 bg-gray-950/40 hover:border-white/10 hover:bg-gray-950/60'
+                                        }`}
+                                      >
+                                        <div className="relative mt-0.5">
+                                          <input 
+                                            type="checkbox" 
+                                            checked={isSelected} 
+                                            onChange={() => toggleResourceSelection(resource.resource_id)} 
+                                            className="hidden" 
+                                          />
+                                          <div className={`h-4 w-4 rounded-md border-2 transition-all flex items-center justify-center ${isSelected ? 'border-purple-500 bg-purple-500' : 'border-gray-700 group-hover:border-gray-500'}`}>
+                                             {isSelected && <IoCheckmarkCircleOutline className="text-white text-[10px]" />}
+                                          </div>
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className={`text-xs font-bold leading-tight transition-colors ${isSelected ? 'text-white' : 'text-gray-300 group-hover:text-gray-100'}`}>
+                                            {resource.title}
+                                          </p>
+                                          <p className="mt-1 text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                                            {resource.resource_type}
+                                          </p>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pt-6">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                            {selectedResourceIds.length > 0 
+                               ? `${selectedResourceIds.length} items ready for mapping` 
+                               : "Select items from the catalog"}
+                          </p>
+                          
+                          <button 
+                            type="button" 
+                            onClick={handleAssignSelectedResources} 
+                            disabled={assigningResources || selectedResourceIds.length === 0} 
+                            className="group relative h-11 w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-white px-8 text-xs font-black text-gray-950 transition-all hover:scale-105 active:scale-95 disabled:opacity-30"
+                          >
+                            {assigningResources ? (
+                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-950/30 border-t-gray-950" />
+                            ) : (
+                              <>
+                                <IoAdd className="text-lg" />
+                                MAP TO UNIT
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+                />
+              </div>
             </div>
           </div>
 
           <div className="xl:col-span-4 space-y-6">
             {userRole === 'student' && studentProgress ? (
-              <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/10 p-6">
-                <h3 className="text-lg font-semibold text-cyan-100">My Progress</h3>
-                <p className="mt-1 text-sm text-cyan-100/80">Track completion and assessment coverage by module.</p>
-                <div className="mt-4">
+              <div className="rounded-3xl border border-cyan-500/20 bg-cyan-500/5 p-8 backdrop-blur-md">
+                <div className="flex items-center gap-3 mb-6">
+                   <div className="h-10 w-10 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+                      <IoStatsChartOutline className="text-xl text-cyan-400" />
+                   </div>
+                   <h3 className="text-lg font-black text-white leading-tight">Sync Progress</h3>
+                </div>
+                <div className="mt-6">
                   <LearningModuleProgress modules={modules} studentProgress={studentProgress} loading={analyticsLoading} />
                 </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-6">
-                <h3 className="text-lg font-semibold text-emerald-100">Instructor Guidance</h3>
-                <ul className="mt-3 space-y-2 text-sm text-emerald-100/90">
-                  <li className="flex items-start gap-2"><IoCheckmarkCircleOutline className="mt-0.5" /> Keep module titles aligned to syllabus outcomes.</li>
-                  <li className="flex items-start gap-2"><IoCheckmarkCircleOutline className="mt-0.5" /> Use Add on each module to attach approved resources.</li>
-                  <li className="flex items-start gap-2"><IoCheckmarkCircleOutline className="mt-0.5" /> Sort modules with Up and Down controls.</li>
+              <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-8 backdrop-blur-md">
+                <div className="flex items-center gap-3 mb-6">
+                   <div className="h-10 w-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                      <IoInformationCircleOutline className="text-xl text-emerald-400" />
+                   </div>
+                   <h3 className="text-lg font-black text-white leading-tight">Instructor Guide</h3>
+                </div>
+                <ul className="space-y-5">
+                  {[
+                    "Align module outcomes with the primary syllabus.",
+                    "Map exactly 3-5 high-quality resources per module.",
+                    "Utilize reordering to maintain conceptual flow."
+                  ].map((text, i) => (
+                    <li key={i} className="flex items-start gap-4 text-sm text-emerald-100/70 group">
+                      <div className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-[10px] font-black text-emerald-400 transition-all group-hover:bg-emerald-500 group-hover:text-white">
+                        {i + 1}
+                      </div>
+                      <p className="leading-relaxed">{text}</p>
+                    </li>
+                  ))}
                 </ul>
               </div>
             )}
 
-            <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 p-6">
-              <h3 className="inline-flex items-center gap-2 text-lg font-semibold text-blue-100">
-                <IoBookOutline /> Curriculum Workflow
-              </h3>
-              <ul className="mt-3 space-y-2 text-sm text-blue-100/90">
-                <li>1. Review module order and required outcomes.</li>
-                <li>2. Attach approved resources to each module.</li>
-                <li>3. Monitor completion trends before publishing new content.</li>
-              </ul>
+            <div className="rounded-3xl border border-indigo-500/20 bg-indigo-500/5 p-8 backdrop-blur-md">
+              <div className="flex items-center gap-3 mb-6">
+                 <div className="h-10 w-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                    <IoBookOutline className="text-xl text-indigo-400" />
+                 </div>
+                 <h3 className="text-lg font-black text-white leading-tight">Workflow Hub</h3>
+              </div>
+              <div className="space-y-6">
+                {[
+                   { t: "Validation", d: "Verify AI-scraped resources in the hub." },
+                   { t: "Mapping", d: "Assign certified content to specific units." },
+                   { t: "Assessment", d: "Configure AI-powered defenses per module." }
+                ].map((item, i) => (
+                  <div key={i} className="relative pl-6 border-l border-white/10 group">
+                    <div className="absolute left-[-1px] top-0 h-4 w-px bg-indigo-500 group-hover:h-full transition-all duration-500" />
+                    <p className="text-xs font-black text-indigo-400 uppercase tracking-widest">{item.t}</p>
+                    <p className="mt-1 text-sm text-gray-400 font-medium">{item.d}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
-        {canManageModules && activeModule && (
-          <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-purple-100">
-                  Add Approved Resources to {getModuleName(activeModule)}
-                </h3>
-                <p className="text-sm text-purple-100/80">Resources are grouped by syllabus category. Select and assign to this module.</p>
-              </div>
-              <button type="button" onClick={refreshApprovedResources} className="inline-flex items-center gap-1 rounded-lg border border-purple-300/30 bg-purple-900/30 px-3 py-2 text-sm text-purple-100 hover:bg-purple-800/40">
-                <IoRefreshOutline /> Refresh
-              </button>
-            </div>
-
-            {approvedResourcesLoading ? (
-              <div className="mt-4 text-sm text-purple-100/80">Loading approved resources...</div>
-            ) : assignableCategories.length === 0 ? (
-              <div className="mt-4 rounded-lg border border-dashed border-purple-300/30 p-4 text-sm text-purple-100/90">
-                No unassigned approved resources are available for this module.
-              </div>
-            ) : (
-              <div className="mt-4 space-y-4">
-                {assignableCategories.map((category, i) => (
-                  <div key={`${category.category}-${i}`} className="rounded-lg border border-purple-300/30 bg-gray-900/40 p-4">
-                    <h4 className="text-sm font-semibold text-purple-100">{category.category}</h4>
-                    <div className="mt-3 space-y-2">
-                      {(category.resources || []).map((resource) => (
-                        <label key={resource.resource_id} className="flex items-start gap-2 rounded border border-gray-700 bg-gray-900/60 px-3 py-2 text-sm text-gray-200">
-                          <input type="checkbox" checked={selectedResourceIds.includes(resource.resource_id)} onChange={() => toggleResourceSelection(resource.resource_id)} className="mt-0.5" />
-                          <div>
-                            <p className="font-medium text-gray-100">{resource.title}</p>
-                            <p className="text-xs text-gray-400">{resource.resource_type}{resource.skill ? ` | ${resource.skill}` : ''}</p>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button type="button" onClick={handleAssignSelectedResources} disabled={assigningResources || selectedResourceIds.length === 0} className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-60">
-                {assigningResources ? 'Assigning...' : `Add Selected (${selectedResourceIds.length})`}
-              </button>
-              <button type="button" onClick={() => { setSelectedResourceIds([]); setActiveModuleForResources(null); }} className="rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-gray-700">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-
         {modules.length === 0 && (
-          <div className="rounded-xl border border-dashed border-gray-600 p-6 text-center text-gray-300">
-            <p className="text-lg">No learning modules available yet.</p>
-            <p className="mt-2 text-sm text-gray-400">
+          <div className="flex flex-col items-center justify-center py-32 rounded-[2.5rem] border-2 border-dashed border-white/5 bg-white/[0.01] text-center">
+             <div className="relative mb-8">
+                <div className="h-24 w-24 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20">
+                   <IoLayersOutline className="text-4xl text-cyan-400" />
+                </div>
+                <div className="absolute -top-2 -right-2 h-10 w-10 rounded-full bg-indigo-500/20 backdrop-blur-md flex items-center justify-center border border-indigo-500/30">
+                   <IoSparklesOutline className="text-indigo-400" />
+                </div>
+             </div>
+            <h3 className="text-2xl font-black text-white tracking-tight">Curriculum Not Found</h3>
+            <p className="mt-3 max-w-sm text-base text-gray-500 leading-relaxed font-medium">
               {canManageModules
-                ? 'Create your first module manually above. Classroom creation AI also seeds modules from curriculum focus areas.'
-                : 'Your teacher will publish modules soon.'}
+                ? 'Your classroom structure is a blank canvas. Start construction by seeding your first module above.'
+                : 'Your instructor is currently architecting the course journey. Check back shortly.'}
             </p>
           </div>
         )}
       </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.1);
+        }
+      `}</style>
     </GlassDashboardShell>
   );
 };

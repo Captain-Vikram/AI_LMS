@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { SignedIn, SignedOut, RedirectToSignIn, useAuth, useUser } from "@clerk/clerk-react";
 import Home from "./components/Home";
 import Navbar from "./components/Navbar";
 import Features from "./components/Features";
@@ -29,31 +30,37 @@ import SkillPathwayTracker from "./components/Skill/SkillPathwayTracker";
 import SkillPathwayResource from "./components/Skill/SkillPathwayResource";
 import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import apiClient from "./services/apiClient";
+import apiClient, { setTokenGetter } from "./services/apiClient";
 import { API_ENDPOINTS } from "./config/api";
 
 // Protected route to ensure the user is logged in
 const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem("token");
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
+  return (
+    <>
+      <SignedIn>{children}</SignedIn>
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </>
+  );
 };
 
 // Route that checks for user progress
 const UserProgressRoute = ({ children }) => {
-  const token = localStorage.getItem("token");
+  const { isLoaded, isSignedIn } = useAuth();
+  const { user } = useUser();
   const reassessmentInfo = localStorage.getItem("reassessmentInfo");
-  const [statusLoading, setStatusLoading] = useState(!!token);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [statusError, setStatusError] = useState(false);
 
   useEffect(() => {
+    if (!isLoaded) return;
+
     let isMounted = true;
 
     const verifyStatus = async () => {
-      if (!token) {
+      if (!isSignedIn) {
         if (isMounted) {
           setStatusLoading(false);
         }
@@ -95,13 +102,9 @@ const UserProgressRoute = ({ children }) => {
     return () => {
       isMounted = false;
     };
-  }, [token]);
+  }, [isLoaded, isSignedIn]);
 
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (statusLoading) {
+  if (!isLoaded || statusLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
         <p>Verifying your account status...</p>
@@ -109,8 +112,8 @@ const UserProgressRoute = ({ children }) => {
     );
   }
 
-  if (statusError) {
-    return <Navigate to="/login" replace />;
+  if (!isSignedIn || statusError) {
+    return <RedirectToSignIn />;
   }
 
   if (!onboardingComplete && !reassessmentInfo) {
@@ -122,6 +125,12 @@ const UserProgressRoute = ({ children }) => {
 const queryClient = new QueryClient();
 
 const App = () => {
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    setTokenGetter(getToken);
+  }, [getToken]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BackgroundProvider>

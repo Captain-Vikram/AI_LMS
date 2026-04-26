@@ -276,11 +276,14 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
             if not classroom_oid or not module_oid:
                 raise HTTPException(status_code=400, detail="Invalid classroom or module id")
 
-            classroom = await db.classrooms.find_one({"_id": classroom_oid})
+            # Parallelize independent database lookups
+            classroom, module = await asyncio.gather(
+                db.classrooms.find_one({"_id": classroom_oid}),
+                db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
+            )
+
             if not classroom:
                 raise HTTPException(status_code=404, detail="Classroom not found")
-
-            module = await db.learning_modules.find_one({"_id": module_oid, "classroom_id": classroom_oid})
             if not module:
                 raise HTTPException(status_code=404, detail="Module not found")
 
@@ -307,7 +310,7 @@ async def generate_quiz(request: GenerateQuizRequest) -> Dict[str, Any]:
 
         # Generate a fresh quiz for each attempt.
         quiz_gen = get_quiz_generator()
-        quiz_content = quiz_gen.generate_quiz_from_video_url(
+        quiz_content = await quiz_gen.generate_quiz_from_video_url(
             video_url=normalized_youtube_url,
             num_questions=5,
             difficulty="intermediate",

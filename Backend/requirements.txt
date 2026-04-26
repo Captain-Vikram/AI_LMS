@@ -41,6 +41,7 @@ gTTS>=2.5.0
 
 # Retry and error handling
 tenacity>=8.2.3
+redis>=5.0.0
 
 # Code execution and utilities
 docker>=6.0.0

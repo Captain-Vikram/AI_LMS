@@ -31,6 +31,7 @@ from routes.module_assessment_workflow_routes import router as module_assessment
 from routes.skill_pathway_routes import router as skill_pathway_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo
+from functions.cache_utils import cache_manager
 
 # Add handoff_fastapi to import path so portable_rag_backend can be mounted directly.
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -62,14 +63,16 @@ if not os.getenv("LMSTUDIO_URL"):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize async database connection on app startup and close on shutdown"""
-    print("🚀 Initializing async database connection...")
+    """Initialize async database and cache connections on app startup and close on shutdown"""
+    print("🚀 Initializing async database and cache connections...")
     await init_db()
-    print("✅ Database initialized and ready for async operations")
+    await cache_manager.connect()
+    print("✅ Infrastructure initialized and ready for async operations")
     yield
-    print("🛑 Shutting down database connection...")
+    print("🛑 Shutting down database and cache connections...")
+    await cache_manager.disconnect()
     await disconnect_from_mongo()
-    print("✅ Database connection closed")
+    print("✅ Infrastructure connections closed")
 
 # Initialize FastAPI app
 app = FastAPI(

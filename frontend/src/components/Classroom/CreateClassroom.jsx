@@ -64,6 +64,7 @@ const CreateClassroom = () => {
       formData.append('curriculum_pdf', curriculumFile);
 
       const res = await apiClient.post(API_ENDPOINTS.CLASSROOM_CREATE, formData);
+      localStorage.setItem("onboardingComplete", "true");
       navigate(`/classroom/${res.classroom_id}/dashboard`);
     } catch (err) {
       setError(err.message || 'Failed to create classroom');

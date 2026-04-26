@@ -5,13 +5,12 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from bson import ObjectId
 from datetime import datetime
-import jwt
 import os
 import json
-import functions.llm_adapter as genai
+import functions.llm_adapter_async as genai
 from functions.mcq_functions import create_quiz_generator, generate_quiz, score_quiz
 from database import get_db
-from jwt_config import settings
+from functions.utils import get_current_user
 
 # Ensure environment variables are loaded
 load_dotenv(override=True)
@@ -41,27 +40,15 @@ class UserParameters(BaseModel):
 def get_quiz_generator():
     """Dependency to get the quiz generator"""
     api_token = os.getenv("LMSTUDIO_API_TOKEN") or os.getenv("LMSTUDIO_API_KEY") or ""
+    # create_quiz_generator now returns a GenerativeModelAsync.
     return create_quiz_generator(api_token)
 
 @router.post("/submit", response_model=Dict[str, Any])
-async def submit_quiz(submission: QuizSubmission, authorization: str = Header(None)):
+async def submit_quiz(submission: QuizSubmission, current_user = Depends(get_current_user)):
     """
     Submit answers for a generated quiz and get results with skill gap analysis
     """
-    # Check authorization
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    token = authorization.split(" ")[1]
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token format")
+    user_id = current_user["user_id"]
 
     # Get database connection
     db = get_db()
@@ -130,7 +117,6 @@ async def submit_quiz(submission: QuizSubmission, authorization: str = Header(No
         print(f"Raw LLM response: {llm_response}")
 
         # Clean the response - try to extract just the JSON part
-        # Sometimes the model returns explanatory text before or after the JSON
         import re
         json_match = re.search(r'(\{.*\})', llm_response, re.DOTALL)
 
@@ -276,12 +262,6 @@ async def call_local_llm_api(prompt: str):
     Call local LM Studio inference to generate content based on the prompt.
     """
     try:
-        # Configure local adapter for LM Studio.
-        genai.configure(base_url=os.getenv("LMSTUDIO_URL"))
-
-        # Initialize the model
-        model = genai.GenerativeModel(os.getenv("LMSTUDIO_MODEL"))
-
         # Set generation config to increase likelihood of proper JSON output
         generation_config = {
             "temperature": 0.2,  # Lower temperature for more deterministic output
@@ -293,17 +273,19 @@ async def call_local_llm_api(prompt: str):
         # Add explicit instruction to return only valid JSON
         enhanced_prompt = prompt + "\n\nIMPORTANT: Return ONLY the JSON object without any additional text, explanation, or markdown formatting."
 
-        # Generate content with configuration
-        response = model.generate_content(
+        # Generate content with configuration using async adapter
+        text = await genai.generate_text_async(
             enhanced_prompt,
+            model_name=os.getenv("LMSTUDIO_MODEL"),
             generation_config=generation_config
         )
 
         # Return the generated text
-        return response.text
+        return text
     except Exception as e:
         print(f"Local LLM API error: {str(e)}")
         raise e
+
 @router.post("/generate", response_model=Dict[str, Any])
 async def generate_assessment(
         params: UserParameters,
@@ -318,8 +300,8 @@ async def generate_assessment(
         import uuid
         quiz_id = str(uuid.uuid4())
 
-        # Start quiz generation
-        quiz_content = generate_quiz(
+        # Start quiz generation (Awaited because generate_quiz is now async)
+        quiz_content = await generate_quiz(
             model=quiz_gen,
             primary_goal=params.primary_goal,
             selected_skills=params.selected_skills,
@@ -355,24 +337,11 @@ async def generate_assessment(
         )
 
 @router.get("/assessment-history")
-async def get_assessment_history(authorization: str = Header(None)):
+async def get_assessment_history(current_user = Depends(get_current_user)):
     """
     Get a user's assessment history
     """
-    # Check authorization
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = authorization.split(" ")[1]
-    
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token format")
+    user_id = current_user["user_id"]
 
     # Get database connection
     db = get_db()
@@ -400,35 +369,11 @@ async def get_assessment_history(authorization: str = Header(None)):
             detail=f"Failed to retrieve assessment history: {str(e)}"
         )
     
-# Add this route to your existing mcq_routes.py file
-
 @router.get("/statistics")
-async def get_assessment_statistics(authorization: str = Header(None)):
+async def get_assessment_statistics(current_user = Depends(get_current_user)):
     """
     Get overall statistics for quiz assessments for admin/developer use
     """
-    # Check authorization
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    token = authorization.split(" ")[1]
-    
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid authentication token")
-            
-        # Optional: Check if user has admin role
-        # db = get_db()
-        # user = db.users.find_one({"_id": ObjectId(user_id)})
-        # if not user or "admin" not in user.get("roles", []):
-        #     raise HTTPException(status_code=403, detail="Access denied")
-            
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token format")
-
     # Get database connection
     db = get_db()
     
@@ -475,9 +420,8 @@ async def get_assessment_statistics(authorization: str = Header(None)):
                 if isinstance(row['score'], dict) and 'percentage' in row['score']:
                     return row['score']['percentage']
                 elif isinstance(row['score'], int):
-                    # Handle case where score might be stored as direct integer
                     return row['score']
-                return 0  # Default fallback
+                return 0
             
             df['score_percentage'] = df.apply(extract_percentage, axis=1)
             df['month'] = df['timestamp'].dt.strftime('%Y-%m')

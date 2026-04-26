@@ -9,7 +9,7 @@ DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234"
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
 DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GOOGLE_MODEL = "gemini-3.0-flash"
+DEFAULT_GOOGLE_MODEL = "gemini-1.5-flash"
 AUTO_MODEL_SENTINELS = {"", "auto", "default", "local-model"}
 
 _runtime_config = {
@@ -310,15 +310,18 @@ def _extract_text(data: Any) -> str:
 
 
 def _build_chat_payload(model_name: Optional[str], messages: List[Dict[str, str]], generation_config: Dict[str, Any]) -> Dict[str, Any]:
+    # Many OpenAI-compatible servers REQUIRE a 'model' field.
+    effective_model = model_name or os.getenv("LMSTUDIO_MODEL") or "local-model"
+    if effective_model.lower() in AUTO_MODEL_SENTINELS:
+        effective_model = "local-model"
+
     payload: Dict[str, Any] = {
+        "model": effective_model,
         "messages": messages,
         "stream": False,
         "temperature": generation_config.get("temperature", 0.2),
         "top_p": generation_config.get("top_p", 0.95),
     }
-
-    if model_name:
-        payload["model"] = model_name
 
     max_tokens = generation_config.get("max_tokens", generation_config.get("max_output_tokens", 1024))
     if max_tokens is not None:
@@ -366,14 +369,16 @@ def _build_responses_payload(
         f"{message.get('role', 'user')}: {message.get('content', '')}" for message in messages
     ).strip()
 
+    effective_model = model_name or os.getenv("LMSTUDIO_MODEL") or "local-model"
+    if effective_model.lower() in AUTO_MODEL_SENTINELS:
+        effective_model = "local-model"
+
     payload: Dict[str, Any] = {
+        "model": effective_model,
         "input": input_text,
         "temperature": generation_config.get("temperature", 0.2),
         "top_p": generation_config.get("top_p", 0.95),
     }
-
-    if model_name:
-        payload["model"] = model_name
 
     max_tokens = generation_config.get("max_tokens", generation_config.get("max_output_tokens", 1024))
     if max_tokens is not None:

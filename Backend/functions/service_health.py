@@ -192,6 +192,7 @@ def _probe_cloud_llm_fallback() -> Dict[str, Any]:
         (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
         or (os.getenv("GOOGLE_FALLBACK_MODEL") or "").strip()
         or (os.getenv("GOOGLE_MODEL") or "").strip()
+        or (os.getenv("GEMINI_CHAT_MODEL") or "").strip()
         or DEFAULT_GOOGLE_MODEL
     )
     normalized_model = configured_model if configured_model.startswith("models/") else f"models/{configured_model}"

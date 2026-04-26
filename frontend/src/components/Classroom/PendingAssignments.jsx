@@ -114,6 +114,11 @@ export const SubmissionList = ({ submissions = [], loading = false }) => {
               <h4 className="font-medium text-gray-100">
                 {submission.assignment_title || 'Assignment'}
               </h4>
+              {submission.student_name && (
+                <p className="text-xs font-semibold text-emerald-400 mt-0.5">
+                  by {submission.student_name}
+                </p>
+              )}
               <p className="text-xs text-gray-400 mt-1">
                 Submitted{' '}
                 {formatDistanceToNow(new Date(submission.submitted_date), {
