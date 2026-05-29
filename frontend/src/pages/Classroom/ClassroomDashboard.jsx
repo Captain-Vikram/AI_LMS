@@ -37,7 +37,11 @@ import {
   IoPeopleOutline,
   IoLayersOutline,
   IoNotificationsOutline,
+  IoTimeOutline,
+  IoSparklesOutline,
 } from 'react-icons/io5';
+import { useAIJobStatus } from '../../hooks/useAIJob';
+import GenerationBanner from '../../components/Classroom/GenerationBanner';
 
 /* ─── Utilities ──────────────────────────────────────────────────── */
 const clamp = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0; };
@@ -415,6 +419,13 @@ const ClassroomDashboard = () => {
             fallbackTo="/classrooms/"
           />
 
+          {td.resource_generation_meta?.job_id && (
+            <GenerationBanner 
+              jobId={td.resource_generation_meta.job_id} 
+              onReady={() => refreshDashboard()}
+            />
+          )}
+
           {/* ── HERO ─────────────────────────────────────────── */}
           <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#060c18] via-[#0a1020] to-[#0c1428] shadow-2xl">
             <div className="pointer-events-none absolute inset-0 opacity-[0.03]"
@@ -691,6 +702,10 @@ const ClassroomDashboard = () => {
           label="Back to Classrooms"
           fallbackTo="/classrooms"
         />
+
+        {sd.resource_generation_meta?.job_id && (
+          <GenerationBanner jobId={sd.resource_generation_meta.job_id} />
+        )}
 
         {/* ── STUDENT HERO ── */}
         <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#070816] via-[#09091e] to-[#0b0e22] shadow-2xl">

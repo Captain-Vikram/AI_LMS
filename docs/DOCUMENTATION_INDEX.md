@@ -1,4 +1,4 @@
-# 📚 Quasar LMS - Complete Documentation Index
+# 📚 SkillMaster - Complete Documentation Index
 
 **Last Updated**: April 24, 2026  
 **Total Documentation**: 18,000+ words across 4 comprehensive guides
@@ -13,7 +13,7 @@
 
 **Start Here** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md) - Pages 1-30
 
-- ✅ What is Quasar LMS?
+- ✅ What is SkillMaster?
 - ✅ Why does it matter?
 - ✅ What can teachers do?
 - ✅ What can students do?
@@ -132,7 +132,7 @@
 
 **Goal**: Track progress, understand timeline, manage team
 
-**Quick Overview** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md) - "What is Quasar LMS?"
+**Quick Overview** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md) - "What is SkillMaster?"
 
 - Understand project vision
 - See key features
@@ -370,7 +370,7 @@
 
 ### Understanding the Project
 
-- **"What is Quasar LMS?"** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md#-what-is-quasar-edusaarthi)
+- **"What is SkillMaster?"** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md#-what-is-skillmaster)
 - **"Why does it matter?"** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md#-why-this-project-matters)
 - **"What's different from other LMS?"** → [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md#-whats-new--different)
 - **"Vision and Goals"** → [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md#executive-summary)
@@ -439,7 +439,7 @@
 
 After reading [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md), you should be able to:
 
-- [ ] Explain what Quasar LMS is in simple terms
+- [ ] Explain what SkillMaster is in simple terms
 - [ ] Describe the main features for teachers
 - [ ] Describe the main features for students
 - [ ] Explain how the "Rule of 2" works
@@ -562,20 +562,20 @@ After reading [SYSTEM_OVERVIEW.md](./SYSTEM_OVERVIEW.md) and [IMPLEMENTATION_PLA
 
 ### "I want to understand..."
 
-| Topic              | Where to Find               | Document                                                                                                     | Section          |
-| ------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------- |
-| Project overview   | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#-what-is-quasar-edusaarthi)                                                      | What is Quasar?  |
-| Teacher features   | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#for-teachers)                                                                    | For Teachers     |
-| Student experience | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#for-students)                                                                    | For Students     |
-| Learning system    | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#-how-the-learning-system-works-rule-of-2)                                        | Rule of 2        |
-| Pages/screens      | IMPLEMENTATION_PLAN         | [Link](../IMPLEMENTATION_PLAN.md#phase-3-frontend-components)                                                | Phase 3 Frontend |
-| APIs               | API_REFERENCE               | [Link](./API_REFERENCE.md)                                                                                   | Full reference   |
-| Architecture       | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-system-architecture-in-detail)                                              | Architecture     |
-| Algorithms         | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-core-algorithms--business-logic)                                            | Core Algorithms  |
-| Database           | SYSTEM_OVERVIEW + TECHNICAL | [Link 1](./SYSTEM_OVERVIEW.md#-database-structure) [Link 2](./TECHNICAL_DEEP_DIVE.md#-database-optimization) | Database         |
-| Security           | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-security-architecture)                                                      | Security         |
-| Performance        | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-performance-optimization)                                                   | Performance      |
-| Setup              | README files                | [Backend](../../Backend/README.md) [Frontend](../../frontend/README.md)                                      | Setup            |
+| Topic              | Where to Find               | Document                                                                                                     | Section              |
+| ------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------- |
+| Project overview   | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#-what-is-skillmaster)                                                            | What is SkillMaster? |
+| Teacher features   | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#for-teachers)                                                                    | For Teachers         |
+| Student experience | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#for-students)                                                                    | For Students         |
+| Learning system    | SYSTEM_OVERVIEW             | [Link](./SYSTEM_OVERVIEW.md#-how-the-learning-system-works-rule-of-2)                                        | Rule of 2            |
+| Pages/screens      | IMPLEMENTATION_PLAN         | [Link](../IMPLEMENTATION_PLAN.md#phase-3-frontend-components)                                                | Phase 3 Frontend     |
+| APIs               | API_REFERENCE               | [Link](./API_REFERENCE.md)                                                                                   | Full reference       |
+| Architecture       | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-system-architecture-in-detail)                                              | Architecture         |
+| Algorithms         | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-core-algorithms--business-logic)                                            | Core Algorithms      |
+| Database           | SYSTEM_OVERVIEW + TECHNICAL | [Link 1](./SYSTEM_OVERVIEW.md#-database-structure) [Link 2](./TECHNICAL_DEEP_DIVE.md#-database-optimization) | Database             |
+| Security           | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-security-architecture)                                                      | Security             |
+| Performance        | TECHNICAL_DEEP_DIVE         | [Link](./TECHNICAL_DEEP_DIVE.md#-performance-optimization)                                                   | Performance          |
+| Setup              | README files                | [Backend](../../Backend/README.md) [Frontend](../../frontend/README.md)                                      | Setup                |
 
 ---
 

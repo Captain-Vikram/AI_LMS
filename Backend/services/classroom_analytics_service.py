@@ -1,6 +1,14 @@
 from bson import ObjectId
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+import numpy as np
+
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 class ClassroomAnalyticsService:
     def __init__(self, db):
@@ -41,6 +49,100 @@ class ClassroomAnalyticsService:
             return int(value) if isinstance(value, (int, float)) else 0
         except Exception:
             return 0
+
+    def get_student_clusters(self, classroom_id: str) -> Dict:
+        """
+        Groups students into behavioral/performance clusters using KMeans.
+        Leverages Intel Extension for Scikit-learn if active.
+        """
+        if not HAS_SKLEARN:
+            return {"status": "error", "message": "Scikit-learn not installed"}
+
+        classroom_oid = ObjectId(classroom_id)
+        classroom = self.db.classrooms.find_one({"_id": classroom_oid})
+        if not classroom:
+            raise ValueError("Classroom not found")
+
+        student_ids = classroom.get("students", [])
+        if len(student_ids) < 3:
+            return {
+                "classroom_id": classroom_id,
+                "clusters": [],
+                "message": "Not enough students for clustering (minimum 3 required)"
+            }
+
+        # 1. Collect features for each student
+        student_features = []
+        student_metadata = []
+
+        for student_id in student_ids:
+            progress = self.get_student_progress(classroom_id, str(student_id))
+            
+            # Features: [Avg Score, Modules Completion %, Resources Passed, Total Points]
+            avg_module_completion = 0
+            if progress["module_progress"]:
+                avg_module_completion = sum(m["completion_percentage"] for m in progress["module_progress"]) / len(progress["module_progress"])
+
+            features = [
+                progress["average_score_percentage"],
+                avg_module_completion,
+                progress["assignments_completed"],
+                progress["total_earned_points"]
+            ]
+            
+            student_features.append(features)
+            student_metadata.append({
+                "student_id": str(student_id),
+                "avg_score": progress["average_score_percentage"],
+                "completion": avg_module_completion
+            })
+
+        # 2. Normalize features
+        X = np.array(student_features)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # 3. Apply KMeans (Intel-optimized via patch_sklearn in main.py)
+        n_clusters = min(3, len(student_ids))
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+        cluster_labels = kmeans.fit_predict(X_scaled)
+
+        # 4. Interpret clusters
+        clusters = [[] for _ in range(n_clusters)]
+        for i, label in enumerate(cluster_labels):
+            clusters[label].append(student_metadata[i])
+
+        # 5. Assign names to clusters based on average score/completion
+        cluster_summaries = []
+        for i in range(n_clusters):
+            members = clusters[i]
+            if not members:
+                continue
+            
+            avg_score = sum(m["avg_score"] for m in members) / len(members)
+            avg_comp = sum(m["completion"] for m in members) / len(members)
+            
+            label = "Consistent Learners"
+            if avg_score > 80 and avg_comp > 80:
+                label = "High Achievers"
+            elif avg_score < 50 or avg_comp < 50:
+                label = "Needs Support"
+            
+            cluster_summaries.append({
+                "cluster_id": i,
+                "label": label,
+                "average_score": round(avg_score, 2),
+                "average_completion": round(avg_comp, 2),
+                "student_count": len(members),
+                "students": members
+            })
+
+        return {
+            "classroom_id": classroom_id,
+            "total_students": len(student_ids),
+            "clusters": cluster_summaries,
+            "intel_optimized": True # Since we use patch_sklearn
+        }
 
     def get_student_progress(self, classroom_id: str, student_id: str) -> Dict:
         """Get detailed progress for a student in classroom including module and resource progress"""

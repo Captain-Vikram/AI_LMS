@@ -891,7 +891,7 @@ def _fetch_article_text(url: str, max_chars: int = 24000) -> str:
         url,
         timeout=12,
         headers={
-            "User-Agent": "Mozilla/5.0 (compatible; EduSaarthiBot/1.0)",
+            "User-Agent": "Mozilla/5.0 (compatible; SkillMasterBot/1.0)",
         },
     )
     response.raise_for_status()

@@ -1355,6 +1355,22 @@ const StudentPersonalResourcesPage = () => {
     }
   };
 
+  useEffect(() => {
+    let pollInterval = null;
+    const currentJobId = String(podcastJob?.job_id || '').trim();
+    const status = podcastJob?.status;
+
+    if (currentJobId && status && !['ready', 'failed', 'completed'].includes(status.toLowerCase())) {
+      pollInterval = setInterval(() => {
+        refreshPodcastJob();
+      }, 5000);
+    }
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [podcastJob?.job_id, podcastJob?.status]);
+
   const generateCombinedQuiz = async () => {
     if (!notebookId) return;
 

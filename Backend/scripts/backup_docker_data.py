@@ -2,8 +2,8 @@
 """Create backups for MongoDB and SurrealDB data.
 
 - Archives the host `mongo-data` directory into `backups/mongo-data-<ts>.tar.gz`.
-- Attempts to copy `/data/quasar-vector.db` from the `quasar-vector-db` container
-  into `backups/quasar-vector-db-<ts>.db`. If `docker cp` fails, it tries to
+    - Attempts to copy `/data/SkillMaster-vector.db` from the `SkillMaster-vector-db` container
+    into `backups/SkillMaster-vector-db-<ts>.db`. If `docker cp` fails, it tries to
   inspect the `surrealdb_data` Docker volume mountpoint and copy the file from there.
 
 Files are placed in the repository `backups/` directory.
@@ -67,7 +67,7 @@ def copy_surreal_from_volume(volume_name: str, dest_path: str) -> bool:
             print("Volume mountpoint not found or inaccessible:", mountpoint)
             return False
 
-        src = os.path.join(mountpoint, "quasar-vector.db")
+        src = os.path.join(mountpoint, "SkillMaster-vector.db")
         if not os.path.exists(src):
             print("SurrealDB data file not found at volume mountpoint:", src)
             return False
@@ -95,9 +95,9 @@ def main() -> int:
         print("MongoDB archive not created.")
 
     # 2) Copy SurrealDB file from container or volume
-    container_name = os.getenv("SURREAL_CONTAINER", "quasar-vector-db")
-    container_db_path = os.getenv("SURREAL_DB_PATH", "/data/quasar-vector.db")
-    dest_db_path = os.path.join(backup_dir, f"quasar-vector-db-{ts}.db")
+    container_name = os.getenv("SURREAL_CONTAINER", "SkillMaster-vector-db")
+    container_db_path = os.getenv("SURREAL_DB_PATH", "/data/SkillMaster-vector.db")
+    dest_db_path = os.path.join(backup_dir, f"SkillMaster-vector-db-{ts}.db")
 
     ok = copy_surreal_from_container(container_name, container_db_path, dest_db_path)
     if not ok:

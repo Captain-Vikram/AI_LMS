@@ -1,4 +1,4 @@
-# 🔧 Quasar LMS - Technical Architecture Deep Dive
+# 🔧 SkillMaster - Technical Architecture Deep Dive
 
 **Audience**: Developers, Technical Stakeholders, System Architects  
 **Last Updated**: April 20, 2026
@@ -542,11 +542,11 @@ def ask_question_rag(resource_id: str, question: str, student_id: str) -> QAResp
 async def submit_workflow_artifact(submission_id: str, file: UploadFile):
     # 1. Securely store artifact (PDF/LaTeX)
     file_path = await save_upload(file)
-    
+
     # 2. Trigger AI Analysis (Async)
     # Uses specialized prompts to evaluate research quality
     analysis = await ai_service.analyze_artifact(file_path)
-    
+
     # 3. Update Submission State
     await db.assessment_submissions.update_one(
         {"_id": ObjectId(submission_id)},
@@ -559,6 +559,7 @@ async def submit_workflow_artifact(submission_id: str, file: UploadFile):
 ```
 
 **Key Innovations**:
+
 - **State-based Progression**: Students move from Scenarios -> Articles -> Final Artifact.
 - **AI Pre-Grading**: Generates detailed rubrics for teachers before they even open the submission.
 - **LaTeX Integration**: Supports professional academic formatting for research tasks.
@@ -569,6 +570,7 @@ async def submit_workflow_artifact(submission_id: str, file: UploadFile):
 **Implementation**: `skill_pathway_service.py`
 
 **Mastery Logic**:
+
 - Pathways are defined as directed acyclic graphs (DAGs) of skills.
 - Each skill node contains a "Mastery Test" generated dynamically.
 - Completion of a node unlocks child nodes across the entire pathway.
@@ -579,6 +581,7 @@ async def submit_workflow_artifact(submission_id: str, file: UploadFile):
 **Implementation**: `handoff_fastapi/portable_rag_backend/`
 
 **Technical Stack**:
+
 - **Vector Engine**: ChromaDB (locally persisted).
 - **Audio Gen**: gTTS for "Audio Overviews" of personal notes.
 - **Ingestion**: Async pipeline for URL scraping and PDF parsing.
@@ -596,7 +599,7 @@ The system has transitioned to a fully non-blocking data layer:
 user = db.users.find_one({"_id": uid})
 profile = db.profiles.find_one({"user_id": uid})
 
-# Parallel Async (Fast - Quasar Pattern)
+# Parallel Async (Fast - SkillMaster Pattern)
 user, profile = await asyncio.gather(
     db.users.find_one({"_id": uid}),
     db.profiles.find_one({"user_id": uid})
@@ -606,6 +609,7 @@ user, profile = await asyncio.gather(
 ### Intelligent Fallback Chain
 
 `llm_adapter_async.py` implements a robust reliability layer:
+
 1. **Local LM Studio** (Low latency, $0 cost)
 2. **Groq / Llama 3** (High speed fallback)
 3. **Google Gemini 1.5** (High reasoning fallback)
@@ -1020,7 +1024,7 @@ All connected via Docker Network
 
 ```env
 DEBUG=true
-DATABASE_URL=mongodb://localhost:27017/quasar_dev
+DATABASE_URL=mongodb://localhost:27017/SkillMaster_dev
 LM_STUDIO_URL=http://localhost:1234
 CORS_ORIGINS=http://localhost:3000
 JWT_EXPIRATION_HOURS=24
@@ -1030,9 +1034,9 @@ JWT_EXPIRATION_HOURS=24
 
 ```env
 DEBUG=false
-DATABASE_URL=mongodb://prod-db.internal:27017/quasar
+DATABASE_URL=mongodb://prod-db.internal:27017/SkillMaster
 LM_STUDIO_URL=http://lm-studio:1234  (internal container network)
-CORS_ORIGINS=https://quasar.example.com
+CORS_ORIGINS=https://SkillMaster.example.com
 JWT_EXPIRATION_HOURS=24
 ENABLE_CLOUD_LLM_FALLBACK=true
 GOOGLE_API_KEY=<secret>
@@ -1240,6 +1244,7 @@ Add Redis cache between frontend and database
 **Implementation**: `Backend/routes/module_assessment_workflow_routes.py`
 
 **Key Innovations**:
+
 - **State-based Progression**: Students move from Scenarios -> Articles -> Final Artifact.
 - **AI Pre-Grading**: Generates detailed rubrics for teachers before they even open the submission.
 - **LaTeX Integration**: Supports professional academic formatting for research tasks.
@@ -1250,6 +1255,7 @@ Add Redis cache between frontend and database
 **Implementation**: `Backend/services/skill_pathway_service.py`
 
 **Mastery Logic**:
+
 - Pathways are defined as directed acyclic graphs (DAGs) of skills.
 - Each skill node contains a "Mastery Test" generated dynamically.
 - Completion of a node unlocks child nodes across the entire pathway.
@@ -1260,6 +1266,7 @@ Add Redis cache between frontend and database
 **Implementation**: `Backend/handoff_fastapi/portable_rag_backend/`
 
 **Technical Stack**:
+
 - **Vector Engine**: ChromaDB (locally persisted).
 - **Audio Gen**: gTTS for "Audio Overviews" of personal notes.
 - **Ingestion**: Async pipeline for URL scraping and PDF parsing.
@@ -1277,7 +1284,7 @@ The system has transitioned to a fully non-blocking data layer:
 user = db.users.find_one({"_id": uid})
 profile = db.profiles.find_one({"user_id": uid})
 
-# Parallel Async (Fast - Quasar Pattern)
+# Parallel Async (Fast - SkillMaster Pattern)
 user, profile = await asyncio.gather(
     db.users.find_one({"_id": uid}),
     db.profiles.find_one({"user_id": uid})
@@ -1287,6 +1294,7 @@ user, profile = await asyncio.gather(
 ### Intelligent Fallback Chain
 
 `llm_adapter_async.py` implements a robust reliability layer:
+
 1. **Local LM Studio** (Low latency, $0 cost)
 2. **Groq / Llama 3** (High speed fallback)
 3. **Google Gemini 1.5** (High reasoning fallback)

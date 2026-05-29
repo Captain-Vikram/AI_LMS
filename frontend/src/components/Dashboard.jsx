@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "@clerk/clerk-react";
 import IconsCarousel from "./IconsCarousel";
 import UserSkills from "./UserSkills";
 import AssessmentHistoryChart from "./AssessmentHistoryChart";
@@ -29,6 +30,7 @@ import {
 } from "react-icons/io5";
 
 const Dashboard = () => {
+  const { isLoaded, isSignedIn } = useAuth();
   const { id: focusedPathwayId } = useParams();
   const navigate = useNavigate();
   const codingLabUrl = import.meta.env.VITE_CODING_URL || "http://localhost:8502/";
@@ -592,40 +594,87 @@ const Dashboard = () => {
     fetchPathwayBlueprint();
   }, [isSkillPathwayMode, focusedPathwayId, focusedCurrentStage?.stage_index]);
 
+  const [showLoadingRetry, setShowLoadingRetry] = useState(false);
+
   useEffect(() => {
+    let loadingTimeout;
     const initializeDashboard = async () => {
-      const hasAccess = await verifyUserStatus();
-      if (!hasAccess) {
-        setIsLoading(false);
-        return;
-      }
+      setIsLoading(true);
+      setShowLoadingRetry(false);
+      
+      // Show retry button after 10 seconds of loading
+      loadingTimeout = setTimeout(() => setShowLoadingRetry(true), 10000);
 
-      const storedResults = localStorage.getItem("skillAssessmentResults");
-      if (storedResults) {
-        try {
-          setAssessmentResults(JSON.parse(storedResults));
-        } catch {
-          localStorage.removeItem("skillAssessmentResults");
+      try {
+        const hasAccess = await verifyUserStatus();
+        if (!hasAccess) {
+          return;
         }
-      }
 
-      await refreshDashboardData();
-      setIsLoading(false);
+        const storedResults = localStorage.getItem("skillAssessmentResults");
+        if (storedResults) {
+          try {
+            setAssessmentResults(JSON.parse(storedResults));
+          } catch {
+            localStorage.removeItem("skillAssessmentResults");
+          }
+        }
+
+        await refreshDashboardData();
+      } catch (error) {
+        console.error("Dashboard initialization failed:", error);
+        addErrorMessage(`Failed to initialize dashboard: ${error.message}`);
+      } finally {
+        setIsLoading(false);
+        clearTimeout(loadingTimeout);
+      }
     };
 
     initializeDashboard();
+    return () => clearTimeout(loadingTimeout);
   }, [navigate, focusedPathwayId, isSkillPathwayMode]);
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 border-4 border-t-blue-500 border-b-purple-500 border-l-transparent border-r-transparent rounded-full animate-spin"></div>
-          <p>
-            {isSkillPathwayMode
-              ? "Loading your skill dashboard..."
-              : "Loading your dashboard..."}
-          </p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-6">
+        <div className="flex flex-col items-center space-y-6 max-w-md text-center">
+          <div className="relative">
+            <div className="w-16 h-16 border-4 border-indigo-500/20 rounded-full"></div>
+            <div className="w-16 h-16 border-4 border-t-blue-500 border-b-purple-500 border-l-transparent border-r-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+          </div>
+          
+          <div>
+            <h2 className="text-xl font-bold mb-2">
+              {isSkillPathwayMode
+                ? "Assembling Your Skill Roadmap"
+                : "Preparing Your Dashboard"}
+            </h2>
+            <p className="text-gray-400 text-sm">
+              {isSkillPathwayMode
+                ? "We're fetching your personalized learning path and progress. This usually takes just a moment."
+                : "We're gathering your latest analytics and achievements."}
+            </p>
+          </div>
+
+          {showLoadingRetry && (
+            <div className="mt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <p className="text-amber-400 text-xs mb-4">Taking longer than expected? The connection might be slow.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-6 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-xl text-white font-medium transition-all"
+                >
+                  Refresh Page
+                </button>
+                <button
+                  onClick={() => setIsLoading(false)}
+                  className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-medium transition-all shadow-lg shadow-indigo-600/20"
+                >
+                  Enter Anyway
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -864,32 +913,45 @@ const Dashboard = () => {
                               </div>
                             )}
 
-                            <div className="flex flex-wrap gap-2">
-                              {focusedResources.length === 0 ? (
-                                <button
-                                  onClick={handleGenerateFocusedResources}
-                                  disabled={pathwayActionLoading || !focusedCurrentStage?.stage_index}
-                                  className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
-                                >
-                                  {pathwayActionLoading ? "Working..." : "Generate Resources"}
-                                </button>
+                            {focusedResources.length === 0 ? (
+                                <div className="bg-indigo-900/20 border border-dashed border-indigo-500/30 rounded-xl p-6 text-center">
+                                  <h4 className="text-indigo-200 font-bold mb-2">No Materials Generated Yet</h4>
+                                  <p className="text-indigo-300/70 text-xs mb-4 max-w-sm mx-auto">
+                                    Click below to let our AI curate a personalized set of videos and articles for this stage.
+                                  </p>
+                                  <button
+                                    onClick={handleGenerateFocusedResources}
+                                    disabled={pathwayActionLoading || !focusedCurrentStage?.stage_index}
+                                    className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-lg shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center mx-auto gap-2"
+                                  >
+                                    {pathwayActionLoading ? (
+                                      <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Curating Materials...</>
+                                    ) : (
+                                      <><IoRocketOutline className="text-lg" /> Generate Study Materials</>
+                                    )}
+                                  </button>
+                                  <p className="mt-3 text-[10px] text-indigo-400 font-medium">
+                                    Regenerations used: {focusedCurrentStage?.regenerations_used || 0} / 3
+                                  </p>
+                                </div>
                               ) : (
-                                <button
-                                  onClick={handleOpenResourcesWorkspace}
-                                  className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center"
-                                >
-                                  <IoPlayCircleOutline className="mr-1" /> Open Resources
-                                </button>
-                              )}
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={handleOpenResourcesWorkspace}
+                                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center transition-all shadow-lg shadow-blue-600/20"
+                                  >
+                                    <IoPlayCircleOutline className="mr-1.5 text-lg" /> Open Stage Workspace
+                                  </button>
 
-                              <button
-                                onClick={() => handleCompleteStage(stage.stage_index)}
-                                disabled={completingStage}
-                                className="px-3 py-1.5 rounded border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold"
-                              >
-                                {completingStage ? "Updating..." : "Mark Fully Complete"}
-                              </button>
-                            </div>
+                                  <button
+                                    onClick={() => handleCompleteStage(stage.stage_index)}
+                                    disabled={completingStage}
+                                    className="px-4 py-2 rounded-xl border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10 text-xs font-bold transition-all"
+                                  >
+                                    {completingStage ? "Updating..." : "Mark Stage Complete"}
+                                  </button>
+                                </div>
+                              )}
                           </div>
                         )}
                       </div>

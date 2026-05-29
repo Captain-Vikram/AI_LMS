@@ -182,6 +182,7 @@ class DashboardService:
             "classroom_grade": classroom.get("grade_level"),
             "subject_focus_areas": classroom.get("subject_focus_areas", []),
             "student_count": student_count,
+            "resource_generation_meta": classroom.get("resource_generation_meta"),
             "recent_submissions": [
                 {
                     "assignment_id": str(s.get("assignment_id")) if s.get("assignment_id") else None,
@@ -284,6 +285,7 @@ class DashboardService:
             "classroom_subject": classroom.get("subject"),
             "teacher_name": self._get_teacher_name(classroom.get("teacher_id")),
             "subject_focus_areas": classroom.get("subject_focus_areas", []),
+            "resource_generation_meta": classroom.get("resource_generation_meta"),
             "pending_assignments": [
                 {
                     "assignment_id": str(a.get("_id")) if a.get("_id") else None,

@@ -14,6 +14,8 @@ from functions.transcript_utils import fetch_transcript_entries
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+# Intel Optimization Imports
+from intel_acceleration import HAS_OPENVINO, get_openvino_device
 
 def extract_video_id(youtube_url):
     """
@@ -144,11 +146,29 @@ class YouTubeLangChainRAG:
         self.api_key = api_key
         self.model_name = model_name or os.getenv("LMSTUDIO_MODEL")
 
-        # Initialize embedding model
-        self.embedding_model = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            api_key=api_key
-        )
+        # Initialize embedding model - Prefer local OpenVINO for privacy and cost
+        if HAS_OPENVINO:
+            try:
+                from langchain_community.embeddings import OpenVINOEmbeddings
+                local_model = os.getenv("LOCAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+                device = get_openvino_device()
+                self.embedding_model = OpenVINOEmbeddings(
+                    model_name_or_path=local_model,
+                    model_kwargs={"device": device},
+                    encode_kwargs={"normalize_embeddings": True}
+                )
+                print(f"RAG: Using Intel-optimized OpenVINO embeddings on {device}")
+            except Exception as e:
+                print(f"RAG: Failed to initialize OpenVINO embeddings: {e}. Falling back to Google.")
+                self.embedding_model = GoogleGenerativeAIEmbeddings(
+                    model="models/embedding-001",
+                    api_key=api_key
+                )
+        else:
+            self.embedding_model = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                api_key=api_key
+            )
 
         # Initialize LLM
         self.llm = ChatGoogleGenerativeAI(

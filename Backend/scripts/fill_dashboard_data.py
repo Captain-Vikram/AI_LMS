@@ -15,13 +15,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 CLASSROOM_NAME = os.getenv("SEED_CLASSROOM_NAME", "Cloud Computing")
 TEACHER_EMAIL = os.getenv("SEED_TEACHER_EMAIL", "aka.vigi@gmail.com")
 MAIN_STUDENT_EMAIL = os.getenv("SEED_MAIN_STUDENT_EMAIL", "huh@email.com")
 
 client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-db = client.get_database("quasar")
+db = client.get_database(MONGO_DB_NAME)
 
 random.seed(123)
 

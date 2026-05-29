@@ -32,6 +32,7 @@ import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import apiClient, { setTokenGetter } from "./services/apiClient";
 import { API_ENDPOINTS } from "./config/api";
+import { storage } from "./utils/storage";
 
 // Protected route to ensure the user is logged in
 const ProtectedRoute = ({ children }) => {
@@ -50,8 +51,9 @@ const UserProgressRoute = ({ children }) => {
   const { isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
   const reassessmentInfo = localStorage.getItem("reassessmentInfo");
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const cachedOnboarding = localStorage.getItem("onboardingComplete");
+  const [statusLoading, setStatusLoading] = useState(() => !cachedOnboarding);
+  const [onboardingComplete, setOnboardingComplete] = useState(() => cachedOnboarding === "true");
   const [statusError, setStatusError] = useState(false);
 
   useEffect(() => {
@@ -129,6 +131,9 @@ const App = () => {
 
   useEffect(() => {
     setTokenGetter(getToken);
+    // Housekeeping on mount
+    storage.clearOldVersions();
+    storage.clearAllExpired();
   }, [getToken]);
 
   return (

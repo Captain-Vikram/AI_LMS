@@ -10,7 +10,7 @@ from portable_rag_backend.providers.lmstudio import (
 
 
 class EmbeddingProviderManager:
-    """Embedding factory supporting local, Gemini, and LM Studio providers."""
+    """Embedding factory supporting local, Gemini, LM Studio, and OpenVINO providers."""
 
     def __init__(self, settings: PortableRAGSettings):
         self.settings = settings
@@ -26,7 +26,7 @@ class EmbeddingProviderManager:
     ) -> str:
         active_provider = provider or self.settings.default_embedding_provider
 
-        if active_provider == "local":
+        if active_provider in ("local", "openvino"):
             return (model or self.settings.local_embedding_model).strip()
 
         if active_provider == "gemini":
@@ -58,7 +58,7 @@ class EmbeddingProviderManager:
             return candidates[0]
 
         raise ValueError(
-            f"Unsupported embedding provider '{active_provider}'. Supported: local, gemini, lmstudio"
+            f"Unsupported embedding provider '{active_provider}'. Supported: local, gemini, lmstudio, openvino"
         )
 
     def get_embeddings(self, provider: str | None = None) -> Embeddings:
@@ -78,6 +78,24 @@ class EmbeddingProviderManager:
             )
             self._cache[cache_key] = embeddings
             return embeddings
+
+        if active_provider == "openvino":
+            try:
+                from langchain_community.embeddings import OpenVINOEmbeddings
+                from intel_acceleration import get_openvino_device
+                
+                device = get_openvino_device()
+                embeddings = OpenVINOEmbeddings(
+                    model_name_or_path=resolved_model,
+                    model_kwargs={"device": device},
+                    encode_kwargs={"normalize_embeddings": True}
+                )
+                self._cache[cache_key] = embeddings
+                return embeddings
+            except ImportError:
+                # Fallback to local if openvino is not installed
+                from langchain_huggingface import HuggingFaceEmbeddings
+                return HuggingFaceEmbeddings(model_name=resolved_model)
 
         if active_provider == "gemini":
             if not self.settings.google_api_key:

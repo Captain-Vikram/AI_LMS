@@ -5,10 +5,17 @@ import {
   IoLockClosedOutline,
   IoPlayCircleOutline,
   IoSchoolOutline,
+  IoSparklesOutline,
+  IoArrowForwardOutline,
 } from "react-icons/io5";
 import apiClient from "../../services/apiClient";
 import { API_ENDPOINTS } from "../../config/api";
 import StudentAssessmentTaker from "./StudentAssessmentTaker";
+
+import {
+  useClassroomResources,
+} from "../../hooks/useClassroom";
+import GenerationBanner from "./GenerationBanner";
 
 const getModuleId = (module) => String(module?.module_id || module?._id || "").trim();
 const getResourceId = (resource) => String(resource?.id || resource?.resource_id || "").trim();
@@ -40,6 +47,13 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [activeAssessment, setActiveAssessment] = useState(null);
+
+  const {
+    resources: personalResources,
+    loading: personalLoading,
+    jobId: personalJobId,
+    refresh: refreshPersonal,
+  } = useClassroomResources(classroomId, 'personal', !!classroomId);
 
   useEffect(() => {
     let isMounted = true;
@@ -296,6 +310,69 @@ const LearningModulesStudent = ({ classroomId, modules = [] }) => {
           }}
         />
       )}
+
+      {/* ── Personal AI Recommendations ─────────────────────────────────────────── */}
+      <div className="pt-8 border-t border-white/10">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="flex items-center gap-2 text-2xl font-black text-white">
+              <IoSparklesOutline className="text-purple-400" />
+              Tailored for You
+            </h2>
+            <p className="text-sm text-gray-500 font-medium">AI-curated resources targeting your specific learning gaps.</p>
+          </div>
+          {personalJobId && (
+            <div className="flex h-8 items-center gap-2 rounded-full border border-purple-500/20 bg-purple-500/10 px-3 text-[10px] font-black uppercase tracking-widest text-purple-400">
+               <div className="h-1 w-1 rounded-full bg-purple-400 animate-ping" />
+               Building Path
+            </div>
+          )}
+        </div>
+
+        {personalJobId && (
+           <GenerationBanner 
+             jobId={personalJobId} 
+             title="AI is Refining Your Path" 
+             className="mb-8" 
+             onReady={refreshPersonal}
+           />
+        )}
+
+        {personalResources.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {personalResources.slice(0, 6).map((res, idx) => (
+              <div key={res.resource_id || idx} className="group relative rounded-3xl border border-white/5 bg-gray-900/40 p-6 backdrop-blur-md transition-all hover:bg-gray-900/60">
+                 <div className="flex items-center justify-between mb-4">
+                    <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-purple-400">
+                      {res.difficulty_tag || 'Intermediate'}
+                    </span>
+                    <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-600">
+                       RELEVANCE {res.relevance_score || 5}/5
+                    </div>
+                 </div>
+                 <h3 className="text-sm font-bold text-gray-100 line-clamp-2 mb-2 group-hover:text-purple-300 transition-colors">
+                    {res.title}
+                 </h3>
+                 <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed mb-4">
+                    {res.description}
+                 </p>
+                 <a 
+                   href={res.url} 
+                   target="_blank" 
+                   rel="noreferrer"
+                   className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-purple-400 hover:text-purple-300 transition-colors"
+                 >
+                    LAUNCH MATERIAL <IoArrowForwardOutline />
+                 </a>
+              </div>
+            ))}
+          </div>
+        ) : !personalJobId && !personalLoading ? (
+           <div className="rounded-3xl border border-dashed border-white/5 p-12 text-center bg-white/[0.01]">
+              <p className="text-sm font-medium text-gray-500">Complete module quizzes to generate personalized learning paths.</p>
+           </div>
+        ) : null}
+      </div>
     </div>
   );
 };

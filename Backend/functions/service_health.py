@@ -20,7 +20,7 @@ def _utc_iso_now() -> str:
 
 
 def _probe_mongodb() -> Dict[str, Any]:
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
 
     try:
         mongo_client.admin.command("ping")

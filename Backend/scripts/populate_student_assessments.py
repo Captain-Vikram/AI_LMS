@@ -13,7 +13,7 @@ Run with:
     python Backend/scripts/populate_student_assessments.py
 
 Environment vars:
-- MONGO_URI: MongoDB connection string (default: mongodb://localhost:27017/quasar)
+- MONGO_URI: MongoDB connection string (default: mongodb://localhost:27017/SkillMaster)
 - TARGET_CLASSROOM_NAME: classroom name to target (default: Cloud Computing)
 - PASS_RATIO: fraction of students who should pass each resource (default: 0.75)
 """
@@ -27,7 +27,8 @@ from bson import ObjectId
 from pymongo import MongoClient
 
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 TARGET_CLASSROOM_NAME = os.getenv("TARGET_CLASSROOM_NAME", "Cloud Computing")
 PASS_RATIO = float(os.getenv("PASS_RATIO", "0.75"))
 
@@ -38,7 +39,7 @@ def now():
 
 def main():
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client.get_database("quasar")
+    db = client.get_database(MONGO_DB_NAME)
 
     classroom = db.classrooms.find_one({"name": TARGET_CLASSROOM_NAME})
     if not classroom:

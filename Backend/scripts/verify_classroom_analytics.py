@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
 CLASSROOM_NAME = os.getenv("SEED_CLASSROOM_NAME", "Cloud Computing")
 TEACHER_EMAIL = os.getenv("SEED_TEACHER_EMAIL", "aka.vigi@gmail.com")
 TEACHER_PASSWORD = os.getenv("SEED_TEACHER_PASSWORD", "GoodGuy@09#")
@@ -26,7 +26,7 @@ API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 
 def find_classroom_id():
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client.get_database("quasar")
+    db = client.get_database(os.getenv("MONGO_DB_NAME", "SkillMaster"))
     classroom = db.classrooms.find_one({"name": CLASSROOM_NAME})
     if not classroom:
         return None

@@ -1,4 +1,4 @@
-# Quasar EduSaarthi
+# SkillMaster
 
 A full-stack classroom learning platform with:
 
@@ -47,7 +47,7 @@ Create a `.env` for backend values.
 
 Common values used by backend code:
 
-- `MONGO_URI` (default fallback: `mongodb://localhost:27017/quasar`)
+- `MONGO_URI` (default fallback: `mongodb://localhost:27017/SkillMaster`)
 - `SECRET_KEY`
 - `JWT_ALGORITHM` (optional, default `HS256`)
 - `LMSTUDIO_URL` (optional, default `http://127.0.0.1:1234`)
@@ -93,7 +93,7 @@ The portable RAG backend is mounted under:
 
 Startup sequence for first-time setup:
 
-1. Start MongoDB (`quasar-mongo`) and your FastAPI backend.
+1. Start MongoDB (`SkillMaster-mongo`) and your FastAPI backend.
 2. Ensure `PORTABLE_DATA_DIR` points to persistent storage.
 3. Create a notebook with `POST /api/portable-rag/notebooks`.
 4. Add sources (`/sources/text`, `/sources/url`, `/sources/file`).
@@ -155,13 +155,13 @@ This keeps backend `:8000` isolated even if vector DB startup/config fails.
 **Default connection string** (if not using auth):
 
 ```
-mongodb://localhost:27017/quasar
+mongodb://localhost:27017/SkillMaster
 ```
 
 **With auth:**
 
 ```
-mongodb://root:password@localhost:27017/quasar
+mongodb://root:password@localhost:27017/SkillMaster
 ```
 
 Set `MONGO_URI` in `.env` to match your setup.

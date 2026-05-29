@@ -5,11 +5,21 @@ from importlib import import_module
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any
+# Ensure Backend package directory is on sys.path so top-level imports like
+# `from routes...` resolve when running the app from the repository root.
+BACKEND_PKG_DIR = Path(__file__).resolve().parent
+if str(BACKEND_PKG_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_PKG_DIR))
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
+# Ensure request-model stubs exist before importing many route modules
+try:
+    import annotation_stubs  # populates builtins with permissive `*Request` models
+except Exception as _e:
+    print(f"[annotation_stubs] import failed: {_e}")
 from routes.mcq_routes import router as mcq_router
 from routes.auth_routes import router as auth_router
 from routes.onboarding_routes import router as onboarding_router
@@ -30,8 +40,12 @@ from routes.module_assessment_routes import router as module_assessment_router
 from routes.module_assessment_workflow_routes import router as module_assessment_workflow_router
 from routes.skill_pathway_routes import router as skill_pathway_router
 from functions.service_health import get_dependency_health_snapshot
-from database_async import init_db, disconnect_from_mongo
+from database_async import init_db, disconnect_from_mongo, get_db
 from functions.cache_utils import cache_manager
+from intel_acceleration import apply_intel_optimizations
+
+# Apply Intel AI Optimizations (IPEX, OpenVINO, Scikit-learn)
+apply_intel_optimizations()
 
 # Add handoff_fastapi to import path so portable_rag_backend can be mounted directly.
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -67,6 +81,30 @@ async def lifespan(app: FastAPI):
     print("🚀 Initializing async database and cache connections...")
     await init_db()
     await cache_manager.connect()
+    
+    # NEW: Automatic Job Recovery
+    db = get_db()
+    try:
+        from functions.async_generation import background_generate_resources
+        interrupted_jobs = await db.ai_generation_jobs.find({
+            "status": {"$in": ["pending", "planning", "searching", "filtering"]}
+        }).to_list(None)
+        
+        if interrupted_jobs:
+            print(f"🔄 Found {len(interrupted_jobs)} interrupted background jobs. Resuming...")
+            for job in interrupted_jobs:
+                job_id = str(job["_id"])
+                asyncio.create_task(background_generate_resources(
+                    job_id=job_id,
+                    assessment_seed=job.get("assessment_seed", {}),
+                    classroom_id=job.get("classroom_id"),
+                    user_id=str(job["user_id"]) if job.get("user_id") else None,
+                    source=job.get("source", "ai"),
+                    approval_status=job.get("approval_status", "pending")
+                ))
+    except Exception as e:
+        print(f"⚠️ Failed to recover interrupted jobs: {e}")
+
     print("✅ Infrastructure initialized and ready for async operations")
     yield
     print("🛑 Shutting down database and cache connections...")

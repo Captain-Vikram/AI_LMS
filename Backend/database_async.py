@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent / "migrations"))
 
 load_dotenv(override=True)
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 MONGO_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 
 # Global async client and database instances
@@ -40,7 +41,7 @@ async def connect_to_mongo() -> AsyncIOMotorDatabase:
         connectTimeoutMS=MONGO_TIMEOUT_MS,
     )
     
-    _async_db = _async_client.get_database("quasar")
+    _async_db = _async_client.get_database(MONGO_DB_NAME)
     
     # Verify connection
     try:

@@ -198,6 +198,29 @@ async def get_classroom_analytics(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/classroom/{classroom_id}/student-clusters")
+async def get_student_clusters(
+    classroom_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Get student clusters based on performance (teacher only)"""
+    db = get_db()
+    rbac = RBACService(db)
+
+    if not await rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can view student clusters"
+        )
+
+    analytics_svc = ClassroomAnalyticsService(db)
+    try:
+        clusters = analytics_svc.get_student_clusters(classroom_id)
+        return {"status": "success", "data": clusters}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/classroom/{classroom_id}/student/{student_id}")
 async def get_student_progress(
     classroom_id: str,

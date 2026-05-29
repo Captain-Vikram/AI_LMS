@@ -16,27 +16,32 @@ const SkillPathwayTracker = () => {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
+  const [generationError, setGenerationError] = useState(null);
+
+  const fetchProgress = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const pgRes = await apiClient.get(API_ENDPOINTS.PATHWAY_GET_PROGRESS(id));
+      if (pgRes.status === 'success') {
+        const matched = pgRes.data;
+        setDashboardData(matched);
+        
+        // Determine active stage
+        const stageProgress = Array.isArray(matched?.stage_progress) ? matched.stage_progress : [];
+        const activeStage = stageProgress.find((s) => s.status === 'in-progress') || stageProgress[0];
+        setCurrentStageIndex(Number(activeStage?.stage_index || 1));
+      } else {
+        setError('Failed to load pathway progress. Please try again.');
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load pathway progress.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchProgress = async () => {
-      setLoading(true);
-      try {
-        const pgRes = await apiClient.get(API_ENDPOINTS.PATHWAY_GET_PROGRESS(id));
-        if (pgRes.status === 'success') {
-          const matched = pgRes.data;
-          setDashboardData(matched);
-          
-          // Determine active stage
-          const stageProgress = Array.isArray(matched?.stage_progress) ? matched.stage_progress : [];
-          const activeStage = stageProgress.find((s) => s.status === 'in-progress') || stageProgress[0];
-          setCurrentStageIndex(Number(activeStage?.stage_index || 1));
-        }
-      } catch (err) {
-        setError(err.message || 'Failed to load pathway progress.');
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProgress();
   }, [id]);
 
@@ -59,14 +64,17 @@ const SkillPathwayTracker = () => {
 
   const handleGenerateResources = async () => {
     setGenerating(true);
+    setGenerationError(null);
     try {
       const res = await apiClient.post(API_ENDPOINTS.PATHWAY_GENERATE_RESOURCES(id, currentStageIndex));
       if (res.status === 'success') {
         // Refresh component
         window.location.reload();
+      } else {
+        setGenerationError(res.message || "Failed to generate resources.");
       }
     } catch (err) {
-      alert("Failed generating resources: " + err.message);
+      setGenerationError(err.message || "An unexpected error occurred during generation.");
     } finally {
       setGenerating(false);
     }
@@ -90,22 +98,31 @@ const SkillPathwayTracker = () => {
     navigate(`/skill-pathway/${id}/stage/${currentStageIndex}/resource/${resource_id}?assessment=1`);
   };
 
-  if (loading || !dashboardData) {
+  if (loading) {
     return (
       <GlassDashboardShell contentClassName="max-w-6xl">
-        <div className="flex justify-center items-center py-20 text-gray-400">
-          <FiLoader className="animate-spin text-3xl mr-3" /> Loading standalone skills tracker...
+        <div className="flex flex-col justify-center items-center py-20 text-gray-400">
+          <FiLoader className="animate-spin text-4xl mb-4 text-indigo-400" />
+          <p className="text-lg">Loading your skills tracker...</p>
         </div>
       </GlassDashboardShell>
     );
   }
 
-  if (error) {
+  if (error || (!loading && !dashboardData)) {
     return (
       <GlassDashboardShell contentClassName="max-w-6xl">
-         <div className="bg-red-900/30 border border-red-700/50 p-6 rounded-lg text-red-200">
-          <div className="flex items-center"><FiAlertTriangle className="mr-3 text-2xl"/> {error}</div>
-          <div className="mt-4">
+         <div className="bg-red-900/30 border border-red-700/50 p-8 rounded-2xl text-red-200 text-center">
+          <FiAlertTriangle className="mx-auto text-5xl mb-4 text-red-400"/>
+          <h2 className="text-2xl font-bold mb-2">Connection Error</h2>
+          <p className="text-red-200/70 max-w-md mx-auto mb-8">{error || "We couldn't retrieve your pathway data. The server might be temporarily unavailable."}</p>
+          <div className="flex justify-center gap-4">
+            <button 
+              onClick={fetchProgress}
+              className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold transition-all"
+            >
+              Retry Connection
+            </button>
             <AppBackButton label="Back to Skills" fallbackTo="/skills" />
           </div>
         </div>
@@ -131,6 +148,16 @@ const SkillPathwayTracker = () => {
             <div className="text-emerald-400 font-bold flex items-center gap-2"><FiCheckCircle /> {tracker?.status || 'locked'}</div>
          </div>
       </div>
+
+      {generationError && (
+        <div className="mb-6 bg-amber-900/30 border border-amber-700/50 p-4 rounded-xl text-amber-200 flex items-center justify-between">
+          <div className="flex items-center">
+            <FiAlertTriangle className="mr-3 text-xl text-amber-400" />
+            <span>{generationError}</span>
+          </div>
+          <button onClick={() => setGenerationError(null)} className="text-amber-400 hover:text-amber-300 font-bold px-2">✕</button>
+        </div>
+      )}
       
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
          {/* Sidebar: Subtopics / Blueprint */}

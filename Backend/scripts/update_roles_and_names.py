@@ -69,9 +69,9 @@ def build_name(first_name: str, last_name: str, profile_name: str, email: str) -
 
 
 def main() -> int:
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
     client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    db = client.get_database("quasar")
+    db = client.get_database(os.getenv("MONGO_DB_NAME", "SkillMaster"))
 
     # Sanity check DB reachability
     db.command("ping")

@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 import functions.llm_adapter_async as genai
 from langchain_community.tools import TavilySearchResults
 from langchain_community.utilities import GoogleSerperAPIWrapper
-# from duckduckgo_search import DDGS  # Install via `pip install duckduckgo-search`
-# from duckduckgo_search.exceptions import DuckDuckGoSearchException
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import asyncio
+from typing import Optional
 
 def llm_serper(query):
     serper_key = os.getenv("SERPER_API_KEY")
@@ -27,48 +27,56 @@ def get_web_links(query):
     except Exception:
         return []
 
-    
-def tavily_search(query):
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=False
+)
+def _sync_tavily_search(query: str, search_depth: str = "advanced", max_results: int = 5):
     """
-    Perform a Tavily search and return relevant documents.
+    Synchronous Tavily search call with retry.
     """
     try:
-        tavily_tool = TavilySearchResults()
-        results = tavily_tool.run(query)
-        return results
+        # bias towards educational/official docs
+        bias_query = f"{query} site:*.edu OR site:*.gov OR site:developer.mozilla.org OR site:github.com OR site:stackoverflow.com"
+        tavily_tool = TavilySearchResults(search_depth=search_depth, max_results=max_results)
+        return tavily_tool.run(bias_query)
     except Exception as e:
-        print(f"Tavily search failed: {e}")
+        print(f"Tavily biased search failed: {e}, falling back to basic")
+        tavily_tool = TavilySearchResults(max_results=max_results)
+        return tavily_tool.run(query)
+
+async def safe_tavily_search_async(query: str, search_depth: str = "advanced", max_results: int = 5, timeout: int = 20):
+    """
+    Perform a Tavily search with retry, timeout, and thread safety.
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync_tavily_search, query, search_depth, max_results),
+            timeout=timeout
+        )
+    except Exception as e:
+        print(f"Safe Tavily search failed for '{query}': {e}")
         return []
 
-async def generate_skill_resources(input_json):
+from functions.filter_utils import filter_pipeline
+
+async def generate_skill_resources(input_json, stop_event: Optional[asyncio.Event] = None):
     """
     Takes JSON data (string or dict) as input, extracts skills from the 'skill_gaps' areas,
     generates a learning workflow for each skill via a generative model, retrieves Tavily documents,
     and DuckDuckGo links, and returns a list of skills with their respective resources.
-
-    Returns:
-        A list of dictionaries in the format:
-        [
-            {
-                "skill": "Skill Name",
-                "documents": [
-                    {"title": "Doc Title 1", "content": "Doc Content 1", "link": "Doc Link 1"},
-                    ...
-                ],
-                "links": [
-                    {"title": "Link Title 1", "link": "Link URL 1"},
-                    ...
-                ]
-            },
-            ...
-        ]
     """
     # Load environment variables
     load_dotenv(override=True)
 
     # Parse input JSON if it is a string
     if isinstance(input_json, str):
-        data = json.loads(input_json)
+        try:
+            data = json.loads(input_json)
+        except json.JSONDecodeError:
+            data = {}
     else:
         data = input_json
 
@@ -76,32 +84,77 @@ async def generate_skill_resources(input_json):
     improvement_areas = data.get("skill_gaps", {}).get("areas", [])
     skills = [area["skill"] for area in improvement_areas if "skill" in area]
     
+    if not skills:
+        # Phase 5: Classroom Support
+        focus_areas = data.get("focus_areas", [])
+        if isinstance(focus_areas, list) and focus_areas:
+            skills = [str(f) for f in focus_areas if f]
+        elif data.get("subject"):
+            skills = [str(data.get("subject"))]
+    
+    if not skills:
+        return []
+    if stop_event and stop_event.is_set():
+        return []
+    assessed_level = data.get("assessed_level", "intermediate")
+    target_bloom = data.get("bloom_level", "apply")
+    
     generation_config = {
-        "temperature": 0.2,       # More deterministic output
+        "temperature": 0.2,
         "top_p": 0.95,
         "top_k": 64,
-        "max_output_tokens": 3000 # Allows longer responses
+        "max_output_tokens": 3000
     }
-    model = genai.GenerativeModelAsync(
-        model_name=os.getenv("LMSTUDIO_MODEL"),
-        generation_config=generation_config
-    )
+
+    # Fallback model strategy
+    primary_model_name = os.getenv("LMSTUDIO_MODEL")
+    fallback_model_name = os.getenv("LMSTUDIO_MODEL_FALLBACK") or primary_model_name
+
+    async def get_model(use_fallback=False):
+        model_name = fallback_model_name if use_fallback else primary_model_name
+        return genai.GenerativeModelAsync(
+            model_name=model_name,
+            generation_config=generation_config
+        )
 
     # Helper function: clean the generative model's JSON response
     def clean_json_response(response_text):
         cleaned_text = re.sub(r"```json|```", "", response_text).strip()
         return cleaned_text
 
-    # Helper function: generate a workflow (list of concepts) for a given skill
-    async def generate_workflow(skill):
-        prompt = f"""Generate a structured JSON response for learning {skill}, listing essential concepts in a logical order. The response should follow this format:  
+    # Helper function: generate a workflow (list of subtopics) for a given skill
+    async def generate_workflow(skill, use_fallback=False):
+        model = await get_model(use_fallback)
+        if stop_event and stop_event.is_set():
+            return json.dumps({"skill": skill, "subtopics": []})
+        
+        prompt = f"""You are an expert curriculum designer. Generate a structured learning path for the skill: "{skill}".
+The student's current assessed level is: {assessed_level}.
+The target Bloom's Taxonomy level is: {target_bloom}.
+
+Behavioral Instructions:
+- If target_bloom is "remember" or "understand": Focus on definitions, core concepts, and introductory overviews.
+- If target_bloom is "apply" or "analyze": Prioritize resources that provide worked examples, case studies, and practical exercises.
+- If target_bloom is "evaluate" or "create": Suggest advanced architectural deep-dives, critique-based content, and project-based learning.
+
+For this skill, provide 4-6 key subtopics. For each subtopic, provide:
+1. 'difficulty': "foundational", "intermediate", or "advanced"
+2. 'reason': A short explanation of why this is included for this level.
+3. 'queries': Exactly 3 search queries: 
+   - A 'precise' query (highly specific, e.g. "React useEffect dependency array depth")
+   - A 'broad' query (contextual, e.g. "React hooks advanced patterns")
+   - A 'fallback' query (general topic, e.g. "React performance optimization")
+
+Return valid JSON in this exact schema:
 {{
   "skill": "{skill}",
-  "concepts": [
-    "keyword1",
-    "keyword2",
-    "keyword3"
-    // up to a maximum of 10 keywords
+  "subtopics": [
+    {{
+      "name": "Subtopic Name",
+      "difficulty": "foundational",
+      "reason": "...",
+      "queries": ["precise", "broad", "fallback"]
+    }}
   ]
 }}
 """
@@ -111,100 +164,126 @@ async def generate_skill_resources(input_json):
             print(f"\nRaw response for {skill}:\n{raw_text}")
             return clean_json_response(raw_text)
         except Exception as exc:
+            if not use_fallback and fallback_model_name != primary_model_name:
+                print(f"Primary model failed for {skill}, trying fallback...")
+                return await generate_workflow(skill, use_fallback=True)
+            
             print(f"Workflow generation failed for {skill}: {exc}")
             fallback_payload = {
                 "skill": skill,
-                "concepts": [
-                    f"{skill} fundamentals",
-                    f"{skill} core concepts",
-                    f"{skill} practical projects",
+                "subtopics": [
+                    {
+                        "name": f"{skill} Fundamentals",
+                        "difficulty": "foundational",
+                        "reason": "Essential base knowledge",
+                        "queries": [f"{skill} comprehensive guide", f"{skill} tutorial", f"{skill} basics"]
+                    }
                 ],
             }
-            return json.dumps(fallback_payload, ensure_ascii=True)
+            return json.dumps(fallback_payload)
 
-    # For each skill, generate the workflow, Tavily documents, and DuckDuckGo links
-    result = []
-    for skill in skills:
-        print(f"\nGenerating workflow for: {skill}")
-        workflow_json = await generate_workflow(skill)
-
+    async def process_single_skill(skill: str):
         try:
-            workflow_data = json.loads(workflow_json)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON for {skill}: {e}\nResponse: {workflow_json}")
-            workflow_data = {
+            print(f"\nGenerating workflow for: {skill}")
+            workflow_json = await generate_workflow(skill)
+
+            try:
+                workflow_data = json.loads(workflow_json)
+            except json.JSONDecodeError:
+                workflow_data = {"skill": skill, "subtopics": []}
+
+            subtopics = workflow_data.get("subtopics", [])
+            if not subtopics: # Final fallback if JSON was invalid
+                 subtopics = [{
+                    "name": f"{skill} Overview",
+                    "difficulty": "intermediate",
+                    "reason": "General coverage of the skill",
+                    "queries": [f"{skill} guide", f"{skill} explained", skill]
+                 }]
+
+            all_tavily_docs = []
+            all_serper_links = []
+            
+            for subtopic in subtopics:
+                if stop_event and stop_event.is_set():
+                    break
+                sub_name = subtopic["name"]
+                queries = subtopic.get("queries", [])
+                
+                subtopic_docs = []
+                queries_used = []
+                
+                for q in queries:
+                    if stop_event and stop_event.is_set():
+                        break
+                    print(f"Searching Tavily for subtopic '{sub_name}' with query: {q}")
+                    docs = await safe_tavily_search_async(q)
+                    if stop_event and stop_event.is_set():
+                        break
+                    if docs:
+                        subtopic_docs.extend(docs)
+                        queries_used.append(q)
+                        if len(subtopic_docs) >= 3:
+                            break
+                
+                if not subtopic_docs:
+                    fallback_q = f"{skill} {sub_name} tutorial"
+                    print(f"Fallback search for '{sub_name}': {fallback_q}")
+                    subtopic_docs.extend(await safe_tavily_search_async(fallback_q))
+                    queries_used.append(fallback_q)
+
+                for d in subtopic_docs:
+                    d["blueprint_subtopic"] = sub_name
+                    d["search_query_used"] = queries_used[0] if queries_used else "fallback"
+                    d["difficulty_tag"] = subtopic.get("difficulty", "intermediate")
+                
+                all_tavily_docs.extend(subtopic_docs)
+
+                serper_q = queries[0] if queries else f"{skill} {sub_name}"
+                links = llm_serper(serper_q)
+                for l in links:
+                    all_serper_links.append({
+                        "url": l,
+                        "title": f"{sub_name} reference",
+                        "blueprint_subtopic": sub_name,
+                        "difficulty_tag": subtopic.get("difficulty", "intermediate")
+                    })
+
+            print(f"Filtering {len(all_tavily_docs)} Tavily docs and {len(all_serper_links)} Serper links for {skill}...")
+            
+            combined_articles = []
+            for d in all_tavily_docs:
+                combined_articles.append({
+                    "url": d.get("url") or d.get("link"),
+                    "title": d.get("title"),
+                    "content": d.get("content"),
+                    "blueprint_subtopic": d.get("blueprint_subtopic"),
+                    "search_query_used": d.get("search_query_used"),
+                    "difficulty_tag": d.get("difficulty_tag")
+                })
+            combined_articles.extend(all_serper_links)
+            
+            if stop_event and stop_event.is_set():
+                filtered_articles = []
+            else:
+                filtered_articles = await filter_pipeline(skill, combined_articles)
+
+            return {
                 "skill": skill,
-                "concepts": [
-                    f"{skill} fundamentals",
-                    f"{skill} core concepts",
-                    f"{skill} practical projects",
-                ],
+                "subtopics": subtopics,
+                "documents": filtered_articles[:15],
+                "blogs": []
+            }
+        except Exception as e:
+            print(f"Failed to process skill resources for '{skill}': {e}")
+            return {
+                "skill": skill,
+                "subtopics": [],
+                "documents": [],
+                "blogs": []
             }
 
-        # Get list of concepts from the workflow
-        concepts = workflow_data.get("concepts", [])
-
-        # Generate Tavily documents
-        tavily_query = f"{skill} learning blogs"
-        # Tavily run is usually blocking, but for now we'll call it.
-        # Ideally we'd use an async search tool.
-        tavily_docs = tavily_search(tavily_query)
-
-        # Generate links
-        duckduckgo_query = f"find me blogs on topic {skill}"
-        # llm_serper is also blocking
-        links = llm_serper(duckduckgo_query)
-
-        # Append results for the current skill
-        result.append({
-            "skill": skill,
-            "documents": tavily_docs,
-            "blogs": links
-        })
-
-    return result
-
-# # Example usage
-# if __name__ == "__main__":
-#     sample_json = """
-#     {
-#       "score": {
-#         "correct": 5,
-#         "total": 10,
-#         "percentage": 50
-#       },
-#       "assessed_level": "intermediate",
-#       "question_feedback": [
-#         {
-#           "question_index": 0,
-#           "is_correct": true,
-#           "correct_answer": 1,
-#           "explanation": "NumPy is the fundamental package for scientific computing in Python, providing support for large, multi-dimensional arrays and matrices."
-#         }
-#       ],
-#       "skill_gaps": {
-#         "overall": "Based on your assessment, we've identified areas for improvement",
-#         "areas": [
-#           {
-#             "skill": "Data Analysis",
-#             "level": "satisfactory"
-#           },
-#           {
-#             "skill": "Programming",
-#             "level": "needs improvement"
-#           }
-#         ]
-#       },
-#       "recommendations": [
-#         {
-#           "title": "Machine Learning Algorithms",
-#           "type": "course"
-#         }
-#       ]
-#     }
-#     """
-#     playlists = generate_skill_resources(sample_json)
-#     print(json.dumps(playlists, indent=4))
-
-# response=llm_serper("Data Science")
-# print(response)
+    # Parallelize skills
+    tasks = [process_single_skill(skill) for skill in skills]
+    results = await asyncio.gather(*tasks)
+    return results

@@ -1,0 +1,59 @@
+This is a genuinely well-designed pipeline — here's a structured breakdown of every layer you can strengthen, from quick wins to architectural upgrades.Here's a full breakdown of every enhancement, organized by phase.
+
+---
+
+**Phase 1 — Smarter Planning Prompt**
+
+The biggest leverage point is what you give the LLM to work with. Right now it gets the blueprint topics. Enrich it with:
+
+- **Student performance context**: pass in Bloom's Taxonomy level reached, topics where the student scored low in tests, and which resources they've already consumed. The LLM can then weight the plan toward gaps.
+- **Difficulty variants**: ask the LLM to tag each resource as "foundational / intermediate / advanced" so you can surface the right level first.
+- **3 ranked queries per resource, not 1**: the first query is precise ("React useEffect dependency array explained"), the second is broader ("React hooks tutorial"), the third is a pure topic fallback ("React functional components"). This makes your search phase far more resilient without needing extra LLM calls.
+- **Reasoning field**: ask for a one-line reason per resource — this becomes useful for displaying "why you're seeing this" to students and for debugging bad results.
+
+**Phase 2 — Search Quality**
+
+For YouTube:
+- Fetch 5–8 candidates per query instead of fewer. Apply your Shorts filter, then additionally check duration metadata — anything under 4 minutes is likely a teaser or clip. Target 8–25 minute videos for tutorials.
+- If candidate count after filtering drops below 2, immediately retry with the second ranked query rather than returning a weak result.
+
+For Tavily:
+- Add a domain allowlist bias: `site:*.edu`, MDN, official docs domains, GitHub READMEs, and known high-quality dev blogs (css-tricks, smashingmagazine, etc.). Tavily supports source filters.
+- Use `search_depth: "advanced"` for topics where shallow results tend to be thin (niche ML concepts, advanced algorithms).
+
+**Phase 3 — A Dedicated Filter Layer (the biggest missing piece)**
+
+You currently filter for Shorts, but there's no quality gate on articles or semantic relevance. Add:
+
+- **Deduplication**: hash all URLs before storing — prevent the same article appearing twice if two queries converge on the same result.
+- **Relevance re-ranking**: make a second, cheap, fast LLM call (even `claude-haiku`) that takes the list of returned titles + URLs and scores each one 1–5 for relevance to the original topic. Drop anything below 3. This is very fast and cheap and catches a large class of bad results.
+- **Metadata completeness check**: if a returned resource has no title, no description, or a dead-looking URL pattern, discard it and promote the backup.
+
+**Phase 4 — Richer Storage Schema**
+
+Extend each resource document in MongoDB with:
+
+```
+search_query_used: string        // which of the 3 ranked queries succeeded
+difficulty_tag: string           // foundational | intermediate | advanced
+relevance_score: number          // from the re-ranking call
+generated_at: timestamp
+source_type: "youtube" | "article"
+backup_used: boolean             // true if primary query fell through
+blueprint_subtopic: string       // which specific subtopic this covers
+```
+
+This lets you build future features like "show me only intermediate resources" or spot patterns in which subtopics consistently produce bad results.
+
+**Phase 5 — Async Generation with Push**
+
+The biggest UX risk in your current design is the loading screen while waiting for LLM + 10 searches to complete. Solve this architecturally:
+
+- **Return immediately** with a `status: "generating"` response and a `job_id`.
+- Run the full Plan-Search-Filter pipeline as a background task.
+- Push results to the client via **WebSocket or Server-Sent Events** as resources complete — videos might be ready in 3 seconds, articles a few seconds later. Students see resources appearing progressively rather than a stuck spinner.
+- Store intermediate state in MongoDB so a page refresh can resume from wherever the pipeline got to.
+
+**Quick wins you can add this week**
+
+The highest ROI changes with the least refactoring are: (1) expand to 3 ranked queries per resource in your LLM prompt, (2) add the haiku re-ranking call, (3) add duration filtering on YouTube, and (4) store `search_query_used` and `backup_used` flags. These four changes will noticeably improve result quality and give you visibility into where failures are happening.

@@ -1,22 +1,88 @@
-﻿from typing import Optional
+from typing import Optional
 import json
 import os
 import re
+import asyncio
 from typing import Any, Dict, List
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from langchain_community.tools import YouTubeSearchTool
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 import functions.llm_adapter_async as genai
 from functions.youtube_quiz_functions import extract_video_id
 
 tool = YouTubeSearchTool()
 
+try:
+    # Some distributions expose the class as `YoutubeSearch` (note capitalization)
+    from youtube_search import YoutubeSearch as YouTubeSearch
+except Exception:
+    try:
+        from youtube_search import YouTubeSearch
+    except Exception as e:
+        print(f"youtube_search import error: {e}")
+        YouTubeSearch = None
 
-async def respond_to_normal_query(query):
-    # YouTubeSearchTool run is usually blocking, but for now we'll call it.
-    return tool.run(f"{query},20")
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=False
+)
+def _sync_youtube_search(query: str, max_results: int = 8):
+    if not YouTubeSearch:
+        return []
+    return YouTubeSearch(query, max_results=max_results).to_dict()
+
+async def safe_youtube_search_async(query: str, max_results: int = 8, timeout: int = 15):
+    """
+    Perform a YouTube search with retry, timeout, and thread safety.
+    """
+    try:
+        # Wrap the synchronous, potentially hanging call in a thread with a timeout
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync_youtube_search, query, max_results),
+            timeout=timeout
+        )
+    except Exception as e:
+        print(f"Safe YouTube search failed for '{query}': {e}")
+        return []
+
+async def respond_to_normal_query(query: str):
+    """
+    Perform a general YouTube search and return structured results.
+    """
+    if not query:
+        return []
+    
+    try:
+        # Use the already imported YouTubeSearch (from youtube_search package)
+        # It's synchronous, but usually fast enough.
+        results = YouTubeSearch(query, max_results=10).to_dict()
+        
+        formatted_results = []
+        for res in results:
+            formatted_results.append({
+                "title": res.get("title"),
+                "url": f"https://www.youtube.com{res.get('url_suffix')}",
+                "thumbnail": res.get("thumbnails", [None])[0],
+                "duration": res.get("duration"),
+                "channel": res.get("channel"),
+                "views": res.get("views"),
+                "publish_time": res.get("publish_time")
+            })
+            
+        return formatted_results
+    except Exception as e:
+        print(f"General YouTube search failed: {e}")
+        # Fallback to the tool if package fails
+        try:
+            raw_output = tool.run(f"{query},10")
+            return raw_output
+        except:
+            return []
 
 
 def _fallback_concepts_for_skill(skill: str) -> List[str]:
@@ -102,6 +168,18 @@ def _extract_skills(data: Dict[str, Any]) -> List[str]:
             if title:
                 skills.append(title)
 
+    if skills:
+        return skills
+
+    # Phase 5: Classroom Support - check focus_areas or subject
+    focus_areas = data.get("focus_areas", [])
+    if isinstance(focus_areas, list) and focus_areas:
+        return [str(f) for f in focus_areas if f]
+    
+    subject = data.get("subject")
+    if subject:
+        return [str(subject)]
+
     return skills
 
 
@@ -139,13 +217,30 @@ def _extract_video_link(tool_output: str) -> Optional[str]:
     return None
 
 
-async def generate_skill_playlist(input_json, force_fallback: bool = False):
+from functions.filter_utils import filter_pipeline
+
+def _parse_duration_to_seconds(duration_str: str) -> int:
+    """Parse duration string (e.g., "10:15", "1:05:10") to seconds."""
+    if not duration_str:
+        return 0
+    parts = duration_str.split(":")
+    seconds = 0
+    try:
+        if len(parts) == 1:
+            seconds = int(parts[0])
+        elif len(parts) == 2:
+            seconds = int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3:
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except ValueError:
+        return 0
+    return seconds
+
+async def generate_skill_playlist(input_json, force_fallback: bool = False, stop_event: Optional[asyncio.Event] = None):
     """
-    Build YouTube recommendations for each skill with robust LLM fallbacks.
+    Build YouTube recommendations for each skill with robust LLM fallbacks and context injection.
     """
     load_dotenv(override=True)
-
-    youtube_tool = YouTubeSearchTool()
 
     if isinstance(input_json, str):
         try:
@@ -161,10 +256,17 @@ async def generate_skill_playlist(input_json, force_fallback: bool = False):
     if not skills:
         return []
 
+    if stop_event and stop_event.is_set():
+        return []
+
+    # Context for prompt injection
+    assessed_level = data.get("assessed_level", "intermediate")
+    target_bloom = data.get("bloom_level", "apply")
+
     try:
-        max_tokens = int(os.getenv("YOUTUBE_WORKFLOW_MAX_OUTPUT_TOKENS", "1500"))
+        max_tokens = int(os.getenv("YOUTUBE_WORKFLOW_MAX_OUTPUT_TOKENS", "2000"))
     except ValueError:
-        max_tokens = 1500
+        max_tokens = 2000
 
     generation_config = {
         "temperature": 0.2,
@@ -173,30 +275,60 @@ async def generate_skill_playlist(input_json, force_fallback: bool = False):
         "max_output_tokens": max_tokens,
     }
 
-    model = None
-    if not force_fallback:
+    # Fallback model strategy
+    primary_model_name = os.getenv("LMSTUDIO_MODEL")
+    fallback_model_name = os.getenv("LMSTUDIO_MODEL_FALLBACK") or primary_model_name
+
+    async def get_model(use_fallback_override=False):
+        model_name = fallback_model_name if (use_fallback_override or force_fallback) else primary_model_name
         try:
-            model = genai.GenerativeModelAsync(
-                model_name=os.getenv("LMSTUDIO_MODEL"),
+            return genai.GenerativeModelAsync(
+                model_name=model_name,
                 generation_config=generation_config,
             )
         except Exception as exc:
-            print(f"Unable to initialize LLM for YouTube recommendations: {exc}")
+            print(f"Unable to initialize LLM ({model_name}): {exc}")
+            return None
 
     def clean_json_response(response_text: str) -> str:
         return re.sub(r"```json|```", "", (response_text or "")).strip()
 
-    async def generate_workflow(skill: str) -> Dict[str, Any]:
+    async def generate_workflow(skill: str, use_fallback_override=False) -> Dict[str, Any]:
+        model = await get_model(use_fallback_override)
+        if stop_event and stop_event.is_set():
+            return {"skill": skill, "subtopics": []}
         if model is None:
-            return {"skill": skill, "concepts": _fallback_concepts_for_skill(skill)}
+            return {"skill": skill, "subtopics": [{"name": c, "queries": [c, f"{skill} {c}", skill]} for c in _fallback_concepts_for_skill(skill)]}
 
-        prompt = f"""Generate a structured JSON response for learning {skill}, listing essential concepts in a logical order.
-Return valid JSON only in this exact schema:
+        prompt = f"""You are an expert video curriculum designer. Generate a structured YouTube learning path for: "{skill}".
+The student's current assessed level is: {assessed_level}.
+The target Bloom's Taxonomy level is: {target_bloom}.
+
+Behavioral Instructions:
+- For "remember/understand": Suggest high-level overview videos and fundamental concept explainers.
+- For "apply/analyze": Prioritize tutorial-style videos, code-alongs, and practical walk-throughs.
+- For "evaluate/create": Suggest deep-dive architectural reviews, "how it works under the hood", and project build videos.
+
+For this skill, provide 4-6 key subtopics. For each subtopic, provide:
+1. 'difficulty': "foundational", "intermediate", or "advanced"
+2. 'reason': A short explanation of why this is included for this level.
+3. 'queries': Exactly 3 search queries optimized for YouTube: 
+   - A 'precise' query (e.g. "Python decorators deep dive tutorial")
+   - A 'broad' query (e.g. "Python functional programming concepts")
+   - A 'fallback' query (e.g. "Python advanced programming")
+
+Return valid JSON in this exact schema:
 {{
   "skill": "{skill}",
-  "concepts": ["keyword1", "keyword2", "keyword3"]
+  "subtopics": [
+    {{
+      "name": "Subtopic Name",
+      "difficulty": "intermediate",
+      "reason": "...",
+      "queries": ["precise", "broad", "fallback"]
+    }}
+  ]
 }}
-Use 5 to 8 concise concepts.
 """
 
         try:
@@ -206,59 +338,115 @@ Use 5 to 8 concise concepts.
             cleaned = clean_json_response(raw_text)
 
             workflow_data = json.loads(cleaned)
-            concepts = _normalize_concepts(workflow_data.get("concepts", []), skill)
-            return {"skill": skill, "concepts": concepts}
+            # Basic validation
+            if "subtopics" not in workflow_data:
+                 raise ValueError("Missing subtopics in LLM response")
+            return workflow_data
         except Exception as exc:
+            if not use_fallback_override and fallback_model_name != primary_model_name:
+                print(f"Primary model failed for {skill}, trying fallback...")
+                return await generate_workflow(skill, use_fallback_override=True)
+            
             print(f"Workflow generation failed for {skill}: {exc}")
-            return {"skill": skill, "concepts": _fallback_concepts_for_skill(skill)}
+            return {
+                "skill": skill, 
+                "subtopics": [
+                    {"name": c, "difficulty": "intermediate", "reason": "Fundamental concept", "queries": [f"{skill} {c} tutorial", f"{skill} {c}", c]} 
+                    for c in _fallback_concepts_for_skill(skill)
+                ]
+            }
 
-    def generate_playlist(skill: str, concepts: List[str]) -> List[Dict[str, str]]:
-        playlist: List[Dict[str, str]] = []
+    async def generate_playlist(skill: str, subtopics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        full_candidate_pool = []
 
-        for concept in concepts:
-            try:
-                query = _build_youtube_tool_query(skill, concept, max_results=1)
-                tool_output = youtube_tool.run(query)
-                link = _extract_video_link(tool_output)
-                
-                if not link:
-                    # Try a more specific search query if the first one failed
-                    retry_query = f"{skill} {concept} complete tutorial course,1"
-                    tool_output_retry = youtube_tool.run(retry_query)
-                    link = _extract_video_link(tool_output_retry)
-                
-                if not link:
-                    link = _build_youtube_search_link(skill, concept)
+        if stop_event and stop_event.is_set():
+            return []
 
-                # Attempt to extract video id and add a thumbnail URL
-                vid = extract_video_id(str(link) or "")
-                thumbnail = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg" if vid else None
-                playlist.append({
-                    "concept": concept,
-                    "youtube_link": str(link),
-                    "video_id": vid,
-                    "thumbnail_url": thumbnail,
-                })
-            except Exception as exc:
-                print(f"Error fetching YouTube link for {concept}: {exc}")
-                playlist.append({
-                    "concept": concept,
-                    "youtube_link": _build_youtube_search_link(skill, concept),
-                    "video_id": None,
-                    "thumbnail_url": None,
-                })
+        for subtopic in subtopics:
+            name = subtopic.get("name", "Untitled Subtopic")
+            queries = subtopic.get("queries", [f"{skill} tutorial"])
+            
+            subtopic_candidates = []
+            queries_used_for_this_subtopic = []
+            
+            for q in queries:
+                if stop_event and stop_event.is_set():
+                    break
+                print(f"Searching YouTube for subtopic '{name}' with query: {q}")
+                try:
+                    # biased search
+                    search_results = await safe_youtube_search_async(f"{q}", max_results=8)
+                    if stop_event and stop_event.is_set():
+                        break
+                    for res in search_results:
+                        duration_sec = _parse_duration_to_seconds(res.get("duration", "0"))
+                        
+                        # Filter out Shorts (< 4 mins / 240 sec)
+                        if duration_sec < 240:
+                            continue
+                            
+                        subtopic_candidates.append({
+                            "concept": name,
+                            "title": res.get("title"),
+                            "url": f"https://www.youtube.com{res.get('url_suffix')}",
+                            "description": f"YouTube video by {res.get('channel')}. Duration: {res.get('duration')}",
+                            "thumbnail_url": res.get("thumbnails", [None])[0],
+                            "video_id": res.get("id"),
+                            "difficulty": subtopic.get("difficulty", "intermediate"),
+                            "reason": subtopic.get("reason", ""),
+                            "blueprint_subtopic": name,
+                            "search_query_used": q
+                        })
+                    
+                    if len(subtopic_candidates) >= 3:
+                        queries_used_for_this_subtopic.append(q)
+                        break
+                except Exception as e:
+                    print(f"YouTube search failed for query '{q}': {e}")
 
-        return playlist
+            full_candidate_pool.extend(subtopic_candidates)
 
-    result = []
-    for skill in skills:
-        print(f"\nGenerating workflow for: {skill}")
-        workflow_data = await generate_workflow(skill)
-        concepts = _normalize_concepts(workflow_data.get("concepts", []), skill)
-        playlist = generate_playlist(skill, concepts)
-        result.append({"skill": skill, "playlist": playlist})
+        # Phase 3: Filter and Re-rank the YouTube bundle
+        print(f"Filtering {len(full_candidate_pool)} YouTube candidates for {skill}...")
+        if stop_event and stop_event.is_set():
+            filtered_playlist = []
+        else:
+            filtered_playlist = await filter_pipeline(skill, full_candidate_pool, min_score=3)
+        
+        # Format for frontend compatibility
+        final_playlist = []
+        for item in filtered_playlist[:12]: # Limit to top 12
+            final_playlist.append({
+                "concept": item["concept"],
+                "subtopic_name": item["blueprint_subtopic"],
+                "difficulty": item["difficulty"],
+                "reason": item["reason"],
+                "youtube_link": item["url"],
+                "video_id": item["video_id"],
+                "thumbnail_url": item["thumbnail_url"],
+                "relevance_score": item.get("relevance_score"),
+                "search_query_used": item.get("search_query_used")
+            })
+            
+        return final_playlist
 
-    return result
+    async def process_single_skill(skill: str):
+        try:
+            if stop_event and stop_event.is_set():
+                return {"skill": skill, "playlist": []}
+            print(f"\nGenerating workflow for: {skill}")
+            workflow_data = await generate_workflow(skill)
+            subtopics = workflow_data.get("subtopics", [])
+            playlist = await generate_playlist(skill, subtopics)
+            return {"skill": skill, "playlist": playlist}
+        except Exception as e:
+            print(f"Failed to process skill '{skill}': {e}")
+            return {"skill": skill, "playlist": []}
+
+    # Parallelize skills
+    tasks = [process_single_skill(skill) for skill in skills]
+    results = await asyncio.gather(*tasks)
+    return results
 
 # Example usage:
 # if __name__ == "__main__":

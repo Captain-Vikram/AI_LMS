@@ -1,4 +1,4 @@
-Quasar/.env
+SkillMaster/.env
 Backend/routes/__pycache__/onboarding_routes.cpython-310.pyc
 Backend/routes/__pycache__/auth_routes.cpython-310.pyc
 Backend/routes/__pycache__/mcq_routes.cpython-310.pyc
@@ -21,3 +21,4 @@ Backend/data/portable_rag/
 Backend/data/portable_rag/**
 /handoff_fastapi/
 /data/
+/project-analyzer (3)/

@@ -1,6 +1,6 @@
 # Frontend
 
-Frontend app for Quasar EduSaarthi.
+Frontend app for SkillMaster.
 
 ## Run
 

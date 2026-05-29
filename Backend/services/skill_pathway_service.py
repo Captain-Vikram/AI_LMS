@@ -174,14 +174,28 @@ class SkillPathwayService:
         """
 
         # 5. Generate via LLM
+        generated_data = None
         try:
             raw_response = await generate_text_async(
                 prompt_or_messages=[{"role": "user", "content": prompt}],
-                generation_config={"temperature": 0.3, "max_tokens": 1500}
+                generation_config={"temperature": 0.3, "max_tokens": 1500},
+                timeout=60
             )
             generated_data = json.loads(raw_response)
         except Exception as e:
-            return {"status": "error", "message": f"Failed to generate resources: {str(e)}"}
+            print(f"LLM generation failed, using fallback: {e}")
+            # Fallback: Generate basic search queries from the blueprint topics
+            fallback_videos = []
+            fallback_articles = []
+            for topic in stage_blueprint.get("topics", [])[:3]:
+                topic_name = topic.get("name", "Topic")
+                fallback_videos.append({"title": f"Introduction to {topic_name}", "search_query": f"{topic_name} tutorial for beginners"})
+                fallback_articles.append({"title": f"Mastering {topic_name}", "search_query": f"{topic_name} comprehensive guide"})
+            
+            generated_data = {
+                "videos": fallback_videos,
+                "articles": fallback_articles
+            }
         
         # 6. Parse and Call YouTube/DeepSearch APIs
         final_resources = []

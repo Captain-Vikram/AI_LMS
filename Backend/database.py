@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent / "migrations"))
 
 load_dotenv(override=True)
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 MONGO_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 
 client = MongoClient(
@@ -18,8 +19,8 @@ client = MongoClient(
     serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
     connectTimeoutMS=MONGO_TIMEOUT_MS,
 )
-
-db = client.get_database("quasar") 
+ 
+db = client.get_database(MONGO_DB_NAME)
 MIGRATION_001_NAME = "001_add_lms_collections"
 
 def get_db():
