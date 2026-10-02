@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from database_async import get_db
-from database import get_db as get_sync_db
-from bson import ObjectId
+from bson import ObjectId, Binary
 import asyncio
 from datetime import datetime
 import hashlib
@@ -13,17 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from services.rbac_service import RBACService
-from services.learning_module_service import LearningModuleService
-from functions.search_doc import generate_skill_resources
-from functions.youtube_education import generate_skill_playlist
-from functions.youtube_quiz_functions import extract_video_id
-from functions.utils import get_current_user, normalize_user_role, get_user_display_name
-from functions.cache_utils import cache_response
-from functions.link_preview import fetch_preview_image
-
-router = APIRouter(prefix="/api/classroom", tags=["classroom"])
-
 
 class ResourceApprovalRequest(BaseModel):
     approved: bool
@@ -32,24 +20,13 @@ class ResourceApprovalRequest(BaseModel):
 class ManualResourceRequest(BaseModel):
     title: str
     url: str
-    resource_type: str  # 'youtube', 'article', 'blog'
+    resource_type: Optional[str] = "youtube"
     skill: Optional[str] = "General"
-
-
-class ResourceEngagementRequest(BaseModel):
-    viewed: Optional[bool] = False
-    view_duration_seconds: Optional[int] = 0
-    completion_percentage: Optional[int] = 0
-    test_score: Optional[float] = None
-    test_attempts: Optional[int] = 0
-    rating: Optional[int] = None
-    helpful: Optional[bool] = None
-    notes: Optional[str] = ""
 
 
 class ModuleCreateRequest(BaseModel):
     name: str
-    description: Optional[str] = ""
+    description: Optional[str] = None
     status: Optional[str] = "published"
 
 
@@ -61,485 +38,158 @@ class ModuleResourceAssignmentRequest(BaseModel):
     resource_ids: List[str]
 
 
-def _subject_regex(subject: str) -> str:
-    return rf"^\s*{re.escape(subject.strip())}\s*$"
+class ResourceEngagementRequest(BaseModel):
+    viewed: Optional[bool] = None
+    view_duration_seconds: Optional[int] = None
+    completion_percentage: Optional[int] = None
+    test_score: Optional[float] = None
+    test_attempts: Optional[int] = None
+    rating: Optional[int] = None
+    helpful: Optional[bool] = None
+    notes: Optional[str] = None
+
+from services.rbac_service import RBACService
+from services.learning_module_service import LearningModuleService
+from functions.search_doc import generate_skill_resources
+from functions.youtube_education import generate_skill_playlist
+from functions.youtube_quiz_functions import extract_video_id
+from functions.utils import get_current_user, normalize_user_role, get_user_display_name
+from functions.cache_utils import cache_response
+from functions.link_preview import fetch_preview_image
+import functions.llm_adapter_async as genai
+
+from functions.resource_utils import (
+    _assessment_signature,
+    _normalize_url,
+    _resource_from_playlist,
+    _resource_from_document,
+    _build_resources_from_outputs,
+    _serialize_resource,
+    _resource_counts,
+    _to_iso
+)
+
+router = APIRouter(prefix="/api/classroom", tags=["classroom"])
 
 
-def _normalize_enrollment_code(code: Any) -> str:
-    return str(code or "").strip().lower()
+def _parse_bool(value) -> bool:
+    """Normalize various truthy/falsey shapes into a boolean.
 
-
-def _assessment_signature(payload: Dict[str, Any]) -> str:
-    serialized = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def _parse_bool(value: Any) -> bool:
+    Accepts booleans, numeric strings, common yes/no words, and returns False for None/unknown values.
+    """
     if isinstance(value, bool):
         return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
-
-
-def _normalize_module_seed_name(candidate: Any) -> str:
-    cleaned = re.sub(r"\s+", " ", str(candidate or "").strip())
-    if not cleaned:
-        return ""
-    if len(cleaned) > 120:
-        cleaned = cleaned[:120].strip()
-    return cleaned
-
-
-def _derive_initial_module_names(
-    focus_areas: List[str],
-    ai_resources: List[Dict[str, Any]],
-    max_items: int = 10,
-) -> List[str]:
-    ordered_candidates: List[str] = []
-    seen_keys = set()
-
-    def add_candidate(value: Any):
-        normalized = _normalize_module_seed_name(value)
-        if not normalized:
-            return
-
-        key = normalized.lower()
-        if key in seen_keys:
-            return
-
-        seen_keys.add(key)
-        ordered_candidates.append(normalized)
-
-    for area in focus_areas or []:
-        add_candidate(area)
-        if len(ordered_candidates) >= max_items:
-            return ordered_candidates
-
-    for resource in ai_resources or []:
-        if not isinstance(resource, dict):
-            continue
-        add_candidate(resource.get("module_name") or resource.get("skill"))
-        if len(ordered_candidates) >= max_items:
-            break
-
-    return ordered_candidates
-
-
-def _to_iso(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
-
-
-def _serialize_resource(resource: Dict[str, Any]) -> Dict[str, Any]:
-    module_id = resource.get("module_id")
-    # prefer existing thumbnail fields, otherwise try to derive from URLs
-    thumb = resource.get("thumbnail_url") or resource.get("thumbnail") or None
-    if not thumb:
-        # try to extract a youtube video id and map to youtube static thumbnail
-        try:
-            vid = extract_video_id(str(resource.get("url") or "") ) or extract_video_id(str(resource.get("youtube_link") or ""))
-            if vid:
-                thumb = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
-        except Exception:
-            thumb = None
-
-    return {
-        "resource_id": resource.get("resource_id"),
-        "title": resource.get("title", "Untitled Resource"),
-        "description": resource.get("description", ""),
-        "url": resource.get("url", ""),
-        "resource_type": resource.get("resource_type", "article"),
-        "skill": resource.get("skill", "General"),
-        "thumbnail_url": thumb,
-        "module_id": str(module_id) if module_id else None,
-        "module_name": resource.get("module_name"),
-        "source": resource.get("source", "ai"),
-        "approval_status": resource.get("approval_status", "pending"),
-        "created_date": _to_iso(resource.get("created_date")),
-        "updated_date": _to_iso(resource.get("updated_date")),
-        "approved_date": _to_iso(resource.get("approved_date")),
-        "approved_by": str(resource.get("approved_by")) if resource.get("approved_by") else None,
-    }
-
-
-async def _update_thumbnails_for_classroom(db, classroom_oid, resources: list):
-    """Background task: fetch preview images for resources and persist them when found."""
-    if not resources:
-        return
+    if value is None:
+        return False
     try:
-        for res in resources:
-            try:
-                if res.get("thumbnail_url"):
-                    continue
-                url = _normalize_url(res.get("url") or res.get("youtube_link") or "")
-                if not url:
-                    continue
-                img = await fetch_preview_image(url)
-                if img:
-                    await db.classrooms.update_one(
-                        {"_id": classroom_oid, "ai_resources.resource_id": res.get("resource_id")},
-                        {"$set": {"ai_resources.$.thumbnail_url": img}},
-                    )
-            except Exception:
-                continue
+        s = str(value).strip().lower()
+        if s in ("1", "true", "t", "yes", "y", "on"):
+            return True
+        if s in ("0", "false", "f", "no", "n", "off", "none", "null", ""):
+            return False
+        # fallback: try integer conversion
+        return bool(int(s))
     except Exception:
-        return
-
-
-async def _update_thumbnails_for_generated_personal_resources(db, user_oid, signature: str, resources: list):
-    if not resources:
-        return
-    try:
-        for res in resources:
-            try:
-                if res.get("thumbnail_url"):
-                    continue
-                url = _normalize_url(res.get("url") or res.get("youtube_link") or "")
-                if not url:
-                    continue
-                img = await fetch_preview_image(url)
-                if img:
-                    await db.generated_personal_resources.update_one(
-                        {"user_id": user_oid, "assessment_signature": signature, "resources.resource_id": res.get("resource_id")},
-                        {"$set": {"resources.$.thumbnail_url": img}},
-                    )
-            except Exception:
-                continue
-    except Exception:
-        return
-
-
-def _resource_counts(resources: List[Dict[str, Any]]) -> Dict[str, int]:
-    approved = sum(1 for resource in resources if resource.get("approval_status") == "approved")
-    rejected = sum(1 for resource in resources if resource.get("approval_status") == "rejected")
-    pending = max(0, len(resources) - approved - rejected)
-    return {
-        "total": len(resources),
-        "approved": approved,
-        "pending": pending,
-        "rejected": rejected,
-    }
+        return False
 
 
 def _extract_pdf_excerpt_and_page_count(pdf_bytes: bytes, max_pages: int = 10) -> Tuple[str, int]:
     if not pdf_bytes:
-        raise HTTPException(status_code=400, detail="Curriculum PDF is required")
+        return "", 0
 
     try:
         import fitz  # PyMuPDF
 
-        text_parts: List[str] = []
-        document = fitz.open(stream=pdf_bytes, filetype="pdf")
-        page_count = int(document.page_count or 0)
-
-        if page_count > max_pages:
-            document.close()
-            raise HTTPException(
-                status_code=400,
-                detail=f"Curriculum PDF must be {max_pages} pages or fewer",
-            )
-
-        for page in document:
-            page_text = page.get_text("text")  # type: ignore[attr-defined]
+        text_parts = []
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page_count = doc.page_count if hasattr(doc, "page_count") else len(doc)
+        for idx, page in enumerate(doc):
+            if idx >= max_pages:
+                break
+            try:
+                page_text = page.get_text("text")
+            except Exception:
+                page_text = ""
             if page_text:
                 text_parts.append(page_text)
-
-        document.close()
-
-        extracted = "\n".join(text_parts)
-        extracted = re.sub(r"\n{3,}", "\n\n", extracted).strip()
-        return extracted[:12000], page_count
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to read curriculum PDF. Upload a valid PDF with selectable text.",
-        )
-
-
-def _subject_matches_pdf_excerpt(subject: str, excerpt: str) -> bool:
-    if not excerpt.strip():
-        return False
-
-    tokens = [
-        token
-        for token in re.findall(r"[a-zA-Z]{3,}", subject.lower())
-        if token not in {"and", "for", "the", "with", "from"}
-    ]
-
-    if not tokens:
-        return True
-
-    lowered_excerpt = excerpt.lower()
-    return any(token in lowered_excerpt for token in tokens)
-
-
-def _derive_focus_areas(
-    subject: str,
-    subject_description: str,
-    student_expectations: str,
-    curriculum_excerpt: str = "",
-) -> List[str]:
-    focus_areas: List[str] = []
-    seen = set()
-
-    def _push(candidate: str):
-        cleaned = re.sub(r"\s+", " ", (candidate or "").strip(" .-•\n\t"))
-        if not cleaned:
-            return
-        if len(cleaned.split()) > 10:
-            return
-        key = cleaned.lower()
-        if key in seen:
-            return
-        seen.add(key)
-        focus_areas.append(cleaned)
-
-    _push(subject)
-
-    if curriculum_excerpt:
-        skip_prefixes = (
-            "learning outcome",
-            "learning outcomes",
-            "outcome",
-            "outcomes",
-            "assessment",
-            "assessments",
-            "reference",
-            "references",
-            "objective",
-            "objectives",
-            "contents",
-            "syllabus",
-        )
-
-        for raw_line in curriculum_excerpt.splitlines():
-            line = re.sub(r"\s+", " ", raw_line).strip()
-            if not line:
-                continue
-
-            line = re.sub(r"^\d+[\)\.\-:]\s*", "", line)
-            line = re.sub(
-                r"^(module|unit|chapter)\s*\d+\s*[:\-]\s*",
-                "",
-                line,
-                flags=re.IGNORECASE,
-            )
-            line = line.strip(" -•\t")
-
-            if not line or line.lower().startswith(skip_prefixes):
-                continue
-            if len(line) > 90:
-                continue
-
-            alpha_count = sum(1 for character in line if character.isalpha())
-            if alpha_count < 4:
-                continue
-
-            _push(line)
-            if len(focus_areas) >= 6:
-                return focus_areas[:6]
-
-    corpus = f"{subject_description}\n{student_expectations}"
-    for sentence in re.split(r"[\n\.;]", corpus):
-        words = re.findall(r"[A-Za-z0-9\+\-]+", sentence)
-        trimmed = [word for word in words if len(word) >= 3]
-        if len(trimmed) < 2:
-            continue
-        _push(" ".join(trimmed[:4]))
-        if len(focus_areas) >= 6:
-            break
-
-    if len(focus_areas) < 3:
-        _push(f"{subject} fundamentals")
-        _push(f"{subject} practical application")
-        _push("problem solving")
-
-    return focus_areas[:6]
-
-
-def _build_assessment_seed(subject: str, focus_areas: List[str], student_expectations: str) -> Dict[str, Any]:
-    unique_focus = [item for item in focus_areas if item and item.strip()]
-    gap_areas = [{"skill": item, "level": "needs improvement"} for item in unique_focus]
-
-    return {
-        "score": {"correct": 0, "total": max(1, len(unique_focus)), "percentage": 0},
-        "assessed_level": "classroom-default",
-        "question_feedback": [],
-        "skill_gaps": {
-            "overall": f"Teacher-defined focus areas for {subject}.",
-            "areas": gap_areas,
-        },
-        "recommendations": [{"title": item, "type": "focus-area"} for item in unique_focus],
-        "teacher_expectations": student_expectations,
-    }
-
-
-def _normalize_url(url_value) -> str:
-    """Extract a clean absolute URL from string/list/legacy list-like string inputs."""
-    if not url_value:
-        return ""
-
-    def _unwrap_quotes(value: Any) -> str:
-        text = str(value or "").strip()
-        while (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
-            text = text[1:-1].strip()
-        return text
-
-    raw_value = url_value
-    if isinstance(raw_value, list):
-        raw_value = next((item for item in raw_value if str(item or "").strip()), "")
-
-    text = _unwrap_quotes(raw_value)
-    if not text:
-        return ""
-
-    if text.startswith("[") and text.endswith("]"):
         try:
-            parsed = json.loads(text.replace("'", '"'))
-            if isinstance(parsed, list):
-                text = _unwrap_quotes(next((item for item in parsed if str(item or "").strip()), ""))
+            doc.close()
         except Exception:
             pass
 
-    text = _unwrap_quotes(text).replace("\\u0026", "&").replace("&amp;", "&")
-    matched = re.search(r"https?://[^\s'\"\]]+", text)
-    if matched:
-        text = matched.group(0).strip()
-
-    if not re.match(r"^https?://", text, flags=re.IGNORECASE) and re.match(
-        r"^[\w.-]+\.[a-z]{2,}(?:/|$)", text, flags=re.IGNORECASE
-    ):
-        text = f"https://{text}"
-
-    return text if re.match(r"^https?://", text, flags=re.IGNORECASE) else ""
+        extracted = "\n".join(text_parts)
+        extracted = re.sub(r"\n{3,}", "\n\n", extracted)
+        return extracted[:16000], int(page_count or 0)
+    except Exception:
+        return "", 0
 
 
-def _resource_from_playlist(
-    skill: str,
-    concept: str,
-    url: str,
-    source: str,
-    approval_status: str,
-    thumbnail_url: Optional[str] = None,
-) -> Dict[str, Any]:
-    now = datetime.utcnow()
-    return {
-        "resource_id": secrets.token_hex(12),
-        "title": concept or f"{skill} video",
-        "description": f"AI-suggested video for {skill}.",
-        "url": _normalize_url(url),
-        "thumbnail_url": _normalize_url(thumbnail_url) if thumbnail_url else None,
-        "resource_type": "youtube",
-        "skill": skill,
-        "source": source,
-        "approval_status": approval_status,
-        "created_date": now,
-        "updated_date": now,
-        "approved_date": now if approval_status == "approved" else None,
-        "approved_by": None,
-    }
+def _subject_regex(subject: str) -> str:
+    return rf"^\s*{re.escape((subject or '').strip())}\s*$"
 
 
-def _resource_from_document(
-    skill: str,
-    title: str,
-    description: str,
-    url: str,
-    resource_type: str,
-    source: str,
-    approval_status: str,
-) -> Dict[str, Any]:
-    now = datetime.utcnow()
-    return {
-        "resource_id": secrets.token_hex(12),
-        "title": title or f"{skill} resource",
-        "description": description or f"AI-suggested {resource_type} resource.",
-        "url": _normalize_url(url),
-        "resource_type": resource_type,
-        "skill": skill,
-        "source": source,
-        "approval_status": approval_status,
-        "created_date": now,
-        "updated_date": now,
-        "approved_date": now if approval_status == "approved" else None,
-        "approved_by": None,
-    }
+def _subject_matches_pdf_excerpt(subject: str, excerpt: str) -> bool:
+    """Loosely check whether key tokens from the subject appear in the PDF excerpt.
+
+    Be permissive: if excerpt is empty, return True to avoid blocking creation.
+    """
+    if not excerpt:
+        return True
+    if not subject:
+        return True
+
+    excerpt_l = excerpt.lower()
+    tokens = [t for t in re.findall(r"\w+", subject.lower()) if len(t) > 2]
+    if not tokens:
+        return True
+
+    # Consider a match if any token appears as a whole word in the excerpt
+    for tok in tokens:
+        if re.search(rf"\b{re.escape(tok)}\b", excerpt_l):
+            return True
+
+    return False
 
 
-def _build_resources_from_outputs(
-    playlists: List[Dict[str, Any]],
-    deepsearch_results: List[Dict[str, Any]],
-    source: str,
-    approval_status: str,
-    max_items: int = 60,
-) -> List[Dict[str, Any]]:
-    resources: List[Dict[str, Any]] = []
-
-    for skill_playlist in playlists or []:
-        skill = str(skill_playlist.get("skill") or "General")
-        for item in skill_playlist.get("playlist", []) or []:
-            if not isinstance(item, dict):
-                continue
-            resource = _resource_from_playlist(
-                skill=skill,
-                concept=str(item.get("concept") or f"{skill} tutorial"),
-                url=_normalize_url(item.get("youtube_link")),
-                source=source,
-                approval_status=approval_status,
-                thumbnail_url=str(item.get("thumbnail_url") or ""),
-            )
-            resources.append(resource)
-
-    for recommendation in deepsearch_results or []:
-        if not isinstance(recommendation, dict):
-            continue
-        skill = str(recommendation.get("skill") or "General")
-
-        for doc in recommendation.get("documents", []) or []:
-            if not isinstance(doc, dict):
-                continue
-
-            resources.append(
-                _resource_from_document(
-                    skill=skill,
-                    title=str(doc.get("title") or f"{skill} article"),
-                    description=str(doc.get("content") or "AI-suggested reading resource."),
-                    url=_normalize_url(doc.get("url") or doc.get("link")),
-                    resource_type="article",
-                    source=source,
-                    approval_status=approval_status,
-                )
-            )
-
-        for blog_url in recommendation.get("blogs", []) or []:
-            resources.append(
-                _resource_from_document(
-                    skill=skill,
-                    title=f"{skill} blog reference",
-                    description="AI-suggested blog resource.",
-                    url=_normalize_url(blog_url),
-                    resource_type="blog",
-                    source=source,
-                    approval_status=approval_status,
-                )
-            )
-
-    deduped: List[Dict[str, Any]] = []
+def _derive_focus_areas(subject: str, subject_description: str, student_expectations: str, curriculum_excerpt: str = "", limit: int = 6) -> List[str]:
+    combined = "\n".join([str(subject_description or ""), str(student_expectations or ""), str(curriculum_excerpt or "")])
+    # Split by common separators and pick candidate phrases
+    candidates = [c.strip() for c in re.split(r"[\n,.;]", combined) if c and len(c.strip()) > 3]
     seen = set()
-    for resource in resources:
-        key = (resource.get("url") or "", resource.get("title") or "")
+    results: List[str] = []
+
+    # Always include the primary subject as the first focus area
+    if subject and subject.strip():
+        results.append(subject.strip())
+        seen.add(subject.strip().lower())
+
+    for c in candidates:
+        key = c.lower()
         if key in seen:
             continue
-        seen.add(key)
-        deduped.append(resource)
-        if len(deduped) >= max_items:
+        if len(results) >= limit:
             break
+        # Skip near-duplicates or generic fragments
+        if len(c.split()) > 5:
+            # truncate long phrases to first 4 words for readability
+            c = " ".join(c.split()[:4])
+        results.append(c)
+        seen.add(key)
 
-    return deduped
+    # Guarantee at least one focus area
+    if not results:
+        results = [subject or "General"]
+
+    return results[:limit]
+
+
+def _build_assessment_seed(subject: str, focus_areas: List[str], student_expectations: str) -> Dict[str, Any]:
+    return {
+        "subject": subject,
+        "focus_areas": focus_areas,
+        "student_expectations": student_expectations,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
 
 
 async def _parse_create_classroom_request(request: Request) -> Tuple[Dict[str, Any], Optional[StarletteUploadFile]]:
@@ -547,16 +197,15 @@ async def _parse_create_classroom_request(request: Request) -> Tuple[Dict[str, A
     if "multipart/form-data" in content_type:
         form = await request.form()
         payload = {
-            "name": form.get("name"),
+            "name": form.get("name") or form.get("classroom_name"),
             "subject": form.get("subject"),
             "grade_level": form.get("grade_level"),
-            "description": form.get("description"),
-            "subject_description": form.get("subject_description"),
-            "student_expectations": form.get("student_expectations"),
+            "description": form.get("description") or form.get("classroom_description"),
+            "subject_description": form.get("subject_description") or form.get("classroom_description"),
+            "student_expectations": form.get("student_expectations") or form.get("teaching_goals"),
             "require_approval": form.get("require_approval"),
         }
         curriculum_pdf = form.get("curriculum_pdf")
-        # request.form() yields Starlette UploadFile objects; accept both FastAPI and Starlette types.
         if curriculum_pdf is not None and not isinstance(curriculum_pdf, (UploadFile, StarletteUploadFile)):
             curriculum_pdf = None
         return payload, curriculum_pdf
@@ -576,7 +225,21 @@ async def _generate_ai_resource_bundle(
     assessment_seed: Dict[str, Any],
     source: str,
     approval_status: str,
+    force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
+    db = get_db()
+    signature = _assessment_signature(assessment_seed)
+    
+    # Phase 0: Cache Layer - check for existing valid cache
+    if not force_refresh:
+        try:
+            cached_doc = await db.ai_resource_cache.find_one({"signature": signature})
+            if cached_doc and isinstance(cached_doc.get("resources"), list):
+                print(f"DEBUG: Cache hit for resource bundle with signature {signature}")
+                return cached_doc["resources"]
+        except Exception as e:
+            print(f"DEBUG: Cache lookup failed: {e}")
+
     playlists: List[Dict[str, Any]] = []
     deepsearch_results: List[Dict[str, Any]] = []
 
@@ -593,12 +256,33 @@ async def _generate_ai_resource_bundle(
     except Exception:
         deepsearch_results = []
 
-    return _build_resources_from_outputs(
+    resources = _build_resources_from_outputs(
         playlists=playlists,
         deepsearch_results=deepsearch_results,
         source=source,
         approval_status=approval_status,
     )
+    
+    # Store in cache with 7-day expiration logic (handled by TTL index)
+    try:
+        await db.ai_resource_cache.update_one(
+            {"signature": signature},
+            {
+                "$set": {
+                    "signature": signature,
+                    "resources": resources,
+                    "created_at": datetime.utcnow(),
+                    "assessment_seed": assessment_seed,
+                }
+            },
+            upsert=True
+        )
+        # Create TTL index if not exists (7 days = 604800 seconds)
+        await db.ai_resource_cache.create_index("created_at", expireAfterSeconds=604800)
+    except Exception as e:
+        print(f"DEBUG: Failed to update cache: {e}")
+
+    return resources
 
 
 async def _latest_assessment_snapshot(db, user_oid: ObjectId) -> Optional[Dict[str, Any]]:
@@ -646,7 +330,7 @@ async def _build_demo_students(db, classroom_oid: ObjectId, teacher_oid: ObjectI
     student_ids = []
 
     for i in range(1, count + 1):
-        email = f"demo_student_{suffix}_{i}@edusaarthi.local"
+        email = f"demo_student_{suffix}_{i}@skillmaster.local"
         student = await db.users.find_one({"email": email})
         if not student:
             created = await db.users.insert_one(
@@ -774,6 +458,335 @@ async def bootstrap_demo_classroom(current_user = Depends(get_current_user)):
     return {"status": "success", "classroom_id": classroom_id, "message": "Demo classroom is ready"}
 
 
+from functions.async_generation import background_generate_resources, cancel_active_job
+from sse_starlette.sse import EventSourceResponse
+
+@router.get("/jobs/{job_id}")
+async def get_job_status(job_id: str, current_user = Depends(get_current_user)):
+    db = get_db()
+    try:
+        job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job id")
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    return {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "progress": job.get("progress", 0),
+        "result": job.get("result"),
+        "error": job.get("error"),
+        "config": job.get("config", {}),
+        "checkpoints": job.get("checkpoints", {}),
+        "retry_count": int(job.get("retry_count", 0)),
+        "stop_requested": bool(job.get("stop_requested", False)),
+    }
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_job_status(job_id: str, current_user = Depends(get_current_user)):
+    """
+    SSE endpoint for real-time job status updates.
+    """
+    db = get_db()
+    async def event_generator():
+        while True:
+            try:
+                job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+                if not job:
+                    yield {"event": "error", "data": json.dumps({"error": "Job not found"})}
+                    break
+                
+                status = job.get("status")
+                yield {
+                    "event": "update",
+                    "data": json.dumps({
+                        "status": status,
+                        "progress": job.get("progress", 0),
+                        "result": job.get("result") if status == "ready" else None,
+                        "config": job.get("config", {}),
+                        "retry_count": int(job.get("retry_count", 0)),
+                        "stop_requested": bool(job.get("stop_requested", False)),
+                    })
+                }
+                
+                if status in ["ready", "failed"]:
+                    break
+                    
+                await asyncio.sleep(1) # Poll every second
+            except Exception as e:
+                yield {"event": "error", "data": json.dumps({"error": str(e)})}
+                break
+                
+    return EventSourceResponse(event_generator())
+
+
+async def _user_can_control_job(db, job: dict, current_user: dict) -> bool:
+    """Return True if the current_user is allowed to control (stop/retry/config) the job.
+
+    Rules:
+    - Admins can control any job
+    - Job creator (user_id) can control personal jobs
+    - Classroom teacher can control classroom-scoped jobs
+    """
+    role = normalize_user_role(current_user.get("role"))
+    if role == "admin":
+        return True
+
+    user_id = str(current_user.get("user_id"))
+    job_user = job.get("user_id")
+    try:
+        if job_user and str(job_user) == user_id:
+            return True
+    except Exception:
+        pass
+
+    classroom_id = job.get("classroom_id")
+    if classroom_id:
+        rbac = RBACService(db)
+        try:
+            if await rbac.is_teacher(current_user["user_id"], str(classroom_id)):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+@router.post("/jobs/{job_id}/stop")
+async def stop_job(job_id: str, current_user = Depends(get_current_user)):
+    db = get_db()
+    try:
+        job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job id")
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not await _user_can_control_job(db, job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to stop this job")
+
+    now = datetime.utcnow()
+    await db.ai_generation_jobs.update_one(
+        {"_id": ObjectId(job_id)},
+        {"$set": {"stop_requested": True, "status": "stopping", "updated_at": now}}
+    )
+
+    # Attempt to cancel in-memory running task (best-effort)
+    try:
+        await cancel_active_job(job_id)
+    except Exception:
+        pass
+
+    return {"status": "stop_requested", "job_id": job_id}
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(job_id: str, current_user = Depends(get_current_user)):
+    db = get_db()
+    try:
+        job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job id")
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not await _user_can_control_job(db, job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to retry this job")
+
+    # Ensure we have the assessment seed saved on the job. If missing, try to reconstruct it
+    assessment_seed = job.get("assessment_seed")
+    if not assessment_seed:
+        # Try to reconstruct from classroom data (for class-scoped jobs)
+        classroom_id = job.get("classroom_id")
+        if classroom_id:
+            try:
+                classroom_doc = await db.classrooms.find_one({"_id": ObjectId(classroom_id)}, {"subject": 1, "subject_focus_areas": 1, "student_expectations": 1})
+                if classroom_doc:
+                    assessment_seed = _build_assessment_seed(
+                        classroom_doc.get("subject", ""),
+                        classroom_doc.get("subject_focus_areas", []) or [],
+                        classroom_doc.get("student_expectations", "") or "",
+                    )
+                    # persist reconstructed seed
+                    now = datetime.utcnow()
+                    await db.ai_generation_jobs.update_one({"_id": ObjectId(job_id)}, {"$set": {"assessment_seed": assessment_seed, "updated_at": now}})
+            except Exception:
+                assessment_seed = None
+
+        # Fallback: try to reconstruct from user assessment snapshot (for personal jobs)
+        if not assessment_seed:
+            try:
+                user_id = job.get("user_id")
+                if user_id and ObjectId.is_valid(user_id):
+                    user_oid = ObjectId(user_id)
+                    snapshot = await _latest_assessment_snapshot(db, user_oid)
+                    if snapshot:
+                        assessment_seed = snapshot
+                        now = datetime.utcnow()
+                        await db.ai_generation_jobs.update_one({"_id": ObjectId(job_id)}, {"$set": {"assessment_seed": assessment_seed, "updated_at": now}})
+            except Exception:
+                assessment_seed = None
+
+        if not assessment_seed:
+            raise HTTPException(status_code=400, detail="Cannot retry: missing job assessment_seed")
+
+    now = datetime.utcnow()
+    await db.ai_generation_jobs.update_one(
+        {"_id": ObjectId(job_id)},
+        {
+            "$inc": {"retry_count": 1},
+            "$set": {
+                "status": "pending",
+                "progress": 0,
+                "error": None,
+                "result": None,
+                "stop_requested": False,
+                "updated_at": now,
+            },
+        },
+    )
+
+    # Re-schedule background work with the stored parameters
+    try:
+        classroom_id = str(job.get("classroom_id")) if job.get("classroom_id") else None
+        user_id = str(job.get("user_id")) if job.get("user_id") else None
+        source = job.get("source", "ai")
+        approval_status = job.get("approval_status", "pending")
+        asyncio.create_task(
+            background_generate_resources(
+                job_id=job_id,
+                assessment_seed=assessment_seed,
+                classroom_id=classroom_id,
+                user_id=user_id,
+                source=source,
+                approval_status=approval_status,
+            )
+        )
+    except Exception as e:
+        # If scheduling fails, reflect that in job status
+        await db.ai_generation_jobs.update_one({"_id": ObjectId(job_id)}, {"$set": {"status": "failed", "error": str(e), "updated_at": datetime.utcnow()}})
+        raise HTTPException(status_code=500, detail=f"Failed to start retry: {e}")
+
+    return {"status": "retry_started", "job_id": job_id}
+
+
+@router.patch("/jobs/{job_id}/config")
+async def update_job_config(job_id: str, payload: dict, current_user = Depends(get_current_user)):
+    db = get_db()
+    try:
+        job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job id")
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not await _user_can_control_job(db, job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to update job config")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Config payload must be an object")
+
+    allowed = {
+        "search_timeout": (int, 5, 3600),
+        "poll_interval": (int, 250, 60000),
+        "use_sse": (bool, None, None),
+        "use_parallel_search": (bool, None, None),
+        "max_retries": (int, 0, 10),
+        "pace": (float, 0.1, 10.0),
+    }
+
+    config_updates = {}
+    for key, spec in allowed.items():
+        if key in payload:
+            val = payload.get(key)
+            expected_type = spec[0]
+            try:
+                # Coerce booleans/numbers conservatively
+                if expected_type is bool:
+                    coerced = _parse_bool(val)
+                elif expected_type is int:
+                    coerced = int(val)
+                elif expected_type is float:
+                    coerced = float(val)
+                else:
+                    coerced = val
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Invalid value for {key}")
+
+            # range checks
+            minv, maxv = spec[1], spec[2]
+            if minv is not None and coerced < minv:
+                raise HTTPException(status_code=400, detail=f"{key} must be >= {minv}")
+            if maxv is not None and coerced > maxv:
+                raise HTTPException(status_code=400, detail=f"{key} must be <= {maxv}")
+
+            config_updates[key] = coerced
+
+    now = datetime.utcnow()
+    await db.ai_generation_jobs.update_one({"_id": ObjectId(job_id)}, {"$set": {"config": config_updates, "updated_at": now}})
+
+    return {"status": "success", "config": config_updates}
+
+
+async def _extract_syllabus_with_llm(subject: str, description: str, curriculum_excerpt: str = "", limit: int = 8) -> List[str]:
+    """
+    Use LLM to identify the main modules or chapters from the curriculum PDF text.
+    """
+    if not curriculum_excerpt or len(curriculum_excerpt.strip()) < 50:
+        # Not enough text to use LLM effectively, fall back to heuristic
+        return _derive_focus_areas(subject, description, "", curriculum_excerpt, limit)
+
+    prompt = f"""
+    You are an expert curriculum architect. Your task is to extract the official module or chapter titles from a syllabus or curriculum document.
+
+    Subject: {subject}
+    Classroom Description: {description}
+
+    Curriculum Document Excerpt:
+    ---
+    {curriculum_excerpt[:8000]}
+    ---
+
+    Task:
+    1. Identify the main modules, units, or chapters that define the core structure of this course.
+    2. Extract their EXACT names as they appear in the document where possible.
+    3. Return a clean JSON list of strings representing these module names.
+    4. Limit the result to a maximum of {limit} modules.
+    5. Do not include introductory or conclusion chapters unless they contain specific technical topics.
+
+    Response format:
+    ["Module 1: Title", "Module 2: Title", ...]
+    """
+
+    try:
+        model = genai.GenerativeModelAsync()
+        response = await model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Clean up JSON if it's wrapped in markdown code blocks
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            # Fallback for generic code blocks
+            lines = text.split("\n")
+            if lines[0].startswith("```"):
+                text = "\n".join(lines[1:-1]).strip()
+            
+        modules = json.loads(text)
+        if isinstance(modules, list) and len(modules) > 0:
+            return [str(m).strip() for m in modules[:limit]]
+    except Exception as e:
+        print(f"LLM syllabus extraction failed: {e}")
+    
+    # Fallback to heuristic
+    return _derive_focus_areas(subject, description, "", curriculum_excerpt, limit)
+
+
 @router.post("/create")
 async def create_classroom(request: Request, current_user = Depends(get_current_user)):
     db = get_db()
@@ -783,12 +796,12 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
 
     classroom_data, curriculum_pdf = await _parse_create_classroom_request(request)
 
-    classroom_name = (classroom_data.get("name") or "").strip()
+    classroom_name = (classroom_data.get("name") or classroom_data.get("classroom_name") or "").strip()
     subject = (classroom_data.get("subject") or "").strip()
     grade_level = (classroom_data.get("grade_level") or "").strip()
-    description = (classroom_data.get("description") or "").strip()
-    subject_description = (classroom_data.get("subject_description") or "").strip()
-    student_expectations = (classroom_data.get("student_expectations") or "").strip()
+    description = (classroom_data.get("description") or classroom_data.get("classroom_description") or "").strip()
+    subject_description = (classroom_data.get("subject_description") or classroom_data.get("classroom_description") or "").strip()
+    student_expectations = (classroom_data.get("student_expectations") or classroom_data.get("teaching_goals") or "").strip()
     require_approval = _parse_bool(classroom_data.get("require_approval"))
 
     if not classroom_name:
@@ -834,18 +847,25 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
         )
 
     enrollment_code = secrets.token_urlsafe(8)
-    focus_areas = _derive_focus_areas(
+    
+    # NEW: Enhanced syllabus extraction using LLM
+    focus_areas = await _extract_syllabus_with_llm(
         subject,
         subject_description,
-        student_expectations,
         curriculum_excerpt=curriculum_excerpt,
     )
+    
     assessment_seed = _build_assessment_seed(subject, focus_areas, student_expectations)
-    ai_resources = _generate_ai_resource_bundle(
-        assessment_seed=assessment_seed,
-        source="class_ai",
-        approval_status="pending",
-    )
+    
+    # Phase 5: Async Generation start
+    job_res = await db.ai_generation_jobs.insert_one({
+        "type": "classroom_generation",
+        "status": "pending",
+        "progress": 0,
+        "created_at": datetime.utcnow(),
+        "user_id": teacher_oid
+    })
+    job_id = str(job_res.inserted_id)
 
     curriculum_metadata = {
         "filename": filename or "curriculum.pdf",
@@ -854,6 +874,7 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
         "page_count": page_count,
         "uploaded_at": datetime.utcnow(),
         "text_excerpt": curriculum_excerpt[:4000],
+        "curriculum_pdf_binary": Binary(pdf_bytes),
     }
 
     classroom = {
@@ -875,9 +896,10 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
         "enrollment_code": enrollment_code,
         "require_approval": require_approval,
         "curriculum_metadata": curriculum_metadata,
-        "ai_resources": ai_resources,
+        "ai_resources": [], # Initially empty, filled by background task
         "resource_generation_meta": {
-            "generated_at": datetime.utcnow(),
+            "job_id": job_id,
+            "status": "pending",
             "source": "teacher_classroom_setup",
             "assessment_signature": _assessment_signature(assessment_seed),
         },
@@ -888,9 +910,33 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
     result = await db.classrooms.insert_one(classroom)
     classroom_id = str(result.inserted_id)
 
+    # Persist job metadata so it can be retried/controlled later
+    try:
+        await db.ai_generation_jobs.update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {
+                "assessment_seed": assessment_seed,
+                "classroom_id": classroom_id,
+                "source": "class_ai",
+                "approval_status": "pending",
+                "updated_at": datetime.utcnow(),
+            }}
+        )
+    except Exception:
+        pass
+
+    # Start background task
+    asyncio.create_task(background_generate_resources(
+        job_id=job_id,
+        assessment_seed=assessment_seed,
+        classroom_id=classroom_id,
+        source="class_ai",
+        approval_status="pending"
+    ))
+
     await _ensure_user_membership(db, teacher_oid, classroom_id, "teacher")
 
-    # Update user's onboarding and assessment status at the top level
+    # Update user's onboarding and assessment status
     await db.users.update_one(
         {"_id": teacher_oid},
         {
@@ -904,9 +950,8 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
 
     module_service = LearningModuleService(db)
     seeded_modules = []
-    initial_module_names = _derive_initial_module_names(focus_areas, ai_resources)
-
-    for module_name in initial_module_names:
+    # Seed modules based on focus areas immediately
+    for module_name in focus_areas:
         seed_result = await module_service.create_module(
             classroom_id=classroom_id,
             name=module_name,
@@ -924,17 +969,11 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
             }
         )
 
-    # schedule background thumbnail extraction for AI-generated classroom resources
-    try:
-        asyncio.create_task(_update_thumbnails_for_classroom(db, ObjectId(classroom_id), ai_resources))
-    except Exception:
-        pass
-
     return {
         "classroom_id": classroom_id,
         "enrollment_code": enrollment_code,
-        "resource_summary": _resource_counts(ai_resources),
-        "resource_preview": [_serialize_resource(resource) for resource in ai_resources[:6]],
+        "job_id": job_id,
+        "status": "generation_started",
         "subject_focus_areas": focus_areas,
         "module_summary": {
             "seeded": len(seeded_modules),
@@ -971,6 +1010,7 @@ async def get_classroom_resources(
             "subject": 1,
             "subject_focus_areas": 1,
             "ai_resources": 1,
+            "resource_generation_meta": 1,
         },
     )
     if not classroom:
@@ -979,6 +1019,22 @@ async def get_classroom_resources(
     if normalized_mode == "class":
         role = normalize_user_role(current_user.get("role"))
         can_manage = role == "admin" or await rbac.is_teacher(current_user["user_id"], classroom_id)
+
+        # Check for active job
+        meta = classroom.get("resource_generation_meta") or {}
+        job_id = meta.get("job_id")
+        if job_id and isinstance(job_id, str) and len(job_id) == 24:
+            try:
+                job = await db.ai_generation_jobs.find_one({"_id": ObjectId(job_id)})
+                if job and job.get("status") in ["pending", "planning", "searching", "filtering"]:
+                    return {
+                        "status": "generation_in_progress",
+                        "mode": "class",
+                        "job_id": job_id,
+                        "message": "Resource generation is in progress for this classroom."
+                    }
+            except Exception:
+                pass
 
         resources = [item for item in classroom.get("ai_resources", []) if isinstance(item, dict)]
         if not can_manage:
@@ -998,6 +1054,8 @@ async def get_classroom_resources(
             "focus_areas": classroom.get("subject_focus_areas", []),
             "summary": _resource_counts(resources),
             "resources": [_serialize_resource(item) for item in resources],
+            "job_id": None,
+            "generation_status": None,
             "cached": True,
         }
 
@@ -1040,39 +1098,48 @@ async def get_classroom_resources(
             "cached": True,
         }
 
-    personal_resources = _generate_ai_resource_bundle(
+    # Check if a job is already running for this user/signature
+    existing_job = await db.ai_generation_jobs.find_one({
+        "user_id": user_oid,
+        "signature": signature,
+        "status": {"$in": ["pending", "planning", "searching", "filtering"]}
+    })
+    if existing_job:
+        return {
+            "status": "generation_in_progress",
+            "mode": "personal",
+            "job_id": str(existing_job["_id"]),
+            "message": "Personal recommendations are being generated."
+        }
+
+    # Start new async generation job
+    job_res = await db.ai_generation_jobs.insert_one({
+        "type": "personal_generation",
+        "user_id": user_oid,
+        "signature": signature,
+        "assessment_seed": assessment_snapshot,
+        "source": "personal_ai",
+        "approval_status": "approved",
+        "status": "pending",
+        "progress": 0,
+        "created_at": datetime.utcnow()
+    })
+    job_id = str(job_res.inserted_id)
+
+    asyncio.create_task(background_generate_resources(
+        job_id=job_id,
         assessment_seed=assessment_snapshot,
+        user_id=str(user_oid),
         source="personal_ai",
-        approval_status="approved",
-    )
-
-    await db.generated_personal_resources.update_one(
-        {
-            "user_id": user_oid,
-            "assessment_signature": signature,
-        },
-        {
-            "$set": {
-                "resources": personal_resources,
-                "assessment_signature": signature,
-                "updated_at": datetime.utcnow(),
-            }
-        },
-        upsert=True,
-    )
-
-    try:
-        asyncio.create_task(_update_thumbnails_for_generated_personal_resources(db, user_oid, signature, personal_resources))
-    except Exception:
-        pass
+        approval_status="approved"
+    ))
 
     return {
-        "status": "success",
+        "status": "generation_started",
         "mode": "personal",
         "classroom_id": classroom_id,
-        "classroom_name": classroom.get("name"),
-        "summary": _resource_counts(personal_resources),
-        "resources": [_serialize_resource(item) for item in personal_resources],
+        "job_id": job_id,
+        "message": "Generating personalized recommendations...",
         "cached": False,
     }
 
@@ -1314,28 +1381,150 @@ async def add_manual_resource(
     }
 
 
-@router.get("/{classroom_id}")
-@cache_response(ttl=600, key_prefix="classroom")
-async def get_classroom(classroom_id: str, current_user = Depends(get_current_user)):
+@router.post("/{classroom_id}/resources/generate")
+async def generate_classroom_resources(
+    classroom_id: str, 
+    force: bool = Query(False), 
+    curriculum_pdf: Optional[UploadFile] = None,
+    current_user = Depends(get_current_user)
+):
+    """
+    Start an async AI discovery job for a classroom's resources.
+    If curriculum_pdf is provided, it updates the stored syllabus.
+    If not, it attempts to use the stored syllabus.
+    """
     db = get_db()
     rbac = RBACService(db)
-    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
+    role = normalize_user_role(current_user.get("role"))
+
+    if role not in {"teacher", "admin"} and not await rbac.is_teacher(current_user["user_id"], classroom_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can start resource discovery")
 
     try:
-        classroom = await db.classrooms.find_one({"_id": ObjectId(classroom_id)})
+        classroom_oid = ObjectId(classroom_id)
     except Exception:
-        raise HTTPException(status_code=404, detail="Classroom not found")
+        raise HTTPException(status_code=400, detail="Invalid classroom id")
 
+    classroom = await db.classrooms.find_one({"_id": classroom_oid})
     if not classroom:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    # serialize ids to strings
-    classroom["_id"] = str(classroom["_id"])
-    classroom["teacher_id"] = str(classroom["teacher_id"]) if classroom.get("teacher_id") else None
-    classroom["students"] = [str(s) for s in classroom.get("students", [])]
+    # 1. Check for active job
+    meta = classroom.get("resource_generation_meta") or {}
+    existing_job_id = meta.get("job_id")
+    if existing_job_id and not force and not curriculum_pdf:
+        job = await db.ai_generation_jobs.find_one({"_id": ObjectId(existing_job_id)})
+        if job and job.get("status") in ["pending", "planning", "searching", "filtering"]:
+            return {
+                "status": "generation_in_progress",
+                "job_id": existing_job_id,
+                "message": "Resource generation is already in progress."
+            }
 
-    return classroom
+    # 2. Syllabus Logic
+    pdf_bytes = None
+    if curriculum_pdf:
+        filename = (curriculum_pdf.filename or "").strip()
+        if not filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Only PDF curriculum files are supported")
+        pdf_bytes = await curriculum_pdf.read()
+        if len(pdf_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Curriculum PDF must be 10MB or smaller")
+    else:
+        # Try to use stored PDF
+        curr_meta = classroom.get("curriculum_metadata") or {}
+        pdf_bytes = curr_meta.get("curriculum_pdf_binary")
+        if pdf_bytes and isinstance(pdf_bytes, bytes):
+            pass # Use as is
+        elif pdf_bytes: # Handle BSON Binary
+            pdf_bytes = bytes(pdf_bytes)
+
+    if not pdf_bytes:
+        return {
+            "status": "syllabus_missing",
+            "message": "Curriculum PDF is not present. Please upload the syllabus to regenerate."
+        }
+
+    # 3. Process Syllabus (New or Stored)
+    curriculum_excerpt, page_count = _extract_pdf_excerpt_and_page_count(pdf_bytes, max_pages=10)
+    
+    # Optional: Re-extract focus areas if new PDF or force
+    focus_areas = classroom.get("subject_focus_areas", [])
+    if curriculum_pdf or not focus_areas or force:
+        focus_areas = await _extract_syllabus_with_llm(
+            classroom.get("subject", ""),
+            classroom.get("description", ""),
+            curriculum_excerpt=curriculum_excerpt
+        )
+        # Update classroom with new syllabus data if it changed
+        if curriculum_pdf:
+            new_meta = {
+                "filename": curriculum_pdf.filename or "curriculum.pdf",
+                "content_type": curriculum_pdf.content_type,
+                "size_bytes": len(pdf_bytes),
+                "page_count": page_count,
+                "uploaded_at": datetime.utcnow(),
+                "text_excerpt": curriculum_excerpt[:4000],
+                "curriculum_pdf_binary": Binary(pdf_bytes),
+            }
+            await db.classrooms.update_one(
+                {"_id": classroom_oid},
+                {"$set": {"curriculum_metadata": new_meta, "subject_focus_areas": focus_areas, "updated_date": datetime.utcnow()}}
+            )
+        elif not classroom.get("subject_focus_areas"):
+             await db.classrooms.update_one(
+                {"_id": classroom_oid},
+                {"$set": {"subject_focus_areas": focus_areas, "updated_date": datetime.utcnow()}}
+            )
+
+    # 4. Build assessment seed and start job
+    assessment_seed = _build_assessment_seed(
+        classroom.get("subject", ""),
+        focus_areas,
+        classroom.get("student_expectations", "") or "",
+    )
+
+    now = datetime.utcnow()
+    job_doc = {
+        "type": "class_generation",
+        "classroom_id": classroom_id,
+        "assessment_seed": assessment_seed,
+        "source": "class_ai",
+        "approval_status": "pending",
+        "status": "pending",
+        "progress": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    res = await db.ai_generation_jobs.insert_one(job_doc)
+    job_id = str(res.inserted_id)
+
+    # Link job to classroom meta
+    await db.classrooms.update_one(
+        {"_id": classroom_oid},
+        {"$set": {"resource_generation_meta.job_id": job_id, "resource_generation_meta.status": "pending", "updated_date": now}}
+    )
+
+    asyncio.create_task(
+        background_generate_resources(
+            job_id=job_id,
+            assessment_seed=assessment_seed,
+            classroom_id=classroom_id,
+            source="class_ai",
+            approval_status="pending",
+            force_refresh=True # Regeneration implies fresh search
+        )
+    )
+
+    return {
+        "status": "generation_started",
+        "classroom_id": classroom_id,
+        "job_id": job_id,
+        "message": "Resource discovery (regeneration) started."
+    }
+
+    return {"status": "generation_started", "job_id": job_id, "message": "Classroom resource discovery started"}
 
 
 @router.get("/find")
@@ -1365,6 +1554,42 @@ async def find_classroom_by_code(code: str):
     }
 
 
+@router.get("/{classroom_id}")
+@cache_response(ttl=600, key_prefix="classroom")
+async def get_classroom(classroom_id: str, current_user = Depends(get_current_user)):
+    db = get_db()
+    rbac = RBACService(db)
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this classroom")
+
+    try:
+        classroom = await db.classrooms.find_one(
+            {"_id": ObjectId(classroom_id)},
+            {"curriculum_metadata.curriculum_pdf_binary": 0}
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    # serialize ids to strings
+    classroom["_id"] = str(classroom["_id"])
+    classroom["teacher_id"] = str(classroom["teacher_id"]) if classroom.get("teacher_id") else None
+    classroom["institution_id"] = str(classroom["institution_id"]) if classroom.get("institution_id") else None
+    classroom["students"] = [str(s) for s in classroom.get("students", [])]
+    classroom["co_teachers"] = [str(t) for t in classroom.get("co_teachers", [])]
+
+    for group in classroom.get("student_groups", []):
+        if "_id" in group:
+            group["id"] = str(group.pop("_id"))
+        elif "id" in group and group["id"]:
+            group["id"] = str(group["id"])
+        group["students"] = [str(s) for s in group.get("students", [])]
+
+    return classroom
+
+
 @router.post("/{classroom_id}/join")
 async def join_classroom(classroom_id: str, enrollment_code: str, current_user = Depends(get_current_user)):
     db = get_db()
@@ -1385,9 +1610,10 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
     user_oid = ObjectId(user_id)
     normalized_role = normalize_user_role(current_user.get("role"))
 
-    is_primary_teacher = user_oid == classroom.get("teacher_id")
-    is_co_teacher = user_id in classroom.get("co_teachers", [])
-    is_student = user_oid in classroom.get("students", [])
+    # String-safe comparisons to handle mixed ObjectId/string storage
+    is_primary_teacher = str(classroom.get("teacher_id", "")) == user_id
+    is_co_teacher = any(str(t) == user_id for t in classroom.get("co_teachers", []))
+    is_student = any(str(s) == user_id for s in classroom.get("students", []))
 
     if is_primary_teacher:
         raise HTTPException(status_code=400, detail="You already own this classroom")
@@ -1415,6 +1641,27 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
             {"_id": ObjectId(classroom_id)},
             {"$addToSet": {"students": user_oid}},
         )
+
+    # Invalidate any cached classroom/dashboard responses so the new member
+    # is not blocked by a previously cached 403 or stale data.
+    try:
+        from functions.cache_utils import invalidate_cache
+        import hashlib, json as _json
+        for prefix in ("classroom", "dashboard", "overview"):
+            for method in ("GET",):
+                for path in (
+                    f"/api/classroom/{classroom_id}",
+                    f"/api/classroom/{classroom_id}/dashboard",
+                    f"/api/classroom/{classroom_id}/overview",
+                ):
+                    raw_key = f"{prefix}:{method}:{path}::{user_id}"
+                    ck = f"{prefix}:{hashlib.md5(raw_key.encode()).hexdigest()}"
+                    from functions.cache_utils import cache_manager
+                    rc = cache_manager.get_redis()
+                    if rc:
+                        await rc.delete(ck)
+    except Exception:
+        pass
 
     user_doc = await db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
     memberships = user_doc.get("classroom_memberships", [])
@@ -2065,5 +2312,56 @@ async def get_module_resource_analytics(
     
     module_service = LearningModuleService(db)
     result = await module_service.get_module_resource_analytics(classroom_id, module_id)
-    
+
     return result
+
+
+def _normalize_enrollment_code(code: str) -> str:
+    return str(code or "").strip().lower()
+
+
+async def _update_thumbnails_for_classroom(db, classroom_oid: ObjectId, resources: List[Dict[str, Any]]):
+    """Background task to derive and persist missing thumbnails for classroom resources."""
+    updated = False
+    new_resources = []
+    for res in resources:
+        if not isinstance(res, dict):
+            new_resources.append(res)
+            continue
+
+        if not res.get("thumbnail_url"):
+            vid = extract_video_id(str(res.get("url") or ""))
+            if vid:
+                res["thumbnail_url"] = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+                updated = True
+        new_resources.append(res)
+
+    if updated:
+        await db.classrooms.update_one(
+            {"_id": classroom_oid},
+            {"$set": {"ai_resources": new_resources}}
+        )
+
+
+async def _update_thumbnails_for_generated_personal_resources(db, user_oid: ObjectId, signature: str, resources: List[Dict[str, Any]]):
+    """Background task to derive and persist missing thumbnails for personal resources."""
+    updated = False
+    new_resources = []
+    for res in resources:
+        if not isinstance(res, dict):
+            new_resources.append(res)
+            continue
+
+        if not res.get("thumbnail_url"):
+            vid = extract_video_id(str(res.get("url") or ""))
+            if vid:
+                res["thumbnail_url"] = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
+                updated = True
+        new_resources.append(res)
+
+    if updated:
+        await db.generated_personal_resources.update_one(
+            {"user_id": user_oid, "assessment_signature": signature},
+            {"$set": {"resources": new_resources}}
+        )
+

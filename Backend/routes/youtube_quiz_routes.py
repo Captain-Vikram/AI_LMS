@@ -15,6 +15,9 @@ from database_async import get_db
 from functions.youtube_quiz_functions import YouTubeQuizGenerator, extract_video_id
 from models.activity_feed import ActivityType
 from models.quiz_attempt import QuestionType, QuizAttempt, QuizQuestion
+from routes.gamification_routes import award_xp_internal
+from functions.user_memory import update_user_memory
+from functions.shared_utils import to_object_id as _to_object_id
 
 load_dotenv(override=True)
 
@@ -63,13 +66,6 @@ def get_quiz_generator():
     """Get the quiz generator instance"""
     api_token = os.getenv("LMSTUDIO_API_TOKEN") or os.getenv("LMSTUDIO_API_KEY")
     return YouTubeQuizGenerator(api_token)
-
-
-def _to_object_id(value: str) -> Optional[ObjectId]:
-    try:
-        return ObjectId(str(value))
-    except Exception:
-        return None
 
 
 def _resource_id(resource: Dict[str, Any]) -> str:
@@ -708,6 +704,23 @@ async def submit_quiz(request: SubmitQuizRequest) -> QuizFeedback:
                 "attempt_number": int(quiz_attempt.attempt_number or 1),
             },
         )
+
+        # Award XP and update AI Memory Profile
+        try:
+            await award_xp_internal(db, request.student_id, "complete_assessment", metadata={"resource_id": str(quiz_attempt.resource_id)})
+            if passed:
+                await award_xp_internal(db, request.student_id, "improve_skill_level", metadata={"resource_id": str(quiz_attempt.resource_id)})
+            
+            p_val = round(score_percentage * 100, 2)
+            await update_user_memory(
+                db=db,
+                user_id=request.student_id,
+                event_type="COMPLETED_YOUTUBE_LESSON_QUIZ",
+                description=f"Completed video lesson quiz for resource {quiz_attempt.resource_id} scoring {p_val}%. Status: {'Passed' if passed else 'Failed'}.",
+                data={"score_percentage": p_val, "passed": passed, "module_id": str(quiz_attempt.module_id)}
+            )
+        except Exception as exc:
+            print(f"Warning: failed to award XP or update memory during youtube quiz submission: {exc}")
 
         return QuizFeedback(
             score_obtained=score_obtained,

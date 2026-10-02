@@ -86,7 +86,6 @@ def combine_transcriptions(transcriptions: List[Dict[str, str]]) -> str:
     return " ".join([entry["description"] for entry in transcriptions])
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def extract_core_topics(transcriptions: List[Dict[str, Any]],
                               model_name: str = None,
                               max_transcript_length: int = 15000) -> Dict[str, Any]:
@@ -173,6 +172,8 @@ async def extract_core_topics(transcriptions: List[Dict[str, Any]],
 
         # Parse the JSON response
         try:
+            # Escape invalid backslashes (like LaTeX '\mathbb')
+            json_content = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', json_content)
             core_topics = json.loads(json_content)
         except json.JSONDecodeError as e:
             print(f"JSON decoding error: {str(e)}")
@@ -366,6 +367,8 @@ class YouTubeQuizGenerator:
 
             # Parse the JSON response
             try:
+                # Escape invalid backslashes (like LaTeX '\mathbb')
+                json_content = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', json_content)
                 parsed_json = json.loads(json_content)
                 return parsed_json
             except json.JSONDecodeError as e:

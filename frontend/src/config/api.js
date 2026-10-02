@@ -57,6 +57,7 @@ export const API_ENDPOINTS = {
   PATHWAY_GET_PROGRESS: (id) => `/api/pathways/progress/${id}`,
   PATHWAY_ENROLL: (id) => `/api/pathways/${id}/enroll`,
   PATHWAY_STAGE_DETAILS: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}`,
+  PATHWAY_SUBMIT_PROJECT: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/submit-project`,
   PATHWAY_COMPLETE_STAGE: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/complete`,
   PATHWAY_GENERATE_RESOURCES: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/generate-resources`,
   PATHWAY_GENERATE_TESTS: (pathwayId, stageIdx, resourceId) => `/api/pathways/${pathwayId}/stage/${stageIdx}/resource/${resourceId}/tests`,
@@ -77,6 +78,13 @@ export const API_ENDPOINTS = {
   MODULE_ASSESSMENT_SUBMISSION_PREFIX: "/api/module-assessment/submission/", // append submission id
   MODULE_ASSESSMENT_PENDING_GRADES_PREFIX: "/api/module-assessment/pending-grades/", // append classroom id
 
+  // --- AI Generation Jobs ---
+  AI_JOB_STATUS: (id) => `/api/classroom/jobs/${id}`,
+  AI_JOB_STREAM: (id) => `/api/classroom/jobs/${id}/stream`,
+  AI_JOB_STOP: (id) => `/api/classroom/jobs/${id}/stop`,
+  AI_JOB_RETRY: (id) => `/api/classroom/jobs/${id}/retry`,
+  AI_JOB_CONFIG: (id) => `/api/classroom/jobs/${id}/config`,
+
   CLASSROOM_ACTIVITY_FEED_PREFIX: "/api/classroom/", // append classroom id + /activity-feed
   CLASSROOM_PENDING_GRADING_COUNT_PREFIX: "/api/classroom/", // append classroom id + /pending-grading-count
 };
@@ -91,5 +99,6 @@ API_ENDPOINTS.CLASSROOM_MY_ENROLLMENTS = "/api/classroom/my/enrollments";
 API_ENDPOINTS.CLASSROOM_BOOTSTRAP_DEMO = "/api/classroom/bootstrap/demo";
 API_ENDPOINTS.CLASSROOM_RESOURCES = "/api/classroom/{id}/resources";
 API_ENDPOINTS.CLASSROOM_RESOURCE_APPROVAL = "/api/classroom/{id}/resources/{resourceId}/approval";
+  API_ENDPOINTS.CLASSROOM_GENERATE_RESOURCES = "/api/classroom/{id}/resources/generate";
 
 API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM = "/api/auth/set-active-classroom/";

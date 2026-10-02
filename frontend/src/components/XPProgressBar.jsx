@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+
 import { IoStarOutline, IoFlashOutline } from 'react-icons/io5';
 
 const XPProgressBar = ({ currentXP, levelThreshold, level }) => {

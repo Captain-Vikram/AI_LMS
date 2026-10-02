@@ -1,7 +1,7 @@
 import React from "react";
 import FlashlightEffect from "./FlashLightEffect";
-import LightbulbOffIcon from "../assets/icons/LightbulbOnIcon.svg";
-import LightbulbOnIcon from "../assets/icons/LightbulbOffIcon.svg";
+import LightbulbOffIcon from "../assets/icons/LightBulbOffIcon.svg";
+import LightbulbOnIcon from "../assets/icons/LightBulbOnIcon.svg";
 
 const FlashlightControl = ({ 
   isClient, 
@@ -41,3 +41,4 @@ const FlashlightControl = ({
 };
 
 export default FlashlightControl;
+

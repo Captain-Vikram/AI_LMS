@@ -37,7 +37,10 @@ export const AnnouncementFeed = ({
         >
           <div className="flex items-start justify-between mb-2">
             <div className="flex-1">
-              <h4 className="font-semibold text-gray-100 line-clamp-2">
+              <h4 className="font-semibold text-gray-100 line-clamp-2 flex items-center gap-2">
+                {!announcement.viewed && (
+                  <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full shrink-0 animate-pulse" title="Unread announcement" />
+                )}
                 {announcement.title}
               </h4>
               <p className="text-xs text-gray-500 mt-1">
@@ -68,7 +71,7 @@ export const AnnouncementFeed = ({
             }`}
             onClick={() => {
               setExpandedId(expandedId === announcement.announcement_id ? null : announcement.announcement_id);
-              if (!announcement.viewed_by?.includes(localStorage.getItem('userId'))) {
+              if (!announcement.viewed) {
                 onMarkViewed?.(announcement.announcement_id);
               }
             }}

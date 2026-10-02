@@ -5,8 +5,9 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from database import get_db
+from database_async import get_db
 from functions.utils import get_current_user
+from functions.shared_utils import to_iso as _to_iso
 
 router = APIRouter(prefix="/api/user", tags=["user"])
 
@@ -31,12 +32,6 @@ class MilestoneUpdate(BaseModel):
     target_date: Optional[datetime] = None
     category: Optional[str] = None
     tags: Optional[List[str]] = None
-
-
-def _to_iso(value):
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
 
 
 def _serialize_milestone(document):
@@ -83,15 +78,14 @@ async def get_user_milestones(current_user: dict = Depends(get_current_user)):
     user_id = current_user["user_id"]
     db = get_db()
 
-    milestones = list(
-        db.user_milestones.find({"user_id": ObjectId(user_id)}).sort(
-            [
-                ("status", 1),
-                ("target_date", 1),
-                ("created_at", -1),
-            ]
-        )
+    milestones_cursor = db.user_milestones.find({"user_id": ObjectId(user_id)}).sort(
+        [
+            ("status", 1),
+            ("target_date", 1),
+            ("created_at", -1),
+        ]
     )
+    milestones = await milestones_cursor.to_list(length=None)
 
     return {"milestones": [_serialize_milestone(milestone) for milestone in milestones]}
 
@@ -130,8 +124,8 @@ async def create_user_milestone(
         "updated_at": now,
     }
 
-    insert_result = db.user_milestones.insert_one(document)
-    created = db.user_milestones.find_one({"_id": insert_result.inserted_id})
+    insert_result = await db.user_milestones.insert_one(document)
+    created = await db.user_milestones.find_one({"_id": insert_result.inserted_id})
 
     return {"milestone": _serialize_milestone(created)}
 
@@ -174,7 +168,7 @@ async def update_user_milestone(
 
     updates["updated_at"] = datetime.utcnow()
 
-    result = db.user_milestones.update_one(
+    result = await db.user_milestones.update_one(
         {"_id": milestone_object_id, "user_id": ObjectId(user_id)},
         {"$set": updates},
     )
@@ -182,7 +176,7 @@ async def update_user_milestone(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Milestone not found")
 
-    updated = db.user_milestones.find_one(
+    updated = await db.user_milestones.find_one(
         {"_id": milestone_object_id, "user_id": ObjectId(user_id)}
     )
 
@@ -202,7 +196,7 @@ async def delete_user_milestone(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid milestone id")
 
-    result = db.user_milestones.delete_one(
+    result = await db.user_milestones.delete_one(
         {"_id": milestone_object_id, "user_id": ObjectId(user_id)}
     )
 

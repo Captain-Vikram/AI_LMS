@@ -5,9 +5,10 @@ from functions.youtube_education import generate_skill_playlist, respond_to_norm
 from fastapi import APIRouter, Query, Depends, HTTPException, status, Header
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from database import get_db
+from database_async import get_db
 from bson import ObjectId
 from functions.utils import get_current_user
+from functions.shared_utils import assessment_signature as _assessment_signature
 
 router = APIRouter(
     prefix="/api/youtube",
@@ -22,10 +23,6 @@ class AssessmentResults(BaseModel):
     skill_gaps: Dict[str, Any]
     recommendations: List[Dict[str, Any]]
 
-
-def _assessment_signature(payload: Dict[str, Any]) -> str:
-    serialized = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 @router.post("/recommendations", response_model=List[Dict[str, Any]])
 async def get_youtube_recommendations(
@@ -43,7 +40,7 @@ async def get_youtube_recommendations(
         latest_assessment_id = None
 
         if assessment_results is None:
-            quiz_result = db.skill_assessment_results.find_one(
+            quiz_result = await db.skill_assessment_results.find_one(
                 {"user_id": ObjectId(user_id)},
                 sort=[("timestamp", -1)],
             )
@@ -78,14 +75,14 @@ async def get_youtube_recommendations(
             "user_id": ObjectId(user_id),
             "assessment_signature": assessment_signature,
         }
-        cached_doc = db.generated_playlists.find_one(cache_filter, sort=[("updated_at", -1)])
+        cached_doc = await db.generated_playlists.find_one(cache_filter, sort=[("updated_at", -1)])
         if cached_doc and isinstance(cached_doc.get("playlists"), list) and cached_doc.get("playlists"):
             return cached_doc["playlists"]
 
         playlists = await generate_skill_playlist(assessment_snapshot)
 
         try:
-            db.generated_playlists.update_one(
+            await db.generated_playlists.update_one(
                 {
                     "user_id": ObjectId(user_id),
                     "assessment_signature": assessment_signature,

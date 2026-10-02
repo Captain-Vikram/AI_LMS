@@ -8,12 +8,14 @@ from pydantic import BaseModel, Field
 class NotebookCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     description: str = Field(default="", max_length=2000)
+    classroom_id: str | None = Field(default=None)
 
 
 class NotebookResponse(BaseModel):
     id: str
     name: str
     description: str
+    classroom_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -22,6 +24,7 @@ class NotebookDetailResponse(BaseModel):
     id: str
     name: str
     description: str
+    classroom_id: str | None = None
     source_ids: list[str]
     created_at: str
     updated_at: str

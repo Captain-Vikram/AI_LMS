@@ -118,7 +118,6 @@ const ClassroomSettings = () => {
               </p>
             </div>
             <AppBackButton
-              label="Back to Dashboard"
               fallbackTo={`/classroom/${classroomId}/dashboard`}
             />
           </div>

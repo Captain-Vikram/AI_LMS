@@ -1,8 +1,8 @@
-import { motion, AnimatePresence } from 'framer-motion';
+
 import TiltCard from './TiltCard';
 import StatBar from './StatBar';
 
-const FeaturesDisplay = ({ phase, active, f, stats, Icon, features }) => {
+const FeaturesDisplay = ({ phase, active, f, stats, features }) => {
   return (
     <>
       <AnimatePresence>
@@ -350,3 +350,4 @@ const FeaturesDisplay = ({ phase, active, f, stats, Icon, features }) => {
 };
 
 export default FeaturesDisplay;
+

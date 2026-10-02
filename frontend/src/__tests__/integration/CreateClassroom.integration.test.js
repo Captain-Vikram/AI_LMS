@@ -1,3 +1,4 @@
+/* eslint-env jest */
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -59,3 +60,4 @@ describe('CreateClassroom integration', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/classroom/class123/dashboard');
   });
 });
+

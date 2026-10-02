@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 # Load .env if present
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 TARGET_CLASSROOM_NAME = os.getenv("SEED_CLASSROOM_NAME", "Cloud Computing")
 TEACHER_EMAIL = os.getenv("SEED_TEACHER_EMAIL", "aka.vigi@gmail.com")
 TEACHER_PASSWORD = os.getenv("SEED_TEACHER_PASSWORD", "GoodGuy@09#")
@@ -50,7 +51,7 @@ def now():
 class Seeder:
     def __init__(self, uri: str):
         self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        self.db = self.client.get_database("quasar")
+        self.db = self.client.get_database(MONGO_DB_NAME)
 
     def _find_user_by_email(self, email: str):
         return self.db.users.find_one({"email": email})
@@ -80,20 +81,7 @@ class Seeder:
 
         result = self.db.users.insert_one(user_doc)
         user_id = result.inserted_id
-        # Insert profile for richer UI
-        profile = {
-            "user_id": user_id,
-            "first_name": user_doc["first_name"],
-            "last_name": user_doc["last_name"],
-            "location": user_doc["location"],
-            "bio": f"Learner interested in {random.choice(SKILLS)} and cloud technologies.",
-            "skills": random.sample(SKILLS, k=random.randint(1, 3)),
-            "created_date": now(),
-        }
-        try:
-            self.db.user_profiles.insert_one(profile)
-        except Exception:
-            pass
+        # Note: user_profiles collection is retired; profile creation is skipped.
 
         print(f"Created user: {email} -> {user_id}")
         return self.db.users.find_one({"_id": user_id})

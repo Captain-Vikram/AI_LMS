@@ -1,0 +1,2 @@
+# Install only in an Intel-optimized environment.
+intel-extension-for-pytorch==2.1.0+cpu # Or whatever version is compatible with the torch version they install

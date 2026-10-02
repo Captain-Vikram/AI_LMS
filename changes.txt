@@ -1,0 +1,30 @@
+High Impact — Add These
+1. Cache Layer
+The plan has no mention of caching. If two students in the same pathway hit the same stage, you're making redundant LLM + search calls. Add a stage-level resource cache in MongoDB (TTL ~7 days) so the second student gets results instantly. Invalidate when a regeneration is requested.
+2. Explicit Bloom's Taxonomy Alignment in the LLM Prompt
+The plan mentions student performance context but doesn't specify how the LLM should use Bloom's levels. Add a requirement that the prompt explicitly tells the LLM: "This student is at the Apply level for Topic X — prioritize resources that go beyond definitions into worked examples and practice." This directly ties your resource quality to your existing taxonomy system.
+3. Dead Link Validation
+The filter phase checks metadata completeness but doesn't actually ping URLs. Add a lightweight HEAD request check before storing — articles especially go dead frequently. If a URL returns 404/403, promote the backup immediately rather than storing a broken link the student will encounter.
+
+Medium Impact — Worth Mentioning
+4. Per-Subtopic Coverage Guarantee
+The plan generates 5 videos + 5 articles globally for a stage, but doesn't guarantee each subtopic is covered. If the LLM front-loads resources on subtopic 1, subtopics 4 and 5 might get nothing. Add a constraint: at least 1 resource per subtopic, distribute the remaining 5 freely.
+5. Feedback Signal Loop
+Add a student_rating field (👍/👎) on each resource in the schema. Even without acting on it immediately, collecting this data lets you later build a quality signal — if a resource gets consistent thumbs-down across students, it gets deprioritized in future cache hits. The plan has no feedback mechanism at all.
+6. LLM Fallback Model Specification
+The plan says "use LLM for planning" but doesn't specify a fallback model if the primary times out. Specify explicitly: primary = claude-sonnet, fallback = claude-haiku (faster, cheaper, still good enough for query generation). Don't leave this implicit.
+
+Low Effort, High Polish
+7. Generation Status Granularity
+The async plan returns status: "generating" as a single state. Break it into: planning → searching → filtering → ready. This lets your frontend show a meaningful progress indicator ("Finding videos…", "Checking quality…") instead of a generic spinner — much better UX for a loading operation that can take 10–15 seconds.
+
+What to say when prompted
+Select "2. Needs changes" and list:
+
+Add stage-level resource caching with 7-day TTL
+Bloom's Taxonomy level must be passed explicitly to the LLM prompt with behavioral instructions
+Add HEAD request URL validation in the filter phase before storing
+Enforce per-subtopic coverage (minimum 1 resource each)
+Add student_rating field to resource schema for future feedback loop
+Specify primary/fallback LLM models explicitly (Sonnet → Haiku)
+Granular async status: planning → searching → filtering → ready

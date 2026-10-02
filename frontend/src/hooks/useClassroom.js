@@ -1,14 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../services/apiClient';
+import { storage } from '../utils/storage';
 
 export const useClassroomDashboard = (classroomId) => {
-  const [dashboard, setDashboard] = useState(null);
-  const [overview, setOverview] = useState(null);
+  const [dashboard, setDashboard] = useState(() => storage.get(`dashboard_${classroomId}`) || null);
+  const [overview, setOverview] = useState(() => storage.get(`overview_${classroomId}`) || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchDashboard = useCallback(async () => {
+  const fetchDashboard = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`dashboard_${classroomId}`);
+      if (cached) setDashboard(cached);
+    }
     
     setLoading(true);
     setError(null);
@@ -17,6 +23,7 @@ export const useClassroomDashboard = (classroomId) => {
       const response = await apiClient.get(`/api/classroom/${classroomId}/dashboard`);
       if (response.status === 'success') {
         setDashboard(response.data);
+        storage.set(`dashboard_${classroomId}`, response.data, 300); // 5 min
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch dashboard');
@@ -25,13 +32,19 @@ export const useClassroomDashboard = (classroomId) => {
     }
   }, [classroomId]);
 
-  const fetchOverview = useCallback(async () => {
+  const fetchOverview = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`overview_${classroomId}`);
+      if (cached) setOverview(cached);
+    }
     
     try {
       const response = await apiClient.get(`/api/classroom/${classroomId}/overview`);
       if (response.status === 'success') {
         setOverview(response.data);
+        storage.set(`overview_${classroomId}`, response.data, 300); // 5 min
       }
     } catch (err) {
       console.error('Failed to fetch overview:', err);
@@ -39,12 +52,12 @@ export const useClassroomDashboard = (classroomId) => {
   }, [classroomId]);
 
   useEffect(() => {
-    fetchDashboard();
-    fetchOverview();
+    fetchDashboard(true);
+    fetchOverview(true);
     
     // Refresh every 30 seconds for student data
     const interval = setInterval(() => {
-      fetchDashboard();
+      fetchDashboard(false);
     }, 30000);
     
     return () => clearInterval(interval);
@@ -55,18 +68,23 @@ export const useClassroomDashboard = (classroomId) => {
     overview,
     loading,
     error,
-    refresh: fetchDashboard,
+    refresh: () => fetchDashboard(false),
   };
 };
 
 export const useClassroomAnalytics = (classroomId) => {
-  const [analytics, setAnalytics] = useState(null);
+  const [analytics, setAnalytics] = useState(() => storage.get(`analytics_${classroomId}`) || null);
   const [studentProgress, setStudentProgress] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchAnalytics = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`analytics_${classroomId}`);
+      if (cached) setAnalytics(cached);
+    }
     
     setLoading(true);
     setError(null);
@@ -75,6 +93,7 @@ export const useClassroomAnalytics = (classroomId) => {
       const response = await apiClient.get(`/api/analytics/classroom/${classroomId}`);
       if (response.status === 'success') {
         setAnalytics(response.data);
+        storage.set(`analytics_${classroomId}`, response.data, 300);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch analytics');
@@ -83,8 +102,14 @@ export const useClassroomAnalytics = (classroomId) => {
     }
   }, [classroomId]);
 
-  const fetchStudentProgress = useCallback(async (studentId) => {
+  const fetchStudentProgress = useCallback(async (studentId, useCache = true) => {
     if (!classroomId || !studentId) return;
+    
+    const cacheKey = `analytics_${classroomId}_student_${studentId}`;
+    if (useCache) {
+      const cached = storage.get(cacheKey);
+      if (cached) setStudentProgress(cached);
+    }
     
     try {
       const response = await apiClient.get(
@@ -92,14 +117,21 @@ export const useClassroomAnalytics = (classroomId) => {
       );
       if (response.status === 'success') {
         setStudentProgress(response.data);
+        storage.set(cacheKey, response.data, 300);
       }
     } catch (err) {
       console.error('Failed to fetch student progress:', err);
     }
   }, [classroomId]);
 
-  const fetchMyProgress = useCallback(async () => {
+  const fetchMyProgress = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    const cacheKey = `analytics_${classroomId}_my-progress`;
+    if (useCache) {
+      const cached = storage.get(cacheKey);
+      if (cached) setStudentProgress(cached);
+    }
     
     try {
       const response = await apiClient.get(
@@ -107,6 +139,7 @@ export const useClassroomAnalytics = (classroomId) => {
       );
       if (response.status === 'success') {
         setStudentProgress(response.data);
+        storage.set(cacheKey, response.data, 300);
       }
     } catch (err) {
       console.error('Failed to fetch my progress:', err);
@@ -114,10 +147,10 @@ export const useClassroomAnalytics = (classroomId) => {
   }, [classroomId]);
 
   useEffect(() => {
-    fetchAnalytics();
+    fetchAnalytics(true);
     
     // Refresh every 2 minutes
-    const interval = setInterval(fetchAnalytics, 120000);
+    const interval = setInterval(() => fetchAnalytics(false), 120000);
     
     return () => clearInterval(interval);
   }, [classroomId, fetchAnalytics]);
@@ -127,19 +160,24 @@ export const useClassroomAnalytics = (classroomId) => {
     studentProgress,
     loading,
     error,
-    fetchAnalytics,
-    fetchStudentProgress,
-    fetchMyProgress,
+    fetchAnalytics: () => fetchAnalytics(false),
+    fetchStudentProgress: (studentId) => fetchStudentProgress(studentId, false),
+    fetchMyProgress: () => fetchMyProgress(false),
   };
 };
 
 export const useAnnouncements = (classroomId) => {
-  const [announcements, setAnnouncements] = useState([]);
+  const [announcements, setAnnouncements] = useState(() => storage.get(`announcements_${classroomId}`) || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAnnouncements = useCallback(async () => {
+  const fetchAnnouncements = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`announcements_${classroomId}`);
+      if (cached) setAnnouncements(cached);
+    }
     
     setLoading(true);
     setError(null);
@@ -148,6 +186,7 @@ export const useAnnouncements = (classroomId) => {
       const response = await apiClient.get(`/api/classroom/${classroomId}/announcements`);
       if (response.status === 'success') {
         setAnnouncements(response.data);
+        storage.set(`announcements_${classroomId}`, response.data, 120);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch announcements');
@@ -169,7 +208,8 @@ export const useAnnouncements = (classroomId) => {
         });
         
         if (response.status === 'success') {
-          await fetchAnnouncements();
+          storage.clearClassroomCache(classroomId);
+          await fetchAnnouncements(false);
           return response.data;
         }
       } catch (err) {
@@ -188,11 +228,13 @@ export const useAnnouncements = (classroomId) => {
         await apiClient.post(
           `/api/classroom/${classroomId}/announcements/${announcementId}/view`
         );
+        storage.clearClassroomCache(classroomId);
+        await fetchAnnouncements(false);
       } catch (err) {
         console.error('Failed to mark announcement as viewed:', err);
       }
     },
-    [classroomId]
+    [classroomId, fetchAnnouncements]
   );
 
   const deleteAnnouncement = useCallback(
@@ -205,6 +247,7 @@ export const useAnnouncements = (classroomId) => {
         );
         
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           setAnnouncements(prev => 
             prev.filter(a => a.announcement_id !== announcementId)
           );
@@ -218,10 +261,10 @@ export const useAnnouncements = (classroomId) => {
   );
 
   useEffect(() => {
-    fetchAnnouncements();
+    fetchAnnouncements(true);
     
     // Refresh every 15 seconds
-    const interval = setInterval(fetchAnnouncements, 15000);
+    const interval = setInterval(() => fetchAnnouncements(false), 15000);
     
     return () => clearInterval(interval);
   }, [classroomId, fetchAnnouncements]);
@@ -233,17 +276,22 @@ export const useAnnouncements = (classroomId) => {
     createAnnouncement,
     markAsViewed,
     deleteAnnouncement,
-    refresh: fetchAnnouncements,
+    refresh: () => fetchAnnouncements(false),
   };
 };
 
 export const useEnrollment = (classroomId) => {
-  const [roster, setRoster] = useState(null);
+  const [roster, setRoster] = useState(() => storage.get(`roster_${classroomId}`) || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchRoster = useCallback(async () => {
+  const fetchRoster = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`roster_${classroomId}`);
+      if (cached) setRoster(cached);
+    }
     
     setLoading(true);
     setError(null);
@@ -252,6 +300,7 @@ export const useEnrollment = (classroomId) => {
       const response = await apiClient.get(`/api/classroom/${classroomId}/members`);
       if (response.status === 'success') {
         setRoster(response.data);
+        storage.set(`roster_${classroomId}`, response.data, 300);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch roster');
@@ -270,7 +319,8 @@ export const useEnrollment = (classroomId) => {
         });
         
         if (response.status === 'success') {
-          await fetchRoster();
+          storage.clearClassroomCache(classroomId);
+          await fetchRoster(false);
           return response.data;
         }
       } catch (err) {
@@ -292,7 +342,8 @@ export const useEnrollment = (classroomId) => {
         );
         
         if (response.status === 'success') {
-          await fetchRoster();
+          storage.clearClassroomCache(classroomId);
+          await fetchRoster(false);
           return response.data;
         }
       } catch (err) {
@@ -313,12 +364,12 @@ export const useEnrollment = (classroomId) => {
         
         const response = await apiClient.post(
           `/api/classroom/${classroomId}/members/bulk-upload`,
-          formData,
-          { 'Content-Type': 'multipart/form-data' }
+          formData
         );
         
         if (response.status === 'upload_complete') {
-          await fetchRoster();
+          storage.clearClassroomCache(classroomId);
+          await fetchRoster(false);
           return response.data;
         }
       } catch (err) {
@@ -339,7 +390,8 @@ export const useEnrollment = (classroomId) => {
         );
         
         if (response.status === 'success') {
-          await fetchRoster();
+          storage.clearClassroomCache(classroomId);
+          await fetchRoster(false);
           return response.data;
         }
       } catch (err) {
@@ -351,7 +403,7 @@ export const useEnrollment = (classroomId) => {
   );
 
   useEffect(() => {
-    fetchRoster();
+    fetchRoster(true);
   }, [classroomId, fetchRoster]);
 
   return {
@@ -362,22 +414,30 @@ export const useEnrollment = (classroomId) => {
     addStudent,
     bulkUpload,
     removeStudent,
-    refresh: fetchRoster,
+    refresh: () => fetchRoster(false),
   };
 };
 
 export const useStudentGroups = (classroomId) => {
-  const [groups, setGroups] = useState([]);
+  const [groups, setGroups] = useState(() => storage.get(`groups_${classroomId}`) || []);
+  // eslint-disable-next-line no-unused-vars
   const [loading, setLoading] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [error, setError] = useState(null);
 
-  const fetchGroups = useCallback(async () => {
+  const fetchGroups = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`groups_${classroomId}`);
+      if (cached) setGroups(cached);
+    }
     
     try {
       const response = await apiClient.get(`/api/classroom/${classroomId}/members`);
       if (response.status === 'success' && response.data.student_groups) {
         setGroups(response.data.student_groups);
+        storage.set(`groups_${classroomId}`, response.data.student_groups, 300);
       }
     } catch (err) {
       console.error('Failed to fetch groups:', err);
@@ -396,7 +456,8 @@ export const useStudentGroups = (classroomId) => {
         });
         
         if (response.status === 'success') {
-          await fetchGroups();
+          storage.clearClassroomCache(classroomId);
+          await fetchGroups(false);
           return response.data;
         }
       } catch (err) {
@@ -418,7 +479,8 @@ export const useStudentGroups = (classroomId) => {
         );
         
         if (response.status === 'success') {
-          await fetchGroups();
+          storage.clearClassroomCache(classroomId);
+          await fetchGroups(false);
           return response.data;
         }
       } catch (err) {
@@ -430,7 +492,7 @@ export const useStudentGroups = (classroomId) => {
   );
 
   useEffect(() => {
-    fetchGroups();
+    fetchGroups(true);
   }, [classroomId, fetchGroups]);
 
   return {
@@ -439,17 +501,22 @@ export const useStudentGroups = (classroomId) => {
     error,
     createGroup,
     addStudentToGroup,
-    refresh: fetchGroups,
+    refresh: () => fetchGroups(false),
   };
 };
 
 export const useLearningModules = (classroomId) => {
-  const [modules, setModules] = useState([]);
+  const [modules, setModules] = useState(() => storage.get(`modules_${classroomId}`) || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchModules = useCallback(async () => {
+  const fetchModules = useCallback(async (useCache = true) => {
     if (!classroomId) return;
+    
+    if (useCache) {
+      const cached = storage.get(`modules_${classroomId}`);
+      if (cached) setModules(cached);
+    }
     
     setLoading(true);
     setError(null);
@@ -463,6 +530,7 @@ export const useLearningModules = (classroomId) => {
             ? response.data
             : [];
         setModules(payload);
+        storage.set(`modules_${classroomId}`, payload, 300);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch modules');
@@ -473,34 +541,51 @@ export const useLearningModules = (classroomId) => {
   }, [classroomId]);
 
   useEffect(() => {
-    fetchModules();
+    fetchModules(true);
   }, [classroomId, fetchModules]);
 
   return {
     modules,
     loading,
     error,
-    refresh: fetchModules,
+    refresh: () => fetchModules(false),
   };
 };
 
 export const useClassroomResources = (classroomId, mode = 'class', enabled = true) => {
-  const [resourcePayload, setResourcePayload] = useState(null);
+  const [resourcePayload, setResourcePayload] = useState(() => storage.get(`resources_${classroomId}_${mode}`) || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [jobId, setJobId] = useState(null);
+  const [generationStatus, setGenerationStatus] = useState(null);
 
   const fetchResources = useCallback(
-    async (targetMode = mode) => {
+    async (targetMode = mode, useCache = true) => {
       if (!enabled || !classroomId) return;
+
+      if (useCache) {
+        const cached = storage.get(`resources_${classroomId}_${targetMode}`);
+        if (cached) setResourcePayload(cached);
+      }
 
       setLoading(true);
       setError(null);
+      // We don't reset jobId/generationStatus here to allow persistent tracking 
+      // of background jobs across refreshes/polling.
 
       try {
         const response = await apiClient.get(
           `/api/classroom/${classroomId}/resources?mode=${encodeURIComponent(targetMode)}`
         );
+        
         if (response.status === 'success') {
+          setResourcePayload(response);
+          setJobId(null);
+          setGenerationStatus(null);
+          storage.set(`resources_${classroomId}_${targetMode}`, response, 300);
+        } else if (response.status === 'generation_started' || response.status === 'generation_in_progress') {
+          setJobId(response.job_id);
+          setGenerationStatus(response.status);
           setResourcePayload(response);
         }
       } catch (err) {
@@ -521,7 +606,8 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
         { approved }
       );
 
-      await fetchResources('class');
+      storage.clearClassroomCache(classroomId);
+      await fetchResources('class', false);
     },
     [classroomId, fetchResources, enabled]
   );
@@ -537,7 +623,8 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
           resourceData
         );
         if (response.status === 'success') {
-          await fetchResources('class');
+          storage.clearClassroomCache(classroomId);
+          await fetchResources('class', false);
           return { success: true, resource: response.resource };
         }
         throw new Error(response.message || 'Failed to add resource');
@@ -552,11 +639,50 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
     [classroomId, fetchResources, enabled]
   );
 
+  const regenerateResources = useCallback(
+    async (file = null) => {
+      if (!enabled || !classroomId) return;
+      setLoading(true);
+      setError(null);
+      try {
+        let response;
+        if (file) {
+          const formData = new FormData();
+          formData.append('curriculum_pdf', file);
+          response = await apiClient.post(
+            `/api/classroom/${classroomId}/resources/generate?force=true`,
+            formData
+          );
+        } else {
+          response = await apiClient.post(
+            `/api/classroom/${classroomId}/resources/generate?force=true`
+          );
+        }
+
+        if (response.status === 'generation_started' || response.status === 'generation_in_progress') {
+          setJobId(response.job_id);
+          setGenerationStatus(response.status);
+          return { success: true, status: response.status, job_id: response.job_id };
+        } else if (response.status === 'syllabus_missing') {
+          return { success: false, status: 'syllabus_missing', message: response.message };
+        }
+        throw new Error(response.message || 'Failed to start regeneration');
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error starting regeneration';
+        setError(errorMessage);
+        return { success: false, message: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [classroomId, enabled]
+  );
+
   useEffect(() => {
     if (!enabled) {
       return;
     }
-    fetchResources(mode);
+    fetchResources(mode, true);
   }, [classroomId, mode, fetchResources, enabled]);
 
   return {
@@ -572,17 +698,26 @@ export const useClassroomResources = (classroomId, mode = 'class', enabled = tru
     error,
     approveResource,
     addManualResource,
-    refresh: fetchResources,
+    regenerateResources,
+    refresh: () => fetchResources(mode, false),
+    fetchProgress: () => fetchResources(mode, false),
+    jobId,
+    generationStatus,
   };
 };
 
 export const useModuleProgress = (classroomId, moduleId, studentId = null) => {
-  const [progress, setProgress] = useState(null);
+  const [progress, setProgress] = useState(() => storage.get(`progress_${classroomId}_${moduleId}_${studentId || 'me'}`) || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchProgress = useCallback(async () => {
+  const fetchProgress = useCallback(async (useCache = true) => {
     if (!classroomId || !moduleId) return;
+
+    if (useCache) {
+      const cached = storage.get(`progress_${classroomId}_${moduleId}_${studentId || 'me'}`);
+      if (cached) setProgress(cached);
+    }
 
     setLoading(true);
     setError(null);
@@ -594,6 +729,7 @@ export const useModuleProgress = (classroomId, moduleId, studentId = null) => {
       );
       if (response.status === 'success') {
         setProgress(response.progress);
+        storage.set(`progress_${classroomId}_${moduleId}_${studentId || 'me'}`, response.progress, 300);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch module progress');
@@ -603,14 +739,14 @@ export const useModuleProgress = (classroomId, moduleId, studentId = null) => {
   }, [classroomId, moduleId, studentId]);
 
   useEffect(() => {
-    fetchProgress();
+    fetchProgress(true);
   }, [classroomId, moduleId, studentId, fetchProgress]);
 
   return {
     progress,
     loading,
     error,
-    refresh: fetchProgress,
+    refresh: () => fetchProgress(false),
   };
 };
 
@@ -659,12 +795,17 @@ export const useResourceEngagement = (classroomId, moduleId, resourceId) => {
 };
 
 export const useModuleAnalytics = (classroomId, moduleId) => {
-  const [analytics, setAnalytics] = useState(null);
+  const [analytics, setAnalytics] = useState(() => storage.get(`module_analytics_${classroomId}_${moduleId}`) || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchAnalytics = useCallback(async (useCache = true) => {
     if (!classroomId || !moduleId) return;
+
+    if (useCache) {
+      const cached = storage.get(`module_analytics_${classroomId}_${moduleId}`);
+      if (cached) setAnalytics(cached);
+    }
 
     setLoading(true);
     setError(null);
@@ -675,6 +816,7 @@ export const useModuleAnalytics = (classroomId, moduleId) => {
       );
       if (response.status === 'success') {
         setAnalytics(response);
+        storage.set(`module_analytics_${classroomId}_${moduleId}`, response, 300);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch analytics');
@@ -684,14 +826,14 @@ export const useModuleAnalytics = (classroomId, moduleId) => {
   }, [classroomId, moduleId]);
 
   useEffect(() => {
-    fetchAnalytics();
+    fetchAnalytics(true);
   }, [classroomId, moduleId, fetchAnalytics]);
 
   return {
     analytics,
     loading,
     error,
-    refresh: fetchAnalytics,
+    refresh: () => fetchAnalytics(false),
   };
 };
 
@@ -712,6 +854,7 @@ export const useAutoGenerateModules = (classroomId) => {
         );
         
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           const modulesCreated = Number(response.modules_created || 0);
           const modulesUpdated = Number(response.modules_updated || 0);
           const modulesProcessed = Number(
@@ -769,6 +912,7 @@ export const useCreateLearningModule = (classroomId) => {
         });
 
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           return {
             success: true,
             module: response.module,
@@ -815,6 +959,7 @@ export const useReorderLearningModules = (classroomId) => {
         );
 
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           return {
             success: true,
             modules: response.modules || [],
@@ -842,14 +987,19 @@ export const useReorderLearningModules = (classroomId) => {
 };
 
 export const useModuleApprovedResources = (classroomId, enabled = true) => {
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState(() => storage.get(`approved_resources_${classroomId}`) || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchApprovedResources = useCallback(async () => {
+  const fetchApprovedResources = useCallback(async (useCache = true) => {
     if (!classroomId || !enabled) {
       setCategories([]);
       return;
+    }
+
+    if (useCache) {
+      const cached = storage.get(`approved_resources_${classroomId}`);
+      if (cached) setCategories(cached);
     }
 
     setLoading(true);
@@ -861,7 +1011,9 @@ export const useModuleApprovedResources = (classroomId, enabled = true) => {
       );
 
       if (response.status === 'success') {
-        setCategories(Array.isArray(response.categories) ? response.categories : []);
+        const payload = Array.isArray(response.categories) ? response.categories : [];
+        setCategories(payload);
+        storage.set(`approved_resources_${classroomId}`, payload, 300);
       } else {
         setCategories([]);
       }
@@ -874,14 +1026,14 @@ export const useModuleApprovedResources = (classroomId, enabled = true) => {
   }, [classroomId, enabled]);
 
   useEffect(() => {
-    fetchApprovedResources();
+    fetchApprovedResources(true);
   }, [fetchApprovedResources]);
 
   return {
     categories,
     loading,
     error,
-    refresh: fetchApprovedResources,
+    refresh: () => fetchApprovedResources(false),
   };
 };
 
@@ -905,6 +1057,7 @@ export const useAssignResourcesToModule = (classroomId) => {
         );
 
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           return {
             success: true,
             module: response.module,
@@ -952,6 +1105,7 @@ export const useRemoveResourceFromModule = (classroomId) => {
         );
 
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           return {
             success: true,
             message: response.message || 'Resource removed successfully',
@@ -996,6 +1150,7 @@ export const useDeleteLearningModule = (classroomId) => {
         );
 
         if (response.status === 'success') {
+          storage.clearClassroomCache(classroomId);
           return {
             success: true,
             message: response.message || 'Module deleted successfully',

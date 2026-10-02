@@ -14,43 +14,48 @@ const SkillPathwaysCatalog = () => {
   const [error, setError] = useState(null);
   const [enrolling, setEnrolling] = useState(null);
 
-  useEffect(() => {
-    const fetchCatalog = async () => {
-      setLoading(true);
-      try {
-        const [catalogRes, enrolledRes] = await Promise.all([
-          apiClient.get(API_ENDPOINTS.PATHWAYS_AVAILABLE),
-          apiClient.get(API_ENDPOINTS.PATHWAYS_MY_PROGRESS)
-        ]);
+  const fetchCatalog = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [catalogRes, enrolledRes] = await Promise.all([
+        apiClient.get(API_ENDPOINTS.PATHWAYS_AVAILABLE),
+        apiClient.get(API_ENDPOINTS.PATHWAYS_MY_PROGRESS)
+      ]);
 
-        if (catalogRes.status === 'success') {
-          setPathways(catalogRes.data || []);
-        }
-
-        if (enrolledRes.status === 'success') {
-           const myProgress = enrolledRes.data || [];
-           setEnrolledIds(myProgress.map(p => p.pathway_id));
-        }
-
-      } catch (err) {
-        setError(err.message || 'Failed to load skill pathways.');
-      } finally {
-        setLoading(false);
+      if (catalogRes.status === 'success') {
+        setPathways(catalogRes.data || []);
       }
-    };
 
+      if (enrolledRes.status === 'success') {
+         const myProgress = enrolledRes.data || [];
+         setEnrolledIds(myProgress.map(p => p.pathway_id));
+      }
+
+    } catch (err) {
+      setError(err.message || 'Failed to load skill pathways.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchCatalog();
   }, []);
 
   const handleEnroll = async (pathwayId) => {
     setEnrolling(pathwayId);
+    setError(null);
     try {
       const res = await apiClient.post(API_ENDPOINTS.PATHWAY_ENROLL(pathwayId));
       if (res.status === 'success') {
         navigate(`/skill-pathway/${pathwayId}`);
+      } else {
+        setError(res.message || 'Failed to enroll in pathway. Please try again.');
+        setEnrolling(null);
       }
     } catch (err) {
-      alert("Error enrolling: " + err.message);
+      setError('Error enrolling: ' + (err.message || 'Unknown error. Please try again.'));
       setEnrolling(null);
     }
   };
@@ -58,8 +63,9 @@ const SkillPathwaysCatalog = () => {
   if (loading) {
     return (
       <GlassDashboardShell contentClassName="max-w-6xl">
-        <div className="flex justify-center items-center py-20 text-gray-400">
-          <FiLoader className="animate-spin text-3xl mr-3" /> Loading standalone skills catalog...
+        <div className="flex flex-col justify-center items-center py-20 text-gray-400">
+          <FiLoader className="animate-spin text-4xl mb-4 text-indigo-400" />
+          <p className="text-lg">Loading standalone skills catalog...</p>
         </div>
       </GlassDashboardShell>
     );
@@ -68,8 +74,19 @@ const SkillPathwaysCatalog = () => {
   if (error) {
     return (
       <GlassDashboardShell contentClassName="max-w-6xl">
-        <div className="bg-red-900/30 border border-red-700/50 p-6 rounded-lg text-red-200 flex items-center">
-          <FiAlertTriangle className="text-2xl mr-3" /> {error}
+        <div className="bg-red-900/30 border border-red-700/50 p-8 rounded-2xl text-red-200 text-center">
+          <FiAlertTriangle className="mx-auto text-5xl mb-4 text-red-400"/>
+          <h2 className="text-2xl font-bold mb-2">Connection Error</h2>
+          <p className="text-red-200/70 max-w-md mx-auto mb-8">{error}</p>
+          <div className="flex justify-center gap-4">
+            <button 
+              onClick={fetchCatalog}
+              className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold transition-all"
+            >
+              Retry Connection
+            </button>
+            <AppBackButton fallbackTo="/dashboard" />
+          </div>
         </div>
       </GlassDashboardShell>
     );
@@ -78,7 +95,7 @@ const SkillPathwaysCatalog = () => {
   return (
     <GlassDashboardShell contentClassName="max-w-6xl">
       <div className="mb-5">
-        <AppBackButton label="Back to Dashboard" fallbackTo="/dashboard" />
+        <AppBackButton fallbackTo="/dashboard" />
       </div>
 
       <div className="mb-10 text-center">

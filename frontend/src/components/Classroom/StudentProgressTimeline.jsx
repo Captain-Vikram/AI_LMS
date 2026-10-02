@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate, useParams } from "react-router-dom";
 import {
   IoCheckmarkCircleOutline,
@@ -56,7 +57,6 @@ const getStatusMeta = (status) => {
 };
 
 const StudentProgressTimeline = () => {
-  const navigate = useNavigate();
   const { id: classroomId, studentId } = useParams();
 
   const [loading, setLoading] = useState(false);
@@ -235,7 +235,6 @@ const StudentProgressTimeline = () => {
 
           <div className="relative px-6 pt-6 pb-6 space-y-4">
             <AppBackButton
-              label="Back to Roster"
               fallbackTo={`/classroom/${classroomId}/roster`}
             />
             <div className="pt-3">

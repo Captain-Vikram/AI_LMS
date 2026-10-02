@@ -412,7 +412,7 @@ Many endpoints perform parallel database queries and API calls, resulting in fas
 
 ```env
 # MongoDB
-MONGO_URI=mongodb://localhost:27017/quasar
+MONGO_URI=mongodb://localhost:27017/SkillMaster
 
 # LLM (Local)
 LMSTUDIO_URL=http://127.0.0.1:1234

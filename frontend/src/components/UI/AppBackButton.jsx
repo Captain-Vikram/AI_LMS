@@ -2,31 +2,42 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IoArrowBackOutline } from 'react-icons/io5';
 
+/**
+ * AppBackButton — universal "Back" navigation button.
+ *
+ * Always navigates to `fallbackTo` (no browser history tricks that cause
+ * redirect loops). Just pass the logical parent route.
+ *
+ * Props:
+ *   fallbackTo  {string}  — the route to navigate to (required, no default)
+ *   className   {string}  — optional extra Tailwind classes
+ */
 const AppBackButton = ({
-  label = 'Back',
-  fallbackTo = '/',
-  useHistory = true,
+  // label is accepted but ignored — always renders "Back" for consistency
+  fallbackTo = '/dashboard',
   className = '',
 }) => {
   const navigate = useNavigate();
 
-  const handleBack = () => {
-    const hasHistory = typeof window !== 'undefined' && window.history.length > 1;
-    if (useHistory && hasHistory) {
-      navigate(-1);
-      return;
-    }
-    navigate(fallbackTo);
-  };
-
   return (
     <button
       type="button"
-      onClick={handleBack}
-      className={`inline-flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-900/70 px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-800 ${className}`}
+      onClick={() => navigate(fallbackTo)}
+      className={[
+        'group inline-flex items-center gap-2 rounded-xl',
+        'border border-white/10 bg-white/5 backdrop-blur-sm',
+        'px-4 py-2 text-sm font-semibold text-gray-200',
+        'transition-all duration-200',
+        'hover:border-white/20 hover:bg-white/10 hover:text-white',
+        'active:scale-[0.97]',
+        className,
+      ].join(' ')}
     >
-      <IoArrowBackOutline />
-      {label}
+      <IoArrowBackOutline
+        className="transition-transform duration-200 group-hover:-translate-x-0.5"
+        size={16}
+      />
+      Back
     </button>
   );
 };

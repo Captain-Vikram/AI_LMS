@@ -1,5 +1,6 @@
 import jwt
 import httpx
+import re
 from fastapi import Header, HTTPException
 from bson import ObjectId
 from typing import Iterable, List, Optional, Dict, Any
@@ -118,31 +119,95 @@ def get_primary_role(roles: List[str]) -> str:
     return roles[0] if roles else "student"
 
 
-async def get_current_user(authorization: str = Header(None)):
+async def get_current_user(
+    authorization: str = Header(None),
+    token: Optional[str] = None
+):
     """FastAPI dependency: returns current user info by verifying Clerk token"""
-    if not authorization or not authorization.startswith("Bearer "):
+    final_token = None
+    if authorization and authorization.startswith("Bearer "):
+        final_token = authorization.split(" ")[1]
+    elif token:
+        final_token = token
+
+    if not final_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = authorization.split(" ")[1]
-    payload = await verify_clerk_token(token)
-    
-    clerk_id = payload.get("sub")
-    if not clerk_id:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-
     db = get_db()
+
+    payload = await verify_clerk_token(final_token)
+    clerk_id = payload.get("sub")
     
+    def _extract_email_from_payload(p: Dict[str, Any]) -> Optional[str]:
+        # Common claim names
+        email = p.get("email") or p.get("preferred_email") or p.get("email_address")
+        if email:
+            return email
+
+        # Common list shapes
+        for key in ("emails", "email_addresses", "email_addresses_verified", "email_addresses_list"):
+            items = p.get(key)
+            if isinstance(items, list) and items:
+                first = items[0]
+                if isinstance(first, str):
+                    return first
+                if isinstance(first, dict):
+                    for fld in ("email", "value", "address"):
+                        if first.get(fld):
+                            return first.get(fld)
+        return None
+
     # Find user by clerk_id
     user = await db.users.find_one({"clerk_id": clerk_id})
+    if user:
+        try:
+            uid = str(user.get("_id"))
+            print(f"[auth] found user by clerk_id: {uid} email={user.get('email')}")
+        except Exception:
+            pass
     
     if not user:
-        # Check if user exists by email as a fallback/migration
-        email = payload.get("email")
+        # Try to extract an email from the token payload (many shapes possible)
+        email = _extract_email_from_payload(payload)
         if email:
-            user = await db.users.find_one({"email": email})
+            # Case-insensitive match to avoid capitalization mismatches
+            user = await db.users.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
             if user:
                 # Update existing user with clerk_id
                 await db.users.update_one({"_id": user["_id"]}, {"$set": {"clerk_id": clerk_id}})
+                try:
+                    print(f"[auth] mapped clerk_id {clerk_id} to existing user {str(user.get('_id'))} email={user.get('email')}")
+                except Exception:
+                    pass
+
+        # If still not found, optionally call Clerk API (requires CLERK_API_KEY env var)
+        if not user:
+            CLERK_API_KEY = os.getenv("CLERK_API_KEY")
+            if CLERK_API_KEY:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        headers = {"Authorization": f"Bearer {CLERK_API_KEY}"}
+                        resp = await client.get(f"https://api.clerk.dev/v1/users/{clerk_id}", headers=headers)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            # Try multiple places for an email in Clerk user object
+                            clerk_email = data.get("email") or data.get("primary_email_address")
+                            if not clerk_email:
+                                eaddrs = data.get("email_addresses") or []
+                                if eaddrs and isinstance(eaddrs, list):
+                                    first = eaddrs[0]
+                                    if isinstance(first, dict):
+                                        clerk_email = first.get("email") or first.get("email_address") or first.get("address")
+                            if clerk_email:
+                                user = await db.users.find_one({"email": {"$regex": f"^{re.escape(clerk_email)}$", "$options": "i"}})
+                                if user:
+                                    await db.users.update_one({"_id": user["_id"]}, {"$set": {"clerk_id": clerk_id}})
+                                    try:
+                                        print(f"[auth] Clerk API matched email {clerk_email} -> user {str(user.get('_id'))}; set clerk_id {clerk_id}")
+                                    except Exception:
+                                        pass
+                except Exception as e:
+                    print(f"Clerk API fetch error: {e}")
         
         if not user:
             # Create new user record from Clerk data
@@ -159,6 +224,10 @@ async def get_current_user(authorization: str = Header(None)):
             }
             result = await db.users.insert_one(new_user_data)
             user = await db.users.find_one({"_id": result.inserted_id})
+            try:
+                print(f"[auth] created NEW user {str(result.inserted_id)} email={new_user_data.get('email')}")
+            except Exception:
+                pass
 
     roles = derive_user_roles(user)
     primary_role = get_primary_role(roles)

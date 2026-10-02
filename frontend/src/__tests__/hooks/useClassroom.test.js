@@ -1,8 +1,4 @@
-"""
-Frontend Hook Tests - Test all custom hooks (useClassroom.js)
-Tests data fetching, state management, and error handling
-"""
-
+/* eslint-env jest */
 import { renderHook, act, waitFor } from '@testing-library/react-hooks';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -630,3 +626,5 @@ describe('useClassroomResources', () => {
     );
   });
 });
+
+

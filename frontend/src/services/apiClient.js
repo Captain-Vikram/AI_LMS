@@ -13,6 +13,7 @@ const clearClientAuthState = () => {
   localStorage.removeItem("skillAssessmentComplete");
 };
 
+// eslint-disable-next-line no-unused-vars
 const isTokenExpired = (token) => {
   try {
     const [, payloadBase64] = token.split(".");
@@ -72,16 +73,19 @@ const buildErrorMessage = (responseBody, status) => {
   return `Request failed with status ${status}`;
 };
 
+const getToken = async () => {
+  if (getTokenFn) {
+    return await getTokenFn();
+  }
+  return null;
+};
+
 const request = async (path, options = {}) => {
   let { token, ...fetchOptions } = options;
   
   // Automatically get token if getter is registered and token not provided
-  if (!token && getTokenFn) {
-    try {
-      token = await getTokenFn();
-    } catch (err) {
-      console.warn("Failed to get authentication token", err);
-    }
+  if (!token) {
+    token = await getToken();
   }
 
   const isFormData = fetchOptions.body instanceof FormData;
@@ -161,4 +165,4 @@ const apiClient = {
 };
 
 export default apiClient;
-export { clearClientAuthState, setTokenGetter };
+export { clearClientAuthState, setTokenGetter, getToken };

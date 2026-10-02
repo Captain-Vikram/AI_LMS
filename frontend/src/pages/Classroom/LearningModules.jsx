@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   IoBookOutline,
@@ -30,12 +30,17 @@ import {
   useReorderLearningModules,
   useDeleteLearningModule,
   useRemoveResourceFromModule,
+  useAutoGenerateModules,
 } from '../../hooks/useClassroom';
+
+import { API_ENDPOINTS } from '../../config/api';
+
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
 import LearningModulesStudent from '../../components/Classroom/LearningModulesStudent';
 import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
+import GenerationBanner from '../../components/Classroom/GenerationBanner';
 
 const getModuleId = (module) => module?.module_id || module?._id || '';
 
@@ -62,7 +67,8 @@ const normalizeResourceLink = (urlValue) => {
       const parsed = JSON.parse(text.replace(/'/g, '"'));
       if (Array.isArray(parsed))
         text = unwrapQuotes(parsed.find((item) => typeof item === 'string' && item.trim()) || '');
-    } catch {}
+    // eslint-disable-next-line no-empty
+    } catch { /* Ignored */ }
   }
   text = unwrapQuotes(text).replace(/\\u0026/g, '&').replace(/&amp;/gi, '&');
   const matched = text.match(/https?:\/\/[^\s'"\]]+/i);
@@ -173,8 +179,10 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
                   return;
                 }
                 img.style.display = 'none';
+              // eslint-disable-next-line no-unused-vars
               } catch (_err) {
-                try { e.currentTarget.style.display = 'none'; } catch (_e) {}
+                // eslint-disable-next-line no-unused-vars
+                try { e.currentTarget.style.display = 'none'; } catch { /* Ignored */ }
               }
             }}
           />
@@ -182,9 +190,23 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
       ) : null}
 
       <div className="flex items-start justify-between mb-3">
-        <span className="rounded-full bg-white/5 px-2.5 py-1 font-mono text-[10px] tracking-wider text-gray-400">
-          {resource?.skill || resource?.source || 'GENERAL'}
-        </span>
+        <div className="flex flex-col gap-1.5">
+          <span className="rounded-full bg-white/5 px-2.5 py-1 font-mono text-[10px] tracking-wider text-gray-400">
+            {resource?.skill || resource?.source || 'GENERAL'}
+          </span>
+          <div className="flex items-center gap-2 px-1">
+            {resource?.difficulty_tag && (
+              <span className="text-[9px] font-black uppercase tracking-tight text-cyan-400/60">
+                {resource.difficulty_tag}
+              </span>
+            )}
+            {resource?.relevance_score && (
+              <span className="text-[9px] font-black text-emerald-400/60">
+                MATCH {resource.relevance_score}/5
+              </span>
+            )}
+          </div>
+        </div>
         <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${getStatusPillClass(status)}`}>
           {getApprovalStatusLabel(status)}
         </span>
@@ -194,6 +216,11 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
         <h3 className="line-clamp-2 text-sm font-medium leading-snug text-gray-100">
           {toShortTitle(resource?.title, 100)}
         </h3>
+        {resource?.blueprint_subtopic && (
+          <p className="mt-1 text-[10px] font-medium italic text-purple-400/70">
+            Topic: {resource.blueprint_subtopic}
+          </p>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-4">
@@ -308,6 +335,7 @@ const ResourceSection = ({ groupKey, label, items, actionPendingId, onApprove, o
   );
 };
 
+// eslint-disable-next-line no-unused-vars
 const StatCard = ({ label, value, icon: Icon, colorClass, borderClass }) => (
   <div className={`group relative rounded-2xl border ${borderClass} bg-gray-900/40 p-5 backdrop-blur-sm transition-all duration-300 hover:bg-gray-900/60`}>
     <div className="flex items-center justify-between">
@@ -357,6 +385,35 @@ const LearningModulesPage = () => {
   const [resourceActionMessage, setResourceActionMessage] = useState('');
   const [resourceActionError, setResourceActionError] = useState('');
 
+  const syllabusInputRef = useRef(null);
+
+  const handleRegenerateResources = async (file = null) => {
+    setResourceActionMessage('Connecting to AI engine...');
+    setResourceActionError(null);
+    
+    const result = await regenerateResources(file);
+    if (result.success) {
+      setResourceActionMessage('AI discovery started. You can track progress in the banner.');
+    } else if (result.status === 'syllabus_missing') {
+      setResourceActionMessage(null);
+      setResourceActionError('Syllabus PDF is required for regeneration. Please select your syllabus file.');
+      // Auto-trigger file picker
+      if (syllabusInputRef.current) syllabusInputRef.current.click();
+    } else {
+      setResourceActionMessage(null);
+      setResourceActionError(result.message || 'Failed to start regeneration');
+    }
+  };
+
+  const handleSyllabusFileChange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) {
+      await handleRegenerateResources(file);
+      // Clear input so same file can be selected again
+      if (syllabusInputRef.current) syllabusInputRef.current.value = '';
+    }
+  };
+
   const [isManualResourceModalOpen, setIsManualResourceModalOpen] = useState(false);
   const [manualResourceData, setManualResourceData] = useState({
     title: '',
@@ -375,8 +432,25 @@ const LearningModulesPage = () => {
     error: classResourcesError,
     approveResource,
     addManualResource,
+    regenerateResources,
     refresh: refreshClassResources,
+    fetchProgress,
+    jobId,
+    generationStatus,
   } = useClassroomResources(classroomId, 'class', isResourceHubRoute && canManageModules);
+
+  // Automatic polling for background jobs
+  useEffect(() => {
+    let pollInterval = null;
+    if (jobId && ['pending', 'planning', 'searching', 'filtering', 'generation_started', 'generation_in_progress'].includes(generationStatus)) {
+      pollInterval = setInterval(() => {
+        fetchProgress();
+      }, 5000);
+    }
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [jobId, generationStatus, fetchProgress]);
   const { createModule, loading: creatingModule, error: createModuleError } =
     useCreateLearningModule(classroomId);
   const { reorderModules, loading: reorderingModules, error: reorderModulesError } =
@@ -390,7 +464,21 @@ const LearningModulesPage = () => {
   const { assignResources, loading: assigningResources, error: assignResourcesError } =
     useAssignResourcesToModule(classroomId);
   const { deleteModule, loading: deletingModule } = useDeleteLearningModule(classroomId);
-  const { removeResource: removeResourceFromModule, loading: removingResource } = useRemoveResourceFromModule(classroomId);
+  const { removeResource: removeResourceFromModule } = useRemoveResourceFromModule(classroomId);
+
+  const { generateModules, loading: generatingModules } = useAutoGenerateModules(classroomId);
+
+  const handleAutoGenerate = async (force = false) => {
+    if (window.confirm(force ? 'This will REBUILD all modules from scratch using current approved resources. Continue?' : 'This will create new modules for any skills that don\'t have one yet. Continue?')) {
+      const res = await generateModules(force);
+      if (res.success) {
+        setManagementMessage(`Successfully processed curriculum: ${res.modulesCreated} created, ${res.modulesUpdated} updated.`);
+        refreshModules();
+      } else {
+        setResourceActionError(res.message || 'Failed to sync modules');
+      }
+    }
+  };
 
   const orderedModules = useMemo(() => getSortedModules(modules), [modules]);
   const activeModule = useMemo(
@@ -411,6 +499,7 @@ const LearningModulesPage = () => {
       .filter((cat) => cat.resources.length > 0);
   }, [activeModule, approvedResourceCategories]);
 
+  // eslint-disable-next-line no-unused-vars
   const completionPercentage = useMemo(() => {
     if (!studentProgress?.module_progress?.length) return 0;
     const sum = studentProgress.module_progress.reduce(
@@ -661,9 +750,16 @@ const LearningModulesPage = () => {
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-6">
           <AppBackButton
-            label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
           />
+
+          {jobId && (
+            <GenerationBanner 
+              jobId={jobId} 
+              title="AI is Discovering New Resources" 
+              onReady={() => refreshClassResources('class')}
+            />
+          )}
 
           <div className="relative overflow-hidden rounded-3xl border border-white/5 bg-gray-900/40 p-8 backdrop-blur-md shadow-2xl">
             <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-purple-600/10 blur-[100px]" />
@@ -703,6 +799,23 @@ const LearningModulesPage = () => {
                   className="inline-flex h-11 items-center gap-2 rounded-xl border border-purple-500/20 bg-purple-500/10 px-5 text-sm font-bold text-purple-300 transition-all hover:bg-purple-500/20 hover:scale-105 active:scale-95"
                 >
                   <IoRefreshOutline /> Refresh
+                </button>
+                <input 
+                  type="file" 
+                  ref={syllabusInputRef} 
+                  className="hidden" 
+                  accept="application/pdf"
+                  onChange={handleSyllabusFileChange}
+                />
+                <button
+                  onClick={() => {
+                    if (window.confirm('Please select/re-upload your syllabus PDF to start the AI resource discovery process.')) {
+                      if (syllabusInputRef.current) syllabusInputRef.current.click();
+                    }
+                  }}
+                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-5 text-sm font-bold text-cyan-300 transition-all hover:bg-cyan-500/20 hover:scale-105 active:scale-95"
+                >
+                  <IoSparklesOutline /> Regenerate AI
                 </button>
               </div>
             </div>
@@ -769,13 +882,9 @@ const LearningModulesPage = () => {
               ))}
               
               {canManageModules && (
-                <button
-                  onClick={() => setIsManualResourceModalOpen(true)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-400 transition-all hover:bg-purple-500/20"
-                  title="Add Custom Resource"
-                >
-                  <IoAdd size={18} />
-                </button>
+                <div className="flex items-center justify-center p-1">
+                  {/* Manual resource addition disabled */}
+                </div>
               )}
             </div>
           </div>
@@ -919,7 +1028,6 @@ const LearningModulesPage = () => {
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-6">
           <AppBackButton
-            label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
           />
           <LearningModulesStudent classroomId={classroomId} modules={orderedModules} />
@@ -931,7 +1039,6 @@ const LearningModulesPage = () => {
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-8 pb-20">
         <AppBackButton
-          label="Back to Dashboard"
           fallbackTo={`/classroom/${classroomId}/dashboard`}
         />
 
@@ -957,6 +1064,15 @@ const LearningModulesPage = () => {
                   <IoGridOutline className="group-hover:text-cyan-400 transition-colors" /> Dashboard
                 </button>
                 <div className="flex gap-2">
+                   <button 
+                     onClick={() => handleAutoGenerate(true)} 
+                     disabled={generatingModules}
+                     className="group flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 text-sm font-bold text-cyan-300 transition-all hover:bg-cyan-500/20 hover:scale-105 disabled:opacity-50"
+                     title="Rebuild curriculum from verified resources"
+                   >
+                     {generatingModules ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400/30 border-t-cyan-400" /> : <IoSparklesOutline />}
+                     Sync AI
+                   </button>
                    <button onClick={() => navigate(`/classroom/${classroomId}/roster`)} className="group flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 text-sm font-bold text-emerald-300 transition-all hover:bg-emerald-500/20 hover:scale-105">
                      <IoPeopleOutline /> Roster
                    </button>
@@ -1106,7 +1222,7 @@ const LearningModulesPage = () => {
                           <div className="rounded-2xl border-2 border-dashed border-white/5 p-10 text-center bg-white/[0.01]">
                              <IoLayersOutline className="mx-auto text-3xl text-gray-700 mb-4" />
                              <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed font-medium">
-                               All certified resources are already mapped. Generate more from the Resource Hub.
+                               All certified resources are already mapped.
                              </p>
                           </div>
                         ) : (
@@ -1291,3 +1407,4 @@ const LearningModulesPage = () => {
 };
 
 export default LearningModulesPage;
+

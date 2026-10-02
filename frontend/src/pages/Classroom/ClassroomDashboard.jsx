@@ -14,7 +14,7 @@ import ModuleQuestionHeatmap from '../../components/Classroom/ModuleQuestionHeat
 import ActivityFeed from '../../components/Classroom/ActivityFeed';
 import AppBackButton from '../../components/UI/AppBackButton';
 import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
-import apiClient from '../../services/apiClient';
+
 import { API_ENDPOINTS } from '../../config/api';
 import { normalizeClassroomRole } from '../../utils/classroomRoles';
 import {
@@ -37,7 +37,11 @@ import {
   IoPeopleOutline,
   IoLayersOutline,
   IoNotificationsOutline,
+  IoTimeOutline,
+  IoSparklesOutline,
 } from 'react-icons/io5';
+
+import GenerationBanner from '../../components/Classroom/GenerationBanner';
 
 /* ─── Utilities ──────────────────────────────────────────────────── */
 const clamp = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0; };
@@ -141,6 +145,7 @@ const ActionPill = ({ label, onClick, variant = 'ghost', badge }) => {
   );
 };
 
+// eslint-disable-next-line no-unused-vars
 const StatChip = ({ icon: Icon, label, color }) => (
   <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold ${color}`}>
     <Icon className="text-[11px]" />{label}
@@ -192,8 +197,11 @@ const ClassroomDashboard = () => {
       : 'student'
   );
   const [studentClassrooms, setStudentClassrooms] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [studentClassProgress, setStudentClassProgress] = useState({});
+  // eslint-disable-next-line no-unused-vars
   const [classContextLoading, setClassContextLoading] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [classContextError, setClassContextError] = useState('');
   const [pendingGradingCount, setPendingGradingCount] = useState(0);
   const [studentActivityStats, setStudentActivityStats] = useState({
@@ -205,10 +213,28 @@ const ClassroomDashboard = () => {
   const [teacherHeatmapLoading, setTeacherHeatmapLoading] = useState(false);
   const [studentHeatmapLoading, setStudentHeatmapLoading] = useState(false);
 
-  const { dashboard, overview, loading: dashLoad, error: dashErr } = useClassroomDashboard(classroomId);
+  const { dashboard, overview, loading: dashLoad, error: dashErr, refresh: refreshDashboard } = useClassroomDashboard(classroomId);
   const { analytics, studentProgress, fetchMyProgress } = useClassroomAnalytics(classroomId);
   const { announcements, loading: annLoad, createAnnouncement, markAsViewed, deleteAnnouncement } = useAnnouncements(classroomId);
   const { modules, loading: modLoad } = useLearningModules(classroomId);
+
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [newAnnouncementNotification, setNewAnnouncementNotification] = useState(null);
+
+  useEffect(() => {
+    if (Array.isArray(announcements)) {
+      const currentUnread = announcements.filter(a => !a.viewed);
+      // If unread count increases, pop a real-time toast
+      if (currentUnread.length > unreadCount && unreadCount !== 0) {
+        const newest = [...currentUnread].sort((a, b) => new Date(b.created_date) - new Date(a.created_date))[0];
+        if (newest) {
+          setNewAnnouncementNotification(newest);
+          setTimeout(() => setNewAnnouncementNotification(null), 6000);
+        }
+      }
+      setUnreadCount(currentUnread.length);
+    }
+  }, [announcements, unreadCount]);
 
   useEffect(() => {
     if (!dashboard) {
@@ -236,6 +262,7 @@ const ClassroomDashboard = () => {
       if (!dashboard || userRole !== 'student') return;
       setClassContextLoading(true);
       try {
+        // eslint-disable-next-line no-undef
         const res = await apiClient.get(API_ENDPOINTS.CLASSROOM_MY_ENROLLMENTS);
         const list = normalizeEnrollments(res);
         if (!ok) return;
@@ -243,6 +270,7 @@ const ClassroomDashboard = () => {
         if (!list.length) { setStudentClassProgress({}); return; }
         const entries = await Promise.all(list.map(async (room) => {
           try {
+            // eslint-disable-next-line no-undef
             const r = await apiClient.get(`/api/analytics/classroom/${room.classroom_id}/my-progress`);
             const p = parseData(r) || {};
             const avg = clamp(p.average_score_percentage || 0);
@@ -265,6 +293,7 @@ const ClassroomDashboard = () => {
     let ok = true;
     const go = async () => {
       if (!classroomId || userRole !== 'teacher') return;
+      // eslint-disable-next-line no-undef
       try { const r = await apiClient.get(`/api/classroom/${classroomId}/pending-grading-count`); if (ok) setPendingGradingCount(Number(r?.pending_count||0)); }
       catch { if (ok) setPendingGradingCount(0); }
     };
@@ -286,6 +315,7 @@ const ClassroomDashboard = () => {
 
       setTeacherHeatmapLoading(true);
       try {
+        // eslint-disable-next-line no-undef
         const response = await apiClient.get(`/api/analytics/classroom/${classroomId}/ai-questions-by-module`);
         if (active) {
           setTeacherQuestionHeatmap(parseData(response) || null);
@@ -322,6 +352,7 @@ const ClassroomDashboard = () => {
 
       setStudentHeatmapLoading(true);
       try {
+        // eslint-disable-next-line no-undef
         const response = await apiClient.get(
           `/api/analytics/classroom/${classroomId}/ai-questions-by-module?student_id=${encodeURIComponent(studentProgress.student_id)}`
         );
@@ -358,6 +389,7 @@ const ClassroomDashboard = () => {
       }
 
       try {
+        // eslint-disable-next-line no-undef
         const response = await apiClient.get(`/api/classroom/${classroomId}/activity-feed?limit=200`);
         const items = Array.isArray(response?.items) ? response.items : [];
         const myId = String(studentProgress.student_id || '').trim();
@@ -411,9 +443,15 @@ const ClassroomDashboard = () => {
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-5 px-3 py-5 sm:px-5">
           <AppBackButton
-            label="Back to Classrooms"
-            fallbackTo="/classrooms/"
+            fallbackTo="/classrooms"
           />
+
+          {td.resource_generation_meta?.job_id && td.resource_generation_meta?.status !== 'ready' && (
+            <GenerationBanner 
+              jobId={td.resource_generation_meta.job_id} 
+              onReady={() => refreshDashboard()}
+            />
+          )}
 
           {/* ── HERO ─────────────────────────────────────────── */}
           <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#060c18] via-[#0a1020] to-[#0c1428] shadow-2xl">
@@ -682,15 +720,19 @@ const ClassroomDashboard = () => {
   const coreProgress = clamp(avgScore*0.45+ptsAtt*0.35+modAvg*0.2);
   const roomIdx   = studentClassrooms.findIndex((r)=>r.classroom_id===classroomId);
   const totalRooms = studentClassrooms.length || 1;
+  // eslint-disable-next-line no-unused-vars
   const roomsDisplay = studentClassrooms.length > 0 ? studentClassrooms : [{ classroom_id:classroomId, name:sd.classroom_name, subject:sd.classroom_subject, grade_level:'' }];
 
   return (
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-5 px-3 py-5 sm:px-5">
         <AppBackButton
-          label="Back to Classrooms"
           fallbackTo="/classrooms"
         />
+
+        {sd.resource_generation_meta?.job_id && sd.resource_generation_meta?.status !== 'ready' && (
+          <GenerationBanner jobId={sd.resource_generation_meta.job_id} />
+        )}
 
         {/* ── STUDENT HERO ── */}
         <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#070816] via-[#09091e] to-[#0b0e22] shadow-2xl">
@@ -725,6 +767,17 @@ const ClassroomDashboard = () => {
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] pt-4">
               <ActionPill label="Personal Resources" onClick={() => navigate(`/classroom/${classroomId}/personal-resources`)} variant="violet" />
               <ActionPill label="Open Modules"       onClick={() => navigate(`/classroom/${classroomId}/modules`)} variant="emerald" />
+              <ActionPill 
+                label="Announcements" 
+                onClick={() => {
+                  const element = document.getElementById('classroom-announcements');
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }} 
+                variant="ghost" 
+                badge={unreadCount} 
+              />
             </div>
           </div>
         </div>
@@ -803,11 +856,16 @@ const ClassroomDashboard = () => {
               <SectionLabel>My Assignments</SectionLabel>
               <PendingAssignments assignments={sd.pending_assignments} loading={false} />
             </Panel>
-            <Panel>
-              <SectionLabel right={<span className="inline-flex items-center gap-1 text-slate-700"><IoNotificationsOutline /> updates</span>}>
+            <Panel id="classroom-announcements">
+              <SectionLabel right={
+                <span className="inline-flex items-center gap-1.5 font-semibold text-slate-500 bg-white/[0.03] px-2.5 py-0.5 rounded-full border border-white/[0.05]">
+                  <IoNotificationsOutline className={unreadCount > 0 ? "text-cyan-400 animate-pulse" : "text-slate-500"} />
+                  {unreadCount > 0 ? `${unreadCount} new` : 'updates'}
+                </span>
+              }>
                 Announcements
               </SectionLabel>
-              <AnnouncementFeed announcements={sd.announcements} onMarkViewed={markAsViewed} isTeacher={false} loading={annLoad} />
+              <AnnouncementFeed announcements={announcements} onMarkViewed={markAsViewed} isTeacher={false} loading={annLoad} />
             </Panel>
           </div>
           <div className="space-y-5">
@@ -849,6 +907,54 @@ const ClassroomDashboard = () => {
             </Panel>
           </div>
         </div>
+
+        {/* Real-time Announcement Toast Popup */}
+        {newAnnouncementNotification && (
+          <div className="fixed bottom-6 right-6 z-[9999] max-w-sm w-full bg-[#0d1527]/95 border border-cyan-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-md transition-all duration-300 animate-in slide-in-from-bottom-8 fade-in">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 bg-cyan-500/20 p-2.5 rounded-xl text-cyan-400 border border-cyan-500/30">
+                <IoNotificationsOutline className="h-6 w-6 animate-bounce" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-white">New Announcement!</h4>
+                  <button 
+                    onClick={() => setNewAnnouncementNotification(null)}
+                    className="text-slate-400 hover:text-white text-lg transition-colors p-1"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <p className="text-xs font-semibold text-cyan-300 mt-1">
+                  {newAnnouncementNotification.title}
+                </p>
+                <p className="text-xs text-slate-300 mt-1 line-clamp-2">
+                  {newAnnouncementNotification.content}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button 
+                    onClick={() => {
+                      setNewAnnouncementNotification(null);
+                      const element = document.getElementById('classroom-announcements');
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }} 
+                    className="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition-all shadow-md"
+                  >
+                    Read Now
+                  </button>
+                  <button 
+                    onClick={() => setNewAnnouncementNotification(null)} 
+                    className="border border-slate-700 hover:bg-white/5 text-slate-300 px-3 py-1.5 rounded-lg text-xs transition-all"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </GlassDashboardShell>

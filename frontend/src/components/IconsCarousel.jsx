@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+
 import { IconsArray } from '../assets/IconsArray';
 import { shuffleArray } from '../utils/shuffleArray';
 
@@ -61,3 +62,4 @@ const IconsCarousel = ({ backgroundColor = "transparent" }) => {
 };
 
 export default IconsCarousel;
+

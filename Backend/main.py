@@ -5,11 +5,21 @@ from importlib import import_module
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any
+# Ensure Backend package directory is on sys.path so top-level imports like
+# `from routes...` resolve when running the app from the repository root.
+BACKEND_PKG_DIR = Path(__file__).resolve().parent
+if str(BACKEND_PKG_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_PKG_DIR))
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
+# Ensure request-model stubs exist before importing many route modules
+try:
+    import annotation_stubs  # populates builtins with permissive `*Request` models
+except Exception as _e:
+    print(f"[annotation_stubs] import failed: {_e}")
 from routes.mcq_routes import router as mcq_router
 from routes.auth_routes import router as auth_router
 from routes.onboarding_routes import router as onboarding_router
@@ -29,9 +39,14 @@ from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
 from routes.module_assessment_workflow_routes import router as module_assessment_workflow_router
 from routes.skill_pathway_routes import router as skill_pathway_router
+from routes.project_analyzer.router import router as project_analyzer_router
 from functions.service_health import get_dependency_health_snapshot
-from database_async import init_db, disconnect_from_mongo
+from database_async import init_db, disconnect_from_mongo, get_db
 from functions.cache_utils import cache_manager
+from intel_acceleration import apply_intel_optimizations
+
+# Apply Intel AI Optimizations (IPEX, OpenVINO, Scikit-learn)
+apply_intel_optimizations()
 
 # Add handoff_fastapi to import path so portable_rag_backend can be mounted directly.
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -67,6 +82,30 @@ async def lifespan(app: FastAPI):
     print("🚀 Initializing async database and cache connections...")
     await init_db()
     await cache_manager.connect()
+    
+    # NEW: Automatic Job Recovery
+    db = get_db()
+    try:
+        from functions.async_generation import background_generate_resources
+        interrupted_jobs = await db.ai_generation_jobs.find({
+            "status": {"$in": ["pending", "planning", "searching", "filtering"]}
+        }).to_list(None)
+        
+        if interrupted_jobs:
+            print(f"🔄 Found {len(interrupted_jobs)} interrupted background jobs. Resuming...")
+            for job in interrupted_jobs:
+                job_id = str(job["_id"])
+                asyncio.create_task(background_generate_resources(
+                    job_id=job_id,
+                    assessment_seed=job.get("assessment_seed", {}),
+                    classroom_id=job.get("classroom_id"),
+                    user_id=str(job["user_id"]) if job.get("user_id") else None,
+                    source=job.get("source", "ai"),
+                    approval_status=job.get("approval_status", "pending")
+                ))
+    except Exception as e:
+        print(f"⚠️ Failed to recover interrupted jobs: {e}")
+
     print("✅ Infrastructure initialized and ready for async operations")
     yield
     print("🛑 Shutting down database and cache connections...")
@@ -83,13 +122,19 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Set ALLOWED_ORIGINS in .env as a comma-separated list for production.
+# Defaults to localhost dev origins so local development works out of the box.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # Include routers
@@ -112,6 +157,7 @@ app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
 app.include_router(module_assessment_workflow_router)
 app.include_router(skill_pathway_router)
+app.include_router(project_analyzer_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
 portable_rag_backend = None
@@ -149,6 +195,8 @@ def _classify_unhandled_exception(exc: Exception) -> tuple[int, dict[str, Any]]:
     }
 
 
+import asyncio
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     incident_id = str(uuid.uuid4())
@@ -156,7 +204,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
     status_code, detail_payload = _classify_unhandled_exception(exc)
     detail_payload["incident_id"] = incident_id
-    detail_payload["dependency_status"] = get_dependency_health_snapshot()
+    detail_payload["dependency_status"] = await asyncio.to_thread(get_dependency_health_snapshot)
 
     return JSONResponse(
         status_code=status_code,
@@ -170,7 +218,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def health_check():
     lmstudio_url = os.getenv("LMSTUDIO_URL", "http://127.0.0.1:1234")
     model_name = os.getenv("LMSTUDIO_MODEL") or "auto-detect"
-    dependency_health = get_dependency_health_snapshot()
+    dependency_health = await asyncio.to_thread(get_dependency_health_snapshot)
 
     return {
         "status": "healthy" if dependency_health["status"] == "healthy" else "degraded",
@@ -183,7 +231,7 @@ async def health_check():
 
 @app.get("/health/dependencies")
 async def dependency_health_check():
-    return get_dependency_health_snapshot()
+    return await asyncio.to_thread(get_dependency_health_snapshot)
 
 
 # Root endpoint

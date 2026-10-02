@@ -1,0 +1,13 @@
+# Add these to your project's requirements.txt
+
+# AI Provider Libraries
+requests==2.31.0
+python-dotenv==1.0.0
+
+# GitHub Integration
+GitPython==3.1.40
+
+# FastAPI already required, but versions for compatibility:
+# fastapi>=0.104.0
+# uvicorn>=0.24.0
+# python-multipart>=0.0.6

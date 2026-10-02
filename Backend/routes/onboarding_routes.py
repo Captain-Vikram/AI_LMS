@@ -84,20 +84,6 @@ async def complete_profile(
         }
     )
     
-    # Also update or create profile in user_profiles collection
-    await db.user_profiles.update_one(
-        {"user_id": user_oid},
-        {
-            "$set": {
-                "first_name": payload.first_name,
-                "last_name": payload.last_name,
-                "role": role,
-                "updated_at": datetime.utcnow()
-            }
-        },
-        upsert=True
-    )
-    
     return {
         "status": "success",
         "message": "Profile updated successfully",
@@ -431,25 +417,6 @@ async def teacher_onboarding_setup(
                 "updated_date": datetime.utcnow(),
             }
         },
-    )
-
-    await db.teacher_onboarding.update_one(
-        {"user_id": user_oid},
-        {
-            "$set": {
-                "user_id": user_oid,
-                "institution_name": institution_name.strip(),
-                "classroom_id": classroom_id,
-                "classroom_name": classroom_name.strip(),
-                "subject": subject.strip(),
-                "grade_level": grade_level.strip(),
-                "teaching_goals": teaching_goals.strip(),
-                "preferred_pace": preferred_pace.strip(),
-                "ai_pathway": ai_pathway,
-                "updated_at": datetime.utcnow(),
-            }
-        },
-        upsert=True,
     )
 
     return {

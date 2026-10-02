@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+// eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 import { IoCloseOutline, IoLockClosedOutline, IoRibbonOutline } from 'react-icons/io5';
 import * as MaterialIcons from 'react-icons/md';

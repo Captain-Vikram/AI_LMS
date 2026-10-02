@@ -37,13 +37,12 @@ async def warm_user_cache(user_id: str, role: str):
         user_oid = ObjectId(user_id)
         
         # 1. Cache User Profile
-        user_profile = await db.user_profiles.find_one({"user_id": user_oid})
         user = await db.users.find_one({"_id": user_oid})
         
         if user:
             profile_data = {
                 "id": str(user_id),
-                "name": f"{user_profile.get('first_name', '') if user_profile else user.get('first_name', '')} {user_profile.get('last_name', '') if user_profile else user.get('last_name', '')}".strip(),
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
                 "role": role,
                 "onboardingComplete": user.get("onboarding_complete", False),
                 "assessmentComplete": user.get("assessment_complete", False)
@@ -52,15 +51,7 @@ async def warm_user_cache(user_id: str, role: str):
             await _cache_data("api", "/api/auth/user-profile", user_id, profile_data, ttl=600)
             
         # 2. Fetch Skill Pathways / Classrooms depending on implementation
-        # Find active pathways for the user
-        enrolled_pathways = await db.skill_pathways.find({"enrolled_users": user_oid}).to_list(length=5)
-        if enrolled_pathways:
-            pathways_data = []
-            for p in enrolled_pathways:
-                p["_id"] = str(p["_id"])
-                p["enrolled_users"] = [str(u) for u in p.get("enrolled_users", [])]
-                pathways_data.append(p)
-            await _cache_data("api", "/api/skill-pathway/enrolled", user_id, pathways_data, ttl=600)
+        # (Legacy skill_pathways caching block removed; global_learning_pathways / student_pathway_progress are not pre-cached)
             
         # 3. Cache Login Activity
         today = asyncio.get_event_loop().time() # just an approximation or logic mirror

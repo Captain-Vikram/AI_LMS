@@ -103,6 +103,12 @@ class AnnouncementsService:
                 if not student_in_group:
                     continue
 
+            # Determine if this specific student has viewed this announcement
+            viewed_by_list = ann.get("viewed_by", [])
+            is_viewed = False
+            if student_oid:
+                is_viewed = any(str(uid) == str(student_oid) for uid in viewed_by_list)
+
             result.append({
                 "announcement_id": str(ann["_id"]),
                 "title": ann["title"],
@@ -111,7 +117,8 @@ class AnnouncementsService:
                 "created_date": ann.get("created_date").isoformat()
                 if isinstance(ann.get("created_date"), datetime)
                 else ann.get("created_date"),
-                "views": ann.get("views", 0)
+                "views": ann.get("views", 0),
+                "viewed": is_viewed
             })
 
         return result

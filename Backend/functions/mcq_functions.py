@@ -11,7 +11,7 @@ def create_quiz_generator(api_key: str) -> Any:
     Creates a structured quiz generator using local LM Studio inference.
     """
     # Configure local adapter (api_key is optional and treated as API token if set).
-    genai.resolve_model_name(os.getenv("LMSTUDIO_MODEL"))
+    # genai.resolve_model_name(os.getenv("LMSTUDIO_MODEL"))
 
     # Use the configured local model unless an explicit model override is provided.
     try:

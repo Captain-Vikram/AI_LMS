@@ -2,11 +2,11 @@ import os
 from pymongo import MongoClient
 
 def get_mongo_url():
-    return os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+  return os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
 
 
 def get_db_name():
-    return os.getenv("MONGO_DB_NAME", "quasar")
+  return os.getenv("MONGO_DB_NAME", "SkillMaster")
 
 client = MongoClient(get_mongo_url())
 db = client[get_db_name()]

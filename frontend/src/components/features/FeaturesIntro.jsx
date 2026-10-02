@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+
 
 const FeaturesIntro = ({ introY, introOp, introScale }) => {
   return (
@@ -85,3 +85,4 @@ const FeaturesIntro = ({ introY, introOp, introScale }) => {
 };
 
 export default FeaturesIntro;
+

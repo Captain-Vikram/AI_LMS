@@ -5,8 +5,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Depends
 from fastapi.responses import FileResponse
+from functions.utils import get_current_user
 
 from portable_rag_backend.bootstrap import PortableRAGBackend
 from portable_rag_backend.schemas import (
@@ -136,30 +137,36 @@ def build_router(backend: PortableRAGBackend) -> APIRouter:
         )
 
     @router.post("/notebooks", response_model=NotebookResponse)
-    def create_notebook(payload: NotebookCreateRequest) -> NotebookResponse:
+    def create_notebook(payload: NotebookCreateRequest, current_user = Depends(get_current_user)) -> NotebookResponse:
+        user_id = current_user.get("user_id")
         notebook = backend.metadata_store.create_notebook(
             name=payload.name,
             description=payload.description,
+            user_id=user_id,
+            classroom_id=payload.classroom_id,
         )
         return NotebookResponse(**notebook)
 
     @router.get("/notebooks", response_model=list[NotebookResponse])
-    def list_notebooks() -> list[NotebookResponse]:
-        items = backend.metadata_store.list_notebooks()
+    def list_notebooks(classroom_id: str | None = None, current_user = Depends(get_current_user)) -> list[NotebookResponse]:
+        user_id = current_user.get("user_id")
+        items = backend.metadata_store.list_notebooks(user_id=user_id, classroom_id=classroom_id)
         return [NotebookResponse(**item) for item in items]
 
     @router.get("/notebooks/{notebook_id}", response_model=NotebookDetailResponse)
-    def get_notebook(notebook_id: str) -> NotebookDetailResponse:
+    def get_notebook(notebook_id: str, current_user = Depends(get_current_user)) -> NotebookDetailResponse:
+        user_id = current_user.get("user_id")
         try:
-            item = backend.source_service.get_notebook_detail(notebook_id)
+            item = backend.source_service.get_notebook_detail(notebook_id, user_id=user_id)
             return NotebookDetailResponse(**item)
         except Exception as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.delete("/notebooks/{notebook_id}", response_model=NotebookDeleteResponse)
-    def delete_notebook(notebook_id: str) -> NotebookDeleteResponse:
+    def delete_notebook(notebook_id: str, current_user = Depends(get_current_user)) -> NotebookDeleteResponse:
+        user_id = current_user.get("user_id")
         try:
-            result = backend.source_service.delete_notebook(notebook_id)
+            result = backend.source_service.delete_notebook(notebook_id, user_id=user_id)
             return NotebookDeleteResponse(**result)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -338,6 +345,27 @@ def build_router(backend: PortableRAGBackend) -> APIRouter:
                 script=item.get("script"),
                 error=item.get("error"),
                 updated_at=item["updated_at"],
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get(
+        "/notebooks/{notebook_id}/audio-file",
+    )
+    def get_audio_file(notebook_id: str) -> FileResponse:
+        try:
+            item = backend.source_service.get_audio_overview(notebook_id)
+            if item is None or not item.get("audio_path"):
+                raise HTTPException(status_code=404, detail="Audio file not ready or not found")
+            audio_path = Path(item["audio_path"])
+            if not audio_path.exists():
+                raise HTTPException(status_code=404, detail="Audio file missing from server disk")
+            return FileResponse(
+                path=str(audio_path),
+                filename=audio_path.name,
+                media_type="audio/mpeg",
             )
         except HTTPException:
             raise

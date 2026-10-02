@@ -38,9 +38,25 @@ class MetadataStore:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     description TEXT NOT NULL,
+                    user_id TEXT,
+                    classroom_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                """
+            )
+            try:
+                conn.execute("ALTER TABLE notebooks ADD COLUMN user_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE notebooks ADD COLUMN classroom_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+        with self._connect() as conn:
+            conn.executescript(
+                """
 
                 CREATE TABLE IF NOT EXISTS sources (
                     id TEXT PRIMARY KEY,
@@ -167,60 +183,109 @@ class MetadataStore:
                 ),
             )
 
-    def create_notebook(self, name: str, description: str = "") -> dict[str, Any]:
+    def create_notebook(self, name: str, description: str = "", user_id: str | None = None, classroom_id: str | None = None) -> dict[str, Any]:
         now = utc_now_iso()
         notebook = {
             "id": uuid4().hex,
             "name": name,
             "description": description,
+            "user_id": user_id,
+            "classroom_id": classroom_id,
             "created_at": now,
             "updated_at": now,
         }
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO notebooks (id, name, description, created_at, updated_at)
-                VALUES (:id, :name, :description, :created_at, :updated_at)
+                INSERT INTO notebooks (id, name, description, user_id, classroom_id, created_at, updated_at)
+                VALUES (:id, :name, :description, :user_id, :classroom_id, :created_at, :updated_at)
                 """,
                 notebook,
             )
         return notebook
 
-    def list_notebooks(self) -> list[dict[str, Any]]:
+    def list_notebooks(self, user_id: str | None = None, classroom_id: str | None = None) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM notebooks
-                WHERE id != ?
-                ORDER BY updated_at DESC
-                """,
-                (INTERNAL_ORPHAN_NOTEBOOK_ID,),
-            ).fetchall()
+            if user_id:
+                # Auto-allocate any existing unassigned notebooks to this user
+                conn.execute(
+                    "UPDATE notebooks SET user_id = ? WHERE user_id IS NULL AND id != ?",
+                    (user_id, INTERNAL_ORPHAN_NOTEBOOK_ID)
+                )
+                if classroom_id:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM notebooks
+                        WHERE id != ? AND user_id = ? AND (classroom_id = ? OR classroom_id IS NULL OR classroom_id = '')
+                        ORDER BY updated_at DESC
+                        """,
+                        (INTERNAL_ORPHAN_NOTEBOOK_ID, user_id, classroom_id),
+                    ).fetchall()
+                else:
+                    # Backward-compatibility: if no classroom_id is supplied, return all user's notebooks
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM notebooks
+                        WHERE id != ? AND user_id = ?
+                        ORDER BY updated_at DESC
+                        """,
+                        (INTERNAL_ORPHAN_NOTEBOOK_ID, user_id),
+                    ).fetchall()
+            else:
+                if classroom_id:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM notebooks
+                        WHERE id != ? AND (classroom_id = ? OR classroom_id IS NULL OR classroom_id = '')
+                        ORDER BY updated_at DESC
+                        """,
+                        (INTERNAL_ORPHAN_NOTEBOOK_ID, classroom_id),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM notebooks
+                        WHERE id != ?
+                        ORDER BY updated_at DESC
+                        """,
+                        (INTERNAL_ORPHAN_NOTEBOOK_ID,),
+                    ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_notebook(self, notebook_id: str) -> dict[str, Any] | None:
+    def get_notebook(self, notebook_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM notebooks WHERE id = ?", (notebook_id,)
-            ).fetchone()
+            if user_id:
+                row = conn.execute(
+                    "SELECT * FROM notebooks WHERE id = ? AND user_id = ?", (notebook_id, user_id)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM notebooks WHERE id = ?", (notebook_id,)
+                ).fetchone()
         return dict(row) if row else None
 
-    def get_notebook_detail(self, notebook_id: str) -> dict[str, Any] | None:
-        notebook = self.get_notebook(notebook_id)
+    def get_notebook_detail(self, notebook_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        notebook = self.get_notebook(notebook_id, user_id)
         if notebook is None:
             return None
         notebook["source_ids"] = sorted(self.list_source_ids(notebook_id))
         return notebook
 
-    def delete_notebook(self, notebook_id: str) -> dict[str, Any]:
+    def delete_notebook(self, notebook_id: str, user_id: str | None = None) -> dict[str, Any]:
         if notebook_id == INTERNAL_ORPHAN_NOTEBOOK_ID:
             raise ValueError("Cannot delete internal orphan notebook")
 
         with self._connect() as conn:
-            notebook = conn.execute(
-                "SELECT id FROM notebooks WHERE id = ?",
-                (notebook_id,),
-            ).fetchone()
+            if user_id:
+                notebook = conn.execute(
+                    "SELECT id FROM notebooks WHERE id = ? AND user_id = ?",
+                    (notebook_id, user_id),
+                ).fetchone()
+            else:
+                notebook = conn.execute(
+                    "SELECT id FROM notebooks WHERE id = ?",
+                    (notebook_id,),
+                ).fetchone()
             if notebook is None:
                 raise ValueError(f"Notebook '{notebook_id}' not found")
 

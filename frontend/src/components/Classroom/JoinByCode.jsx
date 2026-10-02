@@ -21,7 +21,17 @@ const JoinByCode = () => {
       const found = await apiClient.get(`${API_ENDPOINTS.CLASSROOM_FIND_BY_CODE}?code=${encodeURIComponent(normalizedCode)}`);
       const classId = found.classroom_id;
       await apiClient.post(`${API_ENDPOINTS.CLASSROOM_JOIN.replace('{id}', classId)}?enrollment_code=${encodeURIComponent(normalizedCode)}`, {});
-      navigate(`/classroom/${classId}`);
+
+      // Ping set-active-classroom so the backend registers the new context
+      // and clears any stale cached responses for this user/classroom pair.
+      try {
+        await apiClient.post(`${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${classId}`);
+      } catch {
+          // Non-fatal — the DB was already updated by the join above.
+        // Non-fatal — the DB was already updated by the join above.
+      }
+
+      navigate(`/classroom/${classId}/dashboard`);
     } catch (err) {
       setError(err.message || 'Failed to join classroom');
     } finally {
@@ -41,7 +51,7 @@ const JoinByCode = () => {
                 Enter the code shared by your teacher or admin to join the right classroom instantly.
               </p>
             </div>
-            <AppBackButton label="Back to Classrooms" fallbackTo="/classrooms" />
+            <AppBackButton fallbackTo="/classrooms" />
           </div>
         </div>
 

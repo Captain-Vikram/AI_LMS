@@ -5,6 +5,7 @@ import { API_ENDPOINTS } from '../../config/api';
 
 const ClassroomCard = ({ classroom, role }) => {
   const navigate = useNavigate();
+  // eslint-disable-next-line no-unused-vars
   const [isOpening, setIsOpening] = React.useState(false);
   const isTeacher = role === 'teacher';
   const cardColors = isTeacher

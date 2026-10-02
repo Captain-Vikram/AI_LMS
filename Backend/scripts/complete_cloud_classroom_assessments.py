@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/quasar")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/SkillMaster")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "SkillMaster")
 CLASSROOM_NAME = os.getenv("SEED_CLASSROOM_NAME", "Cloud Computing")
 PASSING_STUDENT_RATIO = float(os.getenv("PASSING_STUDENT_RATIO", "0.8"))
 GRADE_RATIO = float(os.getenv("GRADED_SUBMISSION_RATIO", "0.6"))
@@ -56,7 +57,7 @@ def normalize_resource_id(resource: dict):
 
 def main():
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client.get_database("quasar")
+    db = client.get_database(MONGO_DB_NAME)
 
     classroom = find_classroom(db)
     if not classroom:

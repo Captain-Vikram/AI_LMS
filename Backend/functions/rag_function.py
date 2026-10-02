@@ -14,26 +14,10 @@ from functions.transcript_utils import fetch_transcript_entries
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+# Intel Optimization Imports
+from intel_acceleration import HAS_OPENVINO, get_openvino_device
 
-def extract_video_id(youtube_url):
-    """
-    Extract the video ID from a YouTube URL.
-    Supports various YouTube URL formats.
-    """
-    # Regular expression to match various YouTube URL formats
-    youtube_regex = (
-        r'(https?://)?(www\.)?'
-        r'(youtube|youtu|youtube-nocookie)\.(com|be)/'
-        r'(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
-    )
-
-    youtube_match = re.match(youtube_regex, youtube_url)
-
-    if youtube_match:
-        return youtube_match.group(6)
-
-    return None
-
+from functions.youtube_quiz_functions import extract_video_id
 
 def format_timestamp(seconds):
     """
@@ -144,11 +128,29 @@ class YouTubeLangChainRAG:
         self.api_key = api_key
         self.model_name = model_name or os.getenv("LMSTUDIO_MODEL")
 
-        # Initialize embedding model
-        self.embedding_model = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            api_key=api_key
-        )
+        # Initialize embedding model - Prefer local OpenVINO for privacy and cost
+        if HAS_OPENVINO:
+            try:
+                from langchain_community.embeddings import OpenVINOEmbeddings
+                local_model = os.getenv("LOCAL_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+                device = get_openvino_device()
+                self.embedding_model = OpenVINOEmbeddings(
+                    model_name_or_path=local_model,
+                    model_kwargs={"device": device},
+                    encode_kwargs={"normalize_embeddings": True}
+                )
+                print(f"RAG: Using Intel-optimized OpenVINO embeddings on {device}")
+            except Exception as e:
+                print(f"RAG: Failed to initialize OpenVINO embeddings: {e}. Falling back to Google.")
+                self.embedding_model = GoogleGenerativeAIEmbeddings(
+                    model="models/embedding-001",
+                    api_key=api_key
+                )
+        else:
+            self.embedding_model = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                api_key=api_key
+            )
 
         # Initialize LLM
         self.llm = ChatGoogleGenerativeAI(
@@ -299,7 +301,7 @@ class YouTubeLangChainRAG:
 
         return self.video_data[video_id]
 
-    def answer_question(self, video_url, question, languages=['en'], top_k=3):
+    async def answer_question(self, video_url, question, languages=['en'], top_k=3):
         """
         Answer a question about a YouTube video using RAG.
 
@@ -312,6 +314,7 @@ class YouTubeLangChainRAG:
         Returns:
             dict: Answer with source timestamps
         """
+        import asyncio
         # Extract video ID
         video_id = extract_video_id(video_url)
         if not video_id:
@@ -319,7 +322,7 @@ class YouTubeLangChainRAG:
 
         # Process video if not already processed
         if video_id not in self.video_data:
-            self.process_video(video_url, languages)
+            await asyncio.to_thread(self.process_video, video_url, languages)
 
         # Get video data
         video_data = self.video_data[video_id]
@@ -382,7 +385,7 @@ class YouTubeLangChainRAG:
 
         try:
             # Get answer from LLM
-            answer = self.llm.invoke(prompt).content
+            answer = (await self.llm.ainvoke(prompt)).content
         except Exception as exc:
             fallback = True
             fallback_reason = self._classify_fallback_reason(str(exc))

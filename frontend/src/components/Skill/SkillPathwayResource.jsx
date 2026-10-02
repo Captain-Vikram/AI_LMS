@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import IconsCarousel from "../IconsCarousel";
 import {
@@ -47,6 +48,7 @@ const normalizeResourceUrl = (rawValue) => {
     }
   }
 
+  // eslint-disable-next-line no-useless-escape
   const match = text.match(/https?:\/\/[^\s'\"]+/i);
   if (match) {
     return match[0].replace(/\\u0026/g, "&").trim();
@@ -64,7 +66,6 @@ const extractYouTubeId = (url) => {
 };
 
 const SkillPathwayResource = () => {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { id: pathwayId, stageIndex, resourceId } = useParams();
   const classroomId = "standalone";
@@ -99,6 +100,7 @@ const SkillPathwayResource = () => {
   const isVideo = resource?.type === 'video';
   const youtubeId = useMemo(() => isVideo ? extractYouTubeId(resourceUrl) : null, [isVideo, resourceUrl]);
 
+  // eslint-disable-next-line no-unused-vars
   const progressStatus = resourceProgress?.status;
   const passedCount = Number(resourceProgress?.passed_tests_count || 0);
   const passTarget = 2;
@@ -323,6 +325,7 @@ const SkillPathwayResource = () => {
       const passed = score >= 80;
       
       // Submit to backend
+      // eslint-disable-next-line no-unused-vars
       const response = await apiClient.post(API_ENDPOINTS.PATHWAY_SUBMIT_TEST(pathwayId, stageIndex), {
         resource_id: resourceId,
         score_percent: score
@@ -374,7 +377,6 @@ const SkillPathwayResource = () => {
           </p>
           <div className="flex justify-center">
             <AppBackButton
-              label="Back to Pathway"
               fallbackTo={`/skill-pathway/${pathwayId}/resources`}
             />
           </div>
@@ -395,7 +397,6 @@ const SkillPathwayResource = () => {
           
       <header className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 pb-6">
         <AppBackButton
-          label="Back to Pathway"
           fallbackTo={`/skill-pathway/${pathwayId}/resources`}
         />
         <h1 className="mt-4 text-3xl md:text-4xl font-bold text-white tracking-tight">{resource.title || "Resource"}</h1>

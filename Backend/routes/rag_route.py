@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from database import db
+import asyncio
+from database_async import get_db
 from functions.rag_function import YouTubeLangChainRAG
 from functions.youtube_quiz_functions import extract_core_topics, extract_video_id, get_transcript
 from models.activity_feed import ActivityType
@@ -49,11 +50,10 @@ class AskQuestionResponse(BaseModel):
     chat_history: List[Dict[str, Any]]
 
 
-def get_rag_system():
-    """Get the RAG system instance"""
-    api_token = os.getenv("LMSTUDIO_API_TOKEN") or os.getenv("LMSTUDIO_API_KEY")
-    model_name = os.getenv("LMSTUDIO_MODEL", "default")
-    return YouTubeLangChainRAG(api_token, model_name)
+RAG_SYSTEM = YouTubeLangChainRAG(
+    os.getenv("LMSTUDIO_API_TOKEN") or os.getenv("LMSTUDIO_API_KEY"),
+    os.getenv("LMSTUDIO_MODEL", "default")
+)
 
 
 def _to_object_id(value: str) -> Optional[ObjectId]:
@@ -144,19 +144,19 @@ def _resource_explicitly_matches_rickroll(resource: Dict[str, Any]) -> bool:
     return "rick astley" in haystack or "never gonna give you up" in haystack
 
 
-def _find_resource_context(resource_id: str) -> Dict[str, Any]:
+async def _find_resource_context(db, resource_id: str) -> Dict[str, Any]:
     """
     Locate resource metadata from module-embedded resources first, then fallback to resources collection.
     Returns a context object that includes where/how summary cache should be written.
     """
-    module = db.learning_modules.find_one(
+    module = await db.learning_modules.find_one(
         {"resources.id": resource_id},
         {"_id": 1, "classroom_id": 1, "resources.$": 1},
     )
     resource_key = "id"
 
     if not module:
-        module = db.learning_modules.find_one(
+        module = await db.learning_modules.find_one(
             {"resources.resource_id": resource_id},
             {"_id": 1, "classroom_id": 1, "resources.$": 1},
         )
@@ -180,7 +180,7 @@ def _find_resource_context(resource_id: str) -> Dict[str, Any]:
     else:
         resource_filter = {"_id": resource_id}
 
-    collection_resource = db.resources.find_one(resource_filter)
+    collection_resource = await db.resources.find_one(resource_filter)
     if collection_resource:
         return {
             "source": "resources_collection",
@@ -194,7 +194,7 @@ def _find_resource_context(resource_id: str) -> Dict[str, Any]:
     raise HTTPException(status_code=404, detail="Resource not found")
 
 
-def _persist_cached_summary(context: Dict[str, Any], summary: str, now: datetime) -> None:
+async def _persist_cached_summary(db, context: Dict[str, Any], summary: str, now: datetime) -> None:
     if context.get("source") == "module_resource":
         module_oid = _to_object_id(str(context.get("module_id")))
         if not module_oid:
@@ -205,7 +205,7 @@ def _persist_cached_summary(context: Dict[str, Any], summary: str, now: datetime
         if resource_key not in {"id", "resource_id"}:
             return
 
-        db.learning_modules.update_one(
+        await db.learning_modules.update_one(
             {
                 "_id": module_oid,
                 f"resources.{resource_key}": resource_match_value,
@@ -222,7 +222,7 @@ def _persist_cached_summary(context: Dict[str, Any], summary: str, now: datetime
 
     if context.get("source") == "resources_collection":
         resource_id = context.get("resource").get("_id")
-        db.resources.update_one(
+        await db.resources.update_one(
             {"_id": resource_id},
             {
                 "$set": {
@@ -297,7 +297,8 @@ async def get_or_create_summary(
     First call generates and caches it. Subsequent calls return the cached version.
     """
     try:
-        context = _find_resource_context(resource_id)
+        db = get_db()
+        context = await _find_resource_context(db, resource_id)
         resource = context.get("resource", {})
 
         cached_summary = str(resource.get("cached_summary") or "").strip()
@@ -317,7 +318,7 @@ async def get_or_create_summary(
 
         summary = _build_summary(canonical_url, resource=resource)
         now = datetime.utcnow()
-        _persist_cached_summary(context, summary, now)
+        await _persist_cached_summary(db, context, summary, now)
 
         return {
             "summary": summary,
@@ -343,7 +344,8 @@ async def ask_question(request: AskQuestionRequest) -> AskQuestionResponse:
     Answer is appended to chat history.
     """
     try:
-        context = _find_resource_context(request.resource_id)
+        db = get_db()
+        context = await _find_resource_context(db, request.resource_id)
         resource = context.get("resource", {})
 
         # Sanitize question (remove problematic commas if using YouTubeSearchTool)
@@ -354,8 +356,8 @@ async def ask_question(request: AskQuestionRequest) -> AskQuestionResponse:
             raise HTTPException(status_code=400, detail="Invalid or missing resource_url")
 
         # Generate answer using strict single-turn RAG.
-        rag = get_rag_system()
-        rag_result = rag.answer_question(canonical_url, sanitized_question, languages=["en"], top_k=3)
+        rag = RAG_SYSTEM
+        rag_result = await rag.answer_question(canonical_url, sanitized_question, ["en"], 3)
         answer_text = str(rag_result.get("answer") or "").strip()
 
         if not answer_text:
@@ -380,7 +382,7 @@ async def ask_question(request: AskQuestionRequest) -> AskQuestionResponse:
             "resource_id": request.resource_id,
         }
 
-        db.student_progress.update_one(
+        await db.student_progress.update_one(
             progress_filter,
             {
                 "$setOnInsert": {
@@ -403,11 +405,12 @@ async def ask_question(request: AskQuestionRequest) -> AskQuestionResponse:
             upsert=True,
         )
 
-        progress = db.student_progress.find_one(progress_filter) or {}
+        progress = await db.student_progress.find_one(progress_filter) or {}
         chat_history = _serialize_chat_history(progress.get("single_turn_chat_history", []))
 
         # Log activity
-        log_activity(
+        await log_activity(
+            db=db,
             classroom_id=classroom_id,
             action_type=ActivityType.AI_QUESTION_ASKED,
             student_id=request.student_id,
@@ -450,7 +453,8 @@ async def get_chat_history(
     Get all past Q&A for a student on a specific resource.
     """
     try:
-        progress = db.student_progress.find_one({
+        db = get_db()
+        progress = await db.student_progress.find_one({
             "student_id": student_id,
             "resource_id": resource_id
         })
@@ -470,7 +474,8 @@ async def get_chat_history(
         )
 
 
-def log_activity(
+async def log_activity(
+    db,
     classroom_id: str,
     action_type: ActivityType,
     student_id: str,
@@ -488,6 +493,6 @@ def log_activity(
             "details": details or {},
             "created_at": datetime.utcnow(),
         }
-        db.activity_feed.insert_one(activity)
+        await db.activity_feed.insert_one(activity)
     except Exception as e:
         print(f"Error logging activity: {e}")

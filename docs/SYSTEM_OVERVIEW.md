@@ -1,4 +1,4 @@
-# 📚 Quasar EduSaarthi - Complete System Overview
+# 📚 SkillMaster - Complete System Overview
 
 **Last Updated**: April 24, 2026  
 **Project Status**: Phase 3 Substantially Complete, Phase 4 In Development  
@@ -6,9 +6,9 @@
 
 ---
 
-## 🎯 What is Quasar EduSaarthi?
+## 🎯 What is SkillMaster?
 
-Quasar EduSaarthi is a **modern Learning Management System (LMS)** designed to help teachers create interactive, structured learning experiences and help students learn effectively through a **sequential module-based approach**.
+SkillMaster is a **modern Learning Management System (LMS)** designed to help teachers create interactive, structured learning experiences and help students learn effectively through a **sequential module-based approach**.
 
 ### In Simple Terms:
 
@@ -284,7 +284,7 @@ Traditional online learning is chaotic:
 - 🔴 Teachers manually grade everything
 - 🔴 Limited feedback to students
 
-### Quasar EduSaarthi
+### SkillMaster
 
 - ✅ **Strict Sequential Progression** - Resources unlock only after mastery (2 passing quizzes)
 - ✅ **AI-Powered Assessment** - Quizzes auto-generated from actual video content
@@ -1609,7 +1609,7 @@ Frontend (Browser)          Backend (Server)           Database (MongoDB)
 
 ### Q: How is this different from Google Classroom?
 
-**A**: Google Classroom is broad-purpose. Quasar LMS is specifically designed for:
+**A**: Google Classroom is broad-purpose. SkillMaster is specifically designed for:
 
 - **Structured learning** (strict resource order)
 - **Mastery verification** (Rule of 2 quizzes)
@@ -1618,7 +1618,7 @@ Frontend (Browser)          Backend (Server)           Database (MongoDB)
 
 ### Q: How is this different from Canvas or Blackboard?
 
-**A**: Canvas/Blackboard are enterprise systems. Quasar is:
+**A**: Canvas/Blackboard are enterprise systems. SkillMaster is:
 
 - **Lighter weight** (focuses on learning quality, not administration)
 - **AI-integrated** (AI generates quizzes, summarizes, answers questions)

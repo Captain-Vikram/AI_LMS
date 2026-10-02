@@ -101,68 +101,6 @@ async def _get_user_classroom_roles_map(user_id: str):
             mapping[str(cid)] = m.get("role", "student")
     return mapping
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(user: UserRegistration):
-    db = get_db()
-    users_collection = db.users
-    profiles_collection = db.user_profiles
-
-    normalized_role = normalize_user_role(user.role if hasattr(user, 'role') else None)
-    
-    # Check if user already exists (ASYNC)
-    existing_user = await users_collection.find_one({"email": user.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="User already exists")
-    
-    # Create user data
-    user_data = {
-        "first_name": user.first_name,
-        "last_name": user.last_name if hasattr(user, 'last_name') else None,
-        "location": user.location if hasattr(user, 'location') else None,
-        "role": normalized_role,
-        "email": user.email,
-        "password_hash": hash_password(user.password),
-        "registration_date": datetime.utcnow(),
-        "last_login": None,
-        "status": "active",
-        "onboarding_complete": False,
-        "assessment_complete": False,
-    }
-    
-    # Insert user and get the ID (ASYNC)
-    user_result = await users_collection.insert_one(user_data)
-    user_id = user_result.inserted_id
-    
-    # Create profile data if first_name is provided (ASYNC)
-    if hasattr(user, 'first_name') and user.first_name:
-        profile_data = {
-            "user_id": user_id,
-            "first_name": user.first_name,
-            "last_name": user.last_name if hasattr(user, 'last_name') else None,
-            "location": user.location if hasattr(user, 'location') else None,
-            "role": normalized_role,
-        }
-        await profiles_collection.insert_one(profile_data)
-    
-    # Generate JWT token (include role + classroom roles)
-    classroom_roles_map = await _get_user_classroom_roles_map(user_id)
-    access_token = create_access_token(
-        user_id=str(user_id),
-        email=user.email,
-        role=normalized_role,
-        institution_id=None,
-        active_classroom_id=None,
-        classroom_roles=classroom_roles_map,
-    )
-    
-    return {
-        "id": str(user_id), 
-        "message": "User registered successfully",
-        "token": access_token,
-        "role": normalized_role,
-        "onboarding_complete": False
-    }
-
 @router.post("/update-onboarding-status")
 async def update_onboarding_status(
     status: dict,
@@ -184,64 +122,6 @@ async def update_onboarding_status(
         
     return {"message": "Onboarding status updated successfully"}
 
-@router.post("/login")
-async def login(credentials: UserLogin):
-    db = get_db()
-    users_collection = db.users
-    hashed_pw = hash_password(credentials.password)
-    
-    # Find user by email and password (ASYNC)
-    user = await users_collection.find_one({"email": credentials.email, "password_hash": hashed_pw})
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    normalized_role = normalize_user_role(user.get("role"))
-    if user.get("role") != normalized_role:
-        # Update role if needed (ASYNC)
-        await users_collection.update_one({"_id": user["_id"]}, {"$set": {"role": normalized_role}})
-        user["role"] = normalized_role
-    
-    # Update the last_login timestamp (ASYNC)
-    current_login_time = datetime.utcnow()
-    await users_collection.update_one(
-        {"_id": user["_id"]}, {"$set": {"last_login": current_login_time}}
-    )
-
-    # Track login events for weekly activity and streak analytics (ASYNC)
-    await db.login_logs.insert_one({
-        "user_id": user["_id"],
-        "login_time": current_login_time,
-    })
-    
-    # Generate JWT token (include role + classroom roles)
-    classroom_roles_map = await _get_user_classroom_roles_map(user["_id"]) or {}
-    access_token = create_access_token(
-        user_id=str(user["_id"]),
-        email=user.get("email"),
-        role=normalized_role,
-        institution_id=user.get("institution_id"),
-        active_classroom_id=None,
-        classroom_roles=classroom_roles_map,
-    )
-    
-    # Get onboarding status and assessment status
-    onboarding_complete = user.get("onboarding_complete", False)
-    assessment_complete = user.get("assessment_complete", False)
-    
-    from functions.background_warming import trigger_cache_warming
-    trigger_cache_warming(str(user["_id"]), normalized_role)
-    
-    return {
-        "message": "User logged in successfully", 
-        "user_id": str(user["_id"]),
-        "token": access_token,
-        "role": normalized_role,
-        "onboarding_complete": onboarding_complete,
-        "assessment_complete": assessment_complete
-    }
-
-
 @router.post("/set-active-classroom/{classroom_id}")
 async def set_active_classroom(classroom_id: str, current_user = Depends(get_current_user)):
     """Set active classroom in a refreshed token for current user"""
@@ -255,13 +135,10 @@ async def set_active_classroom(classroom_id: str, current_user = Depends(get_cur
     if not class_obj:
         raise HTTPException(status_code=404, detail="Classroom not found")
 
-    # Check membership
-    user_oid = ObjectId(current_user["user_id"])
-    is_student = user_oid in class_obj.get("students", [])
-    is_teacher = user_oid == class_obj.get("teacher_id")
-    is_co_teacher = current_user["user_id"] in class_obj.get("co_teachers", [])
-    
-    if not (is_student or is_teacher or is_co_teacher):
+    # Check membership using robust RBAC service
+    from services.rbac_service import RBACService
+    rbac = RBACService(db)
+    if not await rbac.is_classroom_member(current_user["user_id"], classroom_id):
         raise HTTPException(status_code=403, detail="Not a member of this classroom")
 
     # Build new token
@@ -287,46 +164,24 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
     users_collection = db.users
     profiles_collection = db.user_profiles
     
-    # First try to get from profiles collection for richer data (ASYNC)
-    user_profile = await profiles_collection.find_one({"user_id": user_id_obj})
-    
-    # If no profile exists, get basic data from users collection (ASYNC)
-    if not user_profile:
-        user = await users_collection.find_one({"_id": user_id_obj})
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        return {
-            "id": user_id,
-            "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
-            "firstName": user.get("first_name"),
-            "lastName": user.get("last_name"),
-            "email": user.get("email"),
-            "location": user.get("location"),
-            "role": normalize_user_role(user.get("role")),
-            "joinedDate": user.get("registration_date").strftime("%B %Y") if user.get("registration_date") else None,
-            "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user.get("last_login") else None,
-            "onboardingComplete": user.get("onboarding_complete", False),
-            "assessmentComplete": user.get("assessment_complete", False)
-        }
-    
-    # Return enriched profile data (ASYNC)
     user = await users_collection.find_one({"_id": user_id_obj})
-    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
     return {
         "id": user_id,
-        "name": f"{user_profile.get('first_name', '')} {user_profile.get('last_name', '')}".strip(),
-        "firstName": user_profile.get("first_name"),
-        "lastName": user_profile.get("last_name"),
-        "email": user.get("email") if user else None,
-        "location": user_profile.get("location"),
-        "role": normalize_user_role(user_profile.get("role") if user_profile else user.get("role") if user else None),
-        "bio": user_profile.get("bio"),
-        "skills": user_profile.get("skills", []),
-        "joinedDate": user.get("registration_date").strftime("%B %Y") if user and user.get("registration_date") else None,
-        "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user and user.get("last_login") else "Today",
-        "onboardingComplete": user.get("onboarding_complete", False) if user else False,
-        "assessmentComplete": user.get("assessment_complete", False) if user else False
+        "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+        "firstName": user.get("first_name"),
+        "lastName": user.get("last_name"),
+        "email": user.get("email"),
+        "location": user.get("location"),
+        "role": normalize_user_role(user.get("role")),
+        "bio": "",
+        "skills": [],
+        "joinedDate": user.get("registration_date").strftime("%B %Y") if user.get("registration_date") else None,
+        "lastActive": user.get("last_login").strftime("%Y-%m-%d %H:%M:%S") if user.get("last_login") else "Today",
+        "onboardingComplete": user.get("onboarding_complete", False),
+        "assessmentComplete": user.get("assessment_complete", False)
     }
 
 
@@ -421,3 +276,4 @@ async def get_login_activity(current_user: dict = Depends(get_current_user)):
         })
 
     return {"weekly_activity": weekly_activity}
+

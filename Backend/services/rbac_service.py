@@ -45,10 +45,10 @@ class RBACService:
             return False
         if not classroom:
             return False
-        user_oid = ObjectId(user_id)
-        is_student = user_oid in classroom.get("students", [])
-        is_primary_teacher = user_oid == classroom.get("teacher_id")
-        is_co_teacher = user_id in classroom.get("co_teachers", [])
+        user_id_str = str(user_id)
+        is_student = any(str(s) == user_id_str for s in classroom.get("students", []))
+        is_primary_teacher = str(classroom.get("teacher_id")) == user_id_str if classroom.get("teacher_id") else False
+        is_co_teacher = any(str(t) == user_id_str for t in classroom.get("co_teachers", []))
         return is_student or is_primary_teacher or is_co_teacher
 
     async def is_teacher(self, user_id: str, classroom_id: str) -> bool:
@@ -59,20 +59,21 @@ class RBACService:
             return False
         if not classroom:
             return False
-        user_oid = ObjectId(user_id)
-        is_primary_teacher = user_oid == classroom.get("teacher_id")
-        is_co_teacher = user_id in classroom.get("co_teachers", [])
+        user_id_str = str(user_id)
+        is_primary_teacher = str(classroom.get("teacher_id")) == user_id_str if classroom.get("teacher_id") else False
+        is_co_teacher = any(str(t) == user_id_str for t in classroom.get("co_teachers", []))
         return is_primary_teacher or is_co_teacher
 
     async def is_student(self, user_id: str, classroom_id: str) -> bool:
         db = self.db
         try:
-            classroom = await self._resolve(
-                db.classrooms.find_one({"_id": ObjectId(classroom_id), "students": ObjectId(user_id)})
-            )
+            classroom = await self._resolve(db.classrooms.find_one({"_id": ObjectId(classroom_id)}))
         except Exception:
             return False
-        return classroom is not None
+        if not classroom:
+            return False
+        user_id_str = str(user_id)
+        return any(str(s) == user_id_str for s in classroom.get("students", []))
 
     async def get_user_classrooms(self, user_id: str) -> dict:
         db = self.db
