@@ -62,3 +62,4 @@ const IconsCarousel = ({ backgroundColor = "transparent" }) => {
 };
 
 export default IconsCarousel;
+
