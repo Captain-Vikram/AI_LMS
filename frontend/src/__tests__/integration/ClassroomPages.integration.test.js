@@ -1,8 +1,4 @@
-"""
-Frontend Integration Tests - Test full page workflows
-Tests role-specific dashboards, enrollment flows, and classroom management
-"""
-
+/* eslint-env jest */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -46,6 +42,7 @@ const localStorageMock = {
   removeItem: jest.fn(),
   clear: jest.fn(),
 };
+// eslint-disable-next-line no-undef
 global.localStorage = localStorageMock;
 
 describe('ClassroomDashboard - Teacher View', () => {
@@ -449,6 +446,7 @@ describe('ClassroomSettings', () => {
 
     apiClient.default.get.mockResolvedValue(mockClassroom);
 
+    // eslint-disable-next-line no-undef
     global.navigator.clipboard = {
       writeText: jest.fn(),
     };
@@ -536,3 +534,5 @@ describe('Teacher Classroom Management', () => {
     expect(analyticsMock.data.total_students).toBe(10);
   });
 });
+
+

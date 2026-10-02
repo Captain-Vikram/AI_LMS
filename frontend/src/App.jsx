@@ -60,6 +60,7 @@ const ProtectedRoute = ({ children }) => {
 // Route that checks for user progress
 const UserProgressRoute = ({ children }) => {
   const { isLoaded, isSignedIn } = useAuth();
+  // eslint-disable-next-line no-unused-vars
   const { user } = useUser();
   const reassessmentInfo = localStorage.getItem("reassessmentInfo");
   const cachedOnboarding = localStorage.getItem("onboardingComplete");

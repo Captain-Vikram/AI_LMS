@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate, useParams } from "react-router-dom";
 import {
   IoCheckmarkCircleOutline,
@@ -13,7 +14,6 @@ import apiClient from "../../services/apiClient";
 import IconsCarousel from "../../components/IconsCarousel";
 
 const TeacherGradingDashboard = () => {
-  const navigate = useNavigate();
   const { id: classroomId } = useParams();
 
   const [loading, setLoading] = useState(false);

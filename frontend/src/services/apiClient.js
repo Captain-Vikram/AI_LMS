@@ -13,6 +13,7 @@ const clearClientAuthState = () => {
   localStorage.removeItem("skillAssessmentComplete");
 };
 
+// eslint-disable-next-line no-unused-vars
 const isTokenExpired = (token) => {
   try {
     const [, payloadBase64] = token.split(".");

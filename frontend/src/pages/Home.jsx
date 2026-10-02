@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { motion } from "framer-motion";
+
 import IconsCarousel from "../components/IconsCarousel";
 import FlashlightControl from "../components/FlashLightControl";
 import HeroContent from "../components/HeroContent";

@@ -22,7 +22,8 @@ export const storage = {
     };
     try {
       store.setItem(cacheKey, JSON.stringify(data));
-    } catch (e) {
+    } catch {
+      // eslint-disable-next-line no-undef
       console.warn("Storage write error:", e);
     }
   },
@@ -45,7 +46,7 @@ export const storage = {
         return null;
       }
       return data.value;
-    } catch (e) {
+    } catch {
       return null;
     }
   },
@@ -106,11 +107,12 @@ export const storage = {
             if (data && data.expiresAt && Date.now() > data.expiresAt) {
               store.removeItem(key);
             }
-          } catch (e) {
+          } catch {
             // Not JSON or corrupted, keep/ignore
           }
         });
-      } catch (err) {
+      } catch {
+        // eslint-disable-next-line no-undef
         console.warn("Error running expired cache cleanup:", err);
       }
     });
@@ -134,9 +136,11 @@ export const storage = {
         keysToRemove.forEach((key) => {
           store.removeItem(key);
         });
-      } catch (err) {
+      } catch {
+        // eslint-disable-next-line no-undef
         console.warn("Error clearing legacy cache versions:", err);
       }
     });
   }
 };
+

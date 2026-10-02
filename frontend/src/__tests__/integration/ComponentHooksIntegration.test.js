@@ -1,10 +1,9 @@
-"""
-Frontend Integration Tests - Hooks + Components
-Tests complex interactions between components and hooks
-"""
-
+/* eslint-env jest */
+// eslint-disable-next-line no-unused-vars
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+// eslint-disable-next-line no-unused-vars
 import userEvent from '@testing-library/user-event';
+// eslint-disable-next-line no-unused-vars
 import { renderHook, act } from '@testing-library/react-hooks';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ClassroomDashboard from '../pages/Classroom/ClassroomDashboard';
@@ -159,6 +158,7 @@ describe('Frontend Integration - Hooks + Components', () => {
         markViewed: jest.fn(),
       });
 
+      // eslint-disable-next-line no-unused-vars
       const { getByText, getByPlaceholderText } = render(
         <QueryClientProvider client={queryClient}>
           <ClassroomProvider>
@@ -474,6 +474,7 @@ describe('Frontend Integration - Hooks + Components', () => {
         getGroups: jest.fn(),
       });
 
+      // eslint-disable-next-line no-unused-vars
       const { getByText, getByPlaceholderText } = render(
         <QueryClientProvider client={queryClient}>
           <ClassroomProvider>
@@ -562,6 +563,7 @@ describe('Frontend Integration - Hooks + Components', () => {
         error: null,
       });
 
+      // eslint-disable-next-line no-unused-vars
       const { getByText, getByPlaceholderText } = render(
         <QueryClientProvider client={queryClient}>
           <ClassroomProvider>
@@ -848,3 +850,5 @@ describe('Frontend Integration - Hooks + Components', () => {
     });
   });
 });
+
+

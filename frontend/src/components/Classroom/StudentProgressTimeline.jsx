@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate, useParams } from "react-router-dom";
 import {
   IoCheckmarkCircleOutline,
@@ -56,7 +57,6 @@ const getStatusMeta = (status) => {
 };
 
 const StudentProgressTimeline = () => {
-  const navigate = useNavigate();
   const { id: classroomId, studentId } = useParams();
 
   const [loading, setLoading] = useState(false);

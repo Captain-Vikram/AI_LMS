@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate, useParams } from "react-router-dom";
 import IconsCarousel from "../../components/IconsCarousel";
 import {
@@ -46,6 +47,7 @@ const normalizeResourceUrl = (rawValue) => {
     }
   }
 
+  // eslint-disable-next-line no-useless-escape
   const match = text.match(/https?:\/\/[^\s'\"]+/i);
   if (match) {
     return match[0].replace(/\\u0026/g, "&").trim();
@@ -96,7 +98,6 @@ const getUrlHost = (url) => {
 };
 
 const InteractiveLessonViewer = () => {
-  const navigate = useNavigate();
   const { id: classroomId, moduleId, resourceId } = useParams();
 
   const [loading, setLoading] = useState(false);

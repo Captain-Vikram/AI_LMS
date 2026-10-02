@@ -32,9 +32,9 @@ import {
   useRemoveResourceFromModule,
   useAutoGenerateModules,
 } from '../../hooks/useClassroom';
-import apiClient from '../../services/apiClient';
+
 import { API_ENDPOINTS } from '../../config/api';
-import { useAIJobStatus } from '../../hooks/useAIJob';
+
 import { LoadingState, ErrorState } from '../../components/Classroom/DashboardCard';
 import { ModuleList, LearningModuleProgress } from '../../components/Classroom/ModuleList';
 import LearningModulesStudent from '../../components/Classroom/LearningModulesStudent';
@@ -67,7 +67,8 @@ const normalizeResourceLink = (urlValue) => {
       const parsed = JSON.parse(text.replace(/'/g, '"'));
       if (Array.isArray(parsed))
         text = unwrapQuotes(parsed.find((item) => typeof item === 'string' && item.trim()) || '');
-    } catch {}
+    // eslint-disable-next-line no-empty
+    } catch { /* Ignored */ }
   }
   text = unwrapQuotes(text).replace(/\\u0026/g, '&').replace(/&amp;/gi, '&');
   const matched = text.match(/https?:\/\/[^\s'"\]]+/i);
@@ -178,8 +179,10 @@ const ResourceCard = ({ resource, actionPendingId, onApprove, onReject, groupKey
                   return;
                 }
                 img.style.display = 'none';
+              // eslint-disable-next-line no-unused-vars
               } catch (_err) {
-                try { e.currentTarget.style.display = 'none'; } catch (_e) {}
+                // eslint-disable-next-line no-unused-vars
+                try { e.currentTarget.style.display = 'none'; } catch { /* Ignored */ }
               }
             }}
           />
@@ -332,6 +335,7 @@ const ResourceSection = ({ groupKey, label, items, actionPendingId, onApprove, o
   );
 };
 
+// eslint-disable-next-line no-unused-vars
 const StatCard = ({ label, value, icon: Icon, colorClass, borderClass }) => (
   <div className={`group relative rounded-2xl border ${borderClass} bg-gray-900/40 p-5 backdrop-blur-sm transition-all duration-300 hover:bg-gray-900/60`}>
     <div className="flex items-center justify-between">
@@ -460,7 +464,7 @@ const LearningModulesPage = () => {
   const { assignResources, loading: assigningResources, error: assignResourcesError } =
     useAssignResourcesToModule(classroomId);
   const { deleteModule, loading: deletingModule } = useDeleteLearningModule(classroomId);
-  const { removeResource: removeResourceFromModule, loading: removingResource } = useRemoveResourceFromModule(classroomId);
+  const { removeResource: removeResourceFromModule } = useRemoveResourceFromModule(classroomId);
 
   const { generateModules, loading: generatingModules } = useAutoGenerateModules(classroomId);
 
@@ -495,6 +499,7 @@ const LearningModulesPage = () => {
       .filter((cat) => cat.resources.length > 0);
   }, [activeModule, approvedResourceCategories]);
 
+  // eslint-disable-next-line no-unused-vars
   const completionPercentage = useMemo(() => {
     if (!studentProgress?.module_progress?.length) return 0;
     const sum = studentProgress.module_progress.reduce(
@@ -1402,3 +1407,4 @@ const LearningModulesPage = () => {
 };
 
 export default LearningModulesPage;
+

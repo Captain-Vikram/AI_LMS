@@ -420,7 +420,9 @@ export const useEnrollment = (classroomId) => {
 
 export const useStudentGroups = (classroomId) => {
   const [groups, setGroups] = useState(() => storage.get(`groups_${classroomId}`) || []);
+  // eslint-disable-next-line no-unused-vars
   const [loading, setLoading] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [error, setError] = useState(null);
 
   const fetchGroups = useCallback(async (useCache = true) => {

@@ -1,4 +1,15 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+
+const toSafeFileName = (value) =>
+  String(value || 'study-report')
+    .trim()
+    // eslint-disable-next-line no-control-regex
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120) || 'study-report';
+
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   LuBookOpen,
@@ -35,6 +46,7 @@ import GlassDashboardShell from '../../components/UI/GlassDashboardShell';
 import AppBackButton from '../../components/UI/AppBackButton';
 import apiClient from '../../services/apiClient';
 import IconsCarousel from '../../components/IconsCarousel';
+// eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PORTABLE_RAG_PREFIX = '/api/portable-rag';
@@ -284,6 +296,7 @@ const Styles = () => (
 );
 
 const DashboardView = ({
+  // eslint-disable-next-line no-unused-vars
   notebooks, sortedNotebooks, dashboardLoading, dashboardError, dashboardInfo,
   newNotebookName, setNewNotebookName, newNotebookDescription, setNewNotebookDescription,
   creatingNotebook, createNotebook, deleteNotebook, refreshNotebooks,
@@ -421,22 +434,29 @@ const DashboardView = ({
 );
 
 const WorkspaceView = ({
+  // eslint-disable-next-line no-unused-vars
   notebookDetail, workspaceLoading, workspaceError, chatError, sourceActionError,
   sources, chatMessages, chatInput, setChatInput, sendingChat, sendMessage,
   sourceTitle, setSourceTitle, sourceText, setSourceText, sourceUrl, setSourceUrl,
   sourceFile, setSourceFile, sourceActionLoading, addTextSource, addUrlSource, addFileSource, removeSource,
+  // eslint-disable-next-line no-unused-vars
   health, models, vectorStats, searchQuery, setSearchQuery, searchResults, searchLoading, studioMessage,
+  // eslint-disable-next-line no-unused-vars
   podcastEpisodeName, setPodcastEpisodeName, podcastLoading, podcastJob, generatePodcast, refreshPodcastJob,
+  // eslint-disable-next-line no-unused-vars
   quizLoading, generatedQuiz, generatedQuizRaw, generateCombinedQuiz,
+  // eslint-disable-next-line no-unused-vars
   reportTopic, setReportTopic, reportLoading, reportText, generateTopicReport, downloadTopicReport,
+  // eslint-disable-next-line no-unused-vars
   audioBriefing, setAudioBriefing, audioLoading, audioOverview, generateAudioPodcast, refreshAudioOverview,
+  // eslint-disable-next-line no-unused-vars
   selectedProvider, setSelectedProvider, selectedModel, setSelectedModel,
   isRecording, transcribingVoice, startVoiceRecording, stopVoiceRecording,
+  // eslint-disable-next-line no-unused-vars
   runSearch, initializeVectorDb, refreshWorkspace, notebookId, classroomId, navigate,
 }) => {
   const chatEndRef = useRef(null);
   const [activeAddTab, setActiveAddTab] = useState('text');
-  const [activeStudioPanel, setActiveStudioPanel] = useState('insights');
   const [workspaceShellOffsetPx, setWorkspaceShellOffsetPx] = useState(() => getWorkspaceShellOffsetPx());
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState('chat');
@@ -1222,6 +1242,7 @@ const StudentPersonalResourcesPage = () => {
 
       mediaRecorder.start();
       setIsRecording(true);
+    // eslint-disable-next-line no-unused-vars
     } catch (err) {
       setChatError('Microphone permission denied or audio device not found.');
     }

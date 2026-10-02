@@ -18,7 +18,9 @@ const SkillPathwayTracker = () => {
   const [error, setError] = useState(null);
   const [generationError, setGenerationError] = useState(null);
   const [stageMessage, setStageMessage] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [confirmCompletion, setConfirmCompletion] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [completing, setCompleting] = useState(false);
 
   // Project Analyzer submission state
@@ -92,6 +94,7 @@ const SkillPathwayTracker = () => {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleCompleteStage = async () => {
     setConfirmCompletion(false);
     setCompleting(true);

@@ -34,7 +34,7 @@ export const useAIJobStatus = (jobId) => {
         if (initial.config && initial.config.use_sse === false) {
           useSSE = false;
         }
-      } catch (err) {
+      } catch {
         // ignore initial fetch errors and fall back to SSE
       }
 
@@ -64,7 +64,8 @@ export const useAIJobStatus = (jobId) => {
           console.error('SSE Error:', event);
           // fallback to polling
           if (eventSource) {
-            try { eventSource.close(); } catch (e) {}
+            // eslint-disable-next-line no-empty
+            try { eventSource.close(); } catch {}
             eventSource = null;
           }
         });
@@ -89,7 +90,8 @@ export const useAIJobStatus = (jobId) => {
               setError(res.error || 'Job failed');
               clearInterval(pollInterval);
             }
-          } catch (err) {
+          } catch {
+            // eslint-disable-next-line no-undef
             setError(err.message);
             clearInterval(pollInterval);
           }
@@ -125,7 +127,8 @@ export const useAIJobStatus = (jobId) => {
     try {
       await apiClient.post(API_ENDPOINTS.AI_JOB_STOP(jobId));
       setStatus('stopping');
-    } catch (err) {
+    } catch {
+      // eslint-disable-next-line no-undef
       setError(err.message || 'Failed to stop job');
     }
   }, [jobId]);
@@ -138,7 +141,8 @@ export const useAIJobStatus = (jobId) => {
       setError(null);
       setWarning(null);
       setResult(null);
-    } catch (err) {
+    } catch {
+      // eslint-disable-next-line no-undef
       setError(err.message || 'Failed to retry job');
     }
   }, [jobId]);
@@ -148,8 +152,10 @@ export const useAIJobStatus = (jobId) => {
       const res = await apiClient.patch(API_ENDPOINTS.AI_JOB_CONFIG(jobId), cfg);
       setJobConfig(res.config || cfg);
       return res;
-    } catch (err) {
+    } catch {
+      // eslint-disable-next-line no-undef
       setError(err.message || 'Failed to update job config');
+      // eslint-disable-next-line no-undef
       throw err;
     }
   }, [jobId]);

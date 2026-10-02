@@ -14,9 +14,7 @@ import { IoArrowBackOutline } from 'react-icons/io5';
  */
 const AppBackButton = ({
   // label is accepted but ignored — always renders "Back" for consistency
-  label,           // eslint-disable-line no-unused-vars
   fallbackTo = '/dashboard',
-  useHistory,      // eslint-disable-line no-unused-vars  (kept for compat, unused)
   className = '',
 }) => {
   const navigate = useNavigate();

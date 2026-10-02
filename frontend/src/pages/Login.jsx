@@ -1,6 +1,6 @@
 import React from "react";
 import { SignIn } from "@clerk/clerk-react";
-import { motion } from "framer-motion";
+
 import IconsCarousel from "../components/IconsCarousel";
 import { useBackground } from "../context/BackgroundContext";
 

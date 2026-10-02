@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+// eslint-disable-next-line no-unused-vars
 import { motion, useScroll, useTransform } from 'framer-motion';
 import IconsCarousel from './IconsCarousel';
 import { useBackground } from '../context/BackgroundContext';

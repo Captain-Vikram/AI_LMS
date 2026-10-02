@@ -1,4 +1,5 @@
-ï»¿import React, { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
+// eslint-disable-next-line no-unused-vars
 import { useNavigate } from "react-router-dom";
 import GlassDashboardShell from "../components/UI/GlassDashboardShell";
 import AppBackButton from "../components/UI/AppBackButton";
@@ -22,7 +23,8 @@ const priorityBadge = (p) => ({
   Low: "bg-blue-500/10 text-blue-400 border-blue-500/20",
 }[(p || "")] ?? "bg-gray-500/10 text-gray-400 border-gray-500/20");
 
-const Section = ({ icon: Icon, title, color = "text-purple-400", children, defaultOpen = false }) => {
+// eslint-disable-next-line no-unused-vars
+const Section = ({ icon, title, color = "text-purple-400", children, defaultOpen = false }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.02] overflow-hidden">
@@ -41,7 +43,6 @@ const Section = ({ icon: Icon, title, color = "text-purple-400", children, defau
 };
 
 const ProjectAnalyzerPage = () => {
-  const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [mode, setMode] = useState("zip");
   const [projectTopic, setProjectTopic] = useState("");
@@ -115,12 +116,12 @@ const ProjectAnalyzerPage = () => {
             <div className="flex items-center gap-6 shrink-0">
               <div className="text-center">
                 <p className="text-xs text-gray-500 mb-1">Score</p>
-                <p className="text-5xl font-black text-white">{final_verdict?.score ?? "â€”"}</p>
+                <p className="text-5xl font-black text-white">{final_verdict?.score ?? "—"}</p>
                 <p className="text-xs text-gray-500">/100</p>
               </div>
               <div className="text-center">
                 <p className="text-xs text-gray-500 mb-1">Grade</p>
-                <p className={`text-5xl font-black ${gradeColor(final_verdict?.grade)}`}>{final_verdict?.grade || "â€”"}</p>
+                <p className={`text-5xl font-black ${gradeColor(final_verdict?.grade)}`}>{final_verdict?.grade || "—"}</p>
               </div>
             </div>
           </div>
@@ -168,7 +169,7 @@ const ProjectAnalyzerPage = () => {
             ].map(({ label, items, color, border }) => (
               <div key={label} className={`rounded-xl border ${border} bg-white/[0.01] p-3`}>
                 <p className={`text-xs font-bold ${color} mb-2`}>{label}</p>
-                <ul className="space-y-1">{(items || []).map((item, i) => <li key={i} className="text-xs text-gray-300">â€¢ {item}</li>)}</ul>
+                <ul className="space-y-1">{(items || []).map((item, i) => <li key={i} className="text-xs text-gray-300">• {item}</li>)}</ul>
                 {!(items || []).length && <li className="text-xs text-gray-600 italic">None</li>}
               </div>
             ))}
@@ -178,7 +179,7 @@ const ProjectAnalyzerPage = () => {
         <Section icon={FiCode} title="Code Quality" color="text-purple-400">
           <div className="mt-2 space-y-3">
             {(code_quality?.strengths || []).length > 0 && (
-              <div><p className="text-xs font-bold text-emerald-400 mb-2">Strengths</p><ul className="space-y-1">{code_quality.strengths.map((s, i) => <li key={i} className="text-xs text-gray-300">â€¢ {s}</li>)}</ul></div>
+              <div><p className="text-xs font-bold text-emerald-400 mb-2">Strengths</p><ul className="space-y-1">{code_quality.strengths.map((s, i) => <li key={i} className="text-xs text-gray-300">• {s}</li>)}</ul></div>
             )}
             {(code_quality?.weaknesses || []).length > 0 && (
               <div>
@@ -223,7 +224,7 @@ const ProjectAnalyzerPage = () => {
             {[{ label: "Performance Issues", items: performance_security?.performance_issues, color: "text-amber-400" }, { label: "Security Concerns", items: performance_security?.security_concerns, color: "text-red-400" }].map(({ label, items, color }) => (
               <div key={label} className="rounded-xl border border-white/5 bg-white/[0.01] p-3">
                 <p className={`text-xs font-bold ${color} mb-2`}>{label}</p>
-                <ul className="space-y-1">{(items || []).map((item, i) => <li key={i} className="text-xs text-gray-300">â€¢ {item}</li>)}</ul>
+                <ul className="space-y-1">{(items || []).map((item, i) => <li key={i} className="text-xs text-gray-300">• {item}</li>)}</ul>
                 {!(items || []).length && <p className="text-xs text-gray-600 italic">None detected</p>}
               </div>
             ))}
@@ -233,7 +234,7 @@ const ProjectAnalyzerPage = () => {
         <Section icon={FiList} title="Prioritized Recommendations" color="text-green-400">
           <div className="mt-2 space-y-3">
             {[{ label: "High Priority", items: recommendations?.high_priority, color: "text-red-400" }, { label: "Medium Priority", items: recommendations?.medium_priority, color: "text-amber-400" }, { label: "Low Priority", items: recommendations?.low_priority, color: "text-blue-400" }].map(({ label, items, color }) => (items || []).length ? (
-              <div key={label}><p className={`text-xs font-bold ${color} mb-1.5`}>{label}</p><ul className="space-y-1">{items.map((r, i) => <li key={i} className="text-xs text-gray-300">â€¢ {r}</li>)}</ul></div>
+              <div key={label}><p className={`text-xs font-bold ${color} mb-1.5`}>{label}</p><ul className="space-y-1">{items.map((r, i) => <li key={i} className="text-xs text-gray-300">• {r}</li>)}</ul></div>
             ) : null)}
           </div>
         </Section>
@@ -257,14 +258,15 @@ const ProjectAnalyzerPage = () => {
               <FiCpu size={12} /> AI Code Analyzer
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2">Project Analyzer</h1>
-            <p className="text-gray-400 text-sm max-w-xl leading-relaxed">Upload a ZIP file or paste a GitHub URL to get an AI-powered code review â€” requirements mapping, code quality, security, architecture, and a final score.</p>
+            <p className="text-gray-400 text-sm max-w-xl leading-relaxed">Upload a ZIP file or paste a GitHub URL to get an AI-powered code review — requirements mapping, code quality, security, architecture, and a final score.</p>
           </div>
         </div>
 
         {!result && (
           <div className="space-y-6">
             <div className="flex rounded-xl border border-white/5 bg-white/[0.02] p-1 w-fit">
-              {[{ id: "zip", icon: FiUploadCloud, label: "Upload ZIP" }, { id: "github", icon: FiGithub, label: "GitHub URL" }].map(({ id, icon: Icon, label }) => (
+              // eslint-disable-next-line no-unused-vars
+              {[{ id: "zip", icon: FiUploadCloud, label: "Upload ZIP" }, { id: "github", icon: FiGithub, label: "GitHub URL" }].map(({ id, label }) => (
                 <button key={id} onClick={() => setMode(id)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${mode === id ? "bg-purple-600 text-white shadow-lg" : "text-gray-400 hover:text-white"}`}><Icon size={14} /> {label}</button>
               ))}
             </div>
@@ -305,7 +307,7 @@ const ProjectAnalyzerPage = () => {
             )}
 
             <button onClick={handleAnalyze} disabled={loading} className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-purple-600/20 transition-all hover:brightness-110 active:scale-[0.99] disabled:opacity-50">
-              {loading ? <><FiLoader className="animate-spin" /> Analyzing project â€” this may take a minute...</> : <><FiAward size={15} /> Analyze Project</>}
+              {loading ? <><FiLoader className="animate-spin" /> Analyzing project — this may take a minute...</> : <><FiAward size={15} /> Analyze Project</>}
             </button>
           </div>
         )}
@@ -317,3 +319,7 @@ const ProjectAnalyzerPage = () => {
 };
 
 export default ProjectAnalyzerPage;
+
+
+
+

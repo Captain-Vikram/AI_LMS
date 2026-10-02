@@ -76,6 +76,7 @@ const StudentAssessmentTaker = ({ assessmentId, studentId, onClose, onSubmitted 
           const now = new Date();
           const initialSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
           setSecondsLeft(initialSeconds);
+        // eslint-disable-next-line no-unused-vars
         } catch (legacyErr) {
           if (!isMounted) return;
           setError(err?.message || "Unable to start assessment");

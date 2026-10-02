@@ -5,6 +5,7 @@ export const GroupManagement = ({
   students = [],
   loading = false,
   onCreateGroup,
+  // eslint-disable-next-line no-unused-vars
   onAddToGroup,
   isTeacher = false
 }) => {

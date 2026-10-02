@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+
 
 export const dots = Array.from({ length: 22 }, (_, i) => ({
   id: i,

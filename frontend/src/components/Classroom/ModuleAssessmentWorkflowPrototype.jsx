@@ -332,7 +332,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
   );
 
   const [workflowId, setWorkflowId] = useState('');
-  const [workflowStatus, setWorkflowStatus] = useState('draft');
+  
   const [workflowPublished, setWorkflowPublished] = useState(false);
 
   const [activeCategory, setActiveCategory] = useState('scenario');
@@ -357,7 +357,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
   const [finalizing, setFinalizing] = useState(false);
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
   const [loadingScenario, setLoadingScenario] = useState(false);
-  const [loadingTopics, setLoadingTopics] = useState(false);
+  
 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -369,7 +369,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
     finalizing ||
     uploadingTemplate ||
     loadingScenario ||
-    loadingTopics;
+    false;
   const isReadOnly = workflowPublished;
 
   const selectedScenarioSet = useMemo(
@@ -382,7 +382,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
 
   const resetToDefaults = useCallback(() => {
     setWorkflowId('');
-    setWorkflowStatus('draft');
+    
     setWorkflowPublished(false);
 
     setActiveCategory('scenario');
@@ -441,8 +441,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
         'scenario-set-1';
 
       setWorkflowId(safeTrim(workflow.workflow_id));
-      setWorkflowStatus(safeTrim(workflow.status) || 'draft');
-      setWorkflowPublished(Boolean(workflow.is_published));
+setWorkflowPublished(Boolean(workflow.is_published));
 
       setActiveCategory(normalizedFinalCategory);
       setFinalCategory(normalizedFinalCategory);
@@ -543,7 +542,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
         } else if (response?.workflow_id) {
           setWorkflowId(String(response.workflow_id));
           setWorkflowPublished(false);
-          setWorkflowStatus('draft');
+          
         }
 
         if (!silent) {
@@ -1578,3 +1577,7 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
 };
 
 export default ModuleAssessmentWorkflowPrototype;
+
+
+
+

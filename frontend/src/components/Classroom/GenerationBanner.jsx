@@ -168,6 +168,7 @@ const GenerationBanner = ({ jobId, title = 'AI is Building Content', className =
                         poll_interval: Number(localCfg.poll_interval),
                       });
                       setShowConfig(false);
+                    // eslint-disable-next-line no-unused-vars
                     } catch (e) {
                       // ignore - use hook to surface errors
                     }

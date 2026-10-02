@@ -1,9 +1,6 @@
-"""
-Frontend Component Tests - Test all Phase 2 UI components
-Tests rendering, user interactions, and state management
-"""
-
+/* eslint-env jest */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+// eslint-disable-next-line no-unused-vars
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import {
@@ -479,6 +476,7 @@ describe('RosterTable', () => {
 
   it('should call onRemoveStudent', async () => {
     const onRemoveStudent = jest.fn();
+    // eslint-disable-next-line no-undef
     global.window.confirm = jest.fn(() => true);
 
     render(
@@ -696,3 +694,5 @@ describe('LearningModuleProgress', () => {
     expect(screen.getByText('2/4 assessments completed')).toBeInTheDocument();
   });
 });
+
+

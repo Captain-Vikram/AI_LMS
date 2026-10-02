@@ -26,7 +26,8 @@ const JoinByCode = () => {
       // and clears any stale cached responses for this user/classroom pair.
       try {
         await apiClient.post(`${API_ENDPOINTS.AUTH_SET_ACTIVE_CLASSROOM}${classId}`);
-      } catch (_) {
+      } catch {
+          // Non-fatal — the DB was already updated by the join above.
         // Non-fatal — the DB was already updated by the join above.
       }
 

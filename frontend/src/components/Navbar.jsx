@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+
 import { SignInButton, SignUpButton, UserButton, SignedIn, SignedOut, useAuth } from "@clerk/clerk-react";
 import useNavbarVisibility from "../hooks/useNavbarVisibility";
 import { navbarVariants, childVariants } from "../animations/navbarAnimations";
