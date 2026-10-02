@@ -48,3 +48,10 @@ data/portable_rag/**
 *.njsproj
 *.sln
 *.sw?
+
+# Ignored Docs and Dumps
+*.docx
+mongo-dumps/
+Backend/scratch/
+BROWSER_CACHING_STRATEGY.md
+INTEL_TECH_INTEGRATION.md
