@@ -1,4 +1,5 @@
 import React from "react";
+import { motion } from 'framer-motion';
 import { SignIn } from "@clerk/clerk-react";
 
 import IconsCarousel from "../components/IconsCarousel";
@@ -29,4 +30,7 @@ const Login = () => {
 };
 
 export default Login;
+
+
+
 

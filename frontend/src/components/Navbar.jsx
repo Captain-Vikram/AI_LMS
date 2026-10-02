@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { motion } from 'framer-motion';
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 
 import { SignInButton, SignUpButton, UserButton, SignedIn, SignedOut, useAuth } from "@clerk/clerk-react";

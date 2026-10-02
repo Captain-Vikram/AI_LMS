@@ -28,3 +28,4 @@ const FloatingDot = ({ x, y, size, delay, opacity }) => (
 );
 
 export default FloatingDot;
+

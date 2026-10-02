@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '@clerk/clerk-react';
@@ -64,3 +65,5 @@ const Signout = () => {
 };
 
 export default Signout;
+
+

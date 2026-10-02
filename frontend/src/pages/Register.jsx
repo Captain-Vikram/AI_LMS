@@ -1,8 +1,9 @@
 import React from "react";
+import { motion } from 'framer-motion';
 import { SignUp } from "@clerk/clerk-react";
 
-import IconsCarousel from "../IconsCarousel";
-import { useBackground } from "../../context/BackgroundContext";
+import IconsCarousel from "../components/IconsCarousel";
+import { useBackground } from "../context/BackgroundContext";
 
 const Register = () => {
   const { backgroundColor } = useBackground();
@@ -29,3 +30,7 @@ const Register = () => {
 };
 
 export default Register;
+
+
+
+

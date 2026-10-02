@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { motion } from 'framer-motion';
 
 import { FaEnvelope, FaLocationDot, FaPhone, FaPaperPlane } from "react-icons/fa6";
 import IconsCarousel from "../components/IconsCarousel";
@@ -192,4 +193,7 @@ const Contact = () => {
 };
 
 export default Contact;
+
+
+
 

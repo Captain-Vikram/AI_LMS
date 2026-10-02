@@ -1,12 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { motion, useScroll, useTransform } from 'framer-motion';
-import IconsCarousel from './IconsCarousel';
+import IconsCarousel from '../components/IconsCarousel';
 import { useBackground } from '../context/BackgroundContext';
-import { features, featureStats } from './features/featuresData';
-import FloatingDot, { dots } from './features/FloatingDots';
-import FeaturesIntro from './features/FeaturesIntro';
-import FeaturesDisplay from './features/FeaturesDisplay';
+import { features, featureStats } from '../components/features/featuresData';
+import FloatingDot, { dots } from '../components/features/FloatingDots';
+import FeaturesIntro from '../components/features/FeaturesIntro';
+import FeaturesDisplay from '../components/features/FeaturesDisplay';
 
 const Features = () => {
   const containerRef = useRef(null);
@@ -132,3 +132,8 @@ const Features = () => {
 };
 
 export default Features;
+
+
+
+
+
