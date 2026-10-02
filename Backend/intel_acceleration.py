@@ -68,3 +68,4 @@ if __name__ == "__main__":
     opts = apply_intel_optimizations()
     for opt in opts:
         print(f"[SUCCESS] {opt}")
+

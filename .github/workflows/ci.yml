@@ -30,6 +30,7 @@ jobs:
         CLERK_SECRET_KEY: "test-clerk-secret"
         CLERK_JWKS_URL: "https://test.clerk.accounts.dev/.well-known/jwks.json"
         ENABLE_CLOUD_LLM_FALLBACK: "false"
+        DISABLE_IPEX: "true"
       run: |
         pytest Backend/tests/ -v
 
@@ -56,3 +57,4 @@ jobs:
       
     - name: Build
       run: npm run build
+
