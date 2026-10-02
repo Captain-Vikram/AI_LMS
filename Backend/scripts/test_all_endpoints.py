@@ -93,13 +93,11 @@ def test_endpoint(method: str, endpoint: str, expected_status: List[int] = None,
         passed = response.status_code in expected_status
         
         try:
-            response_text = response.json() if response.text else "No response body"
-            if isinstance(response_text, dict) and len(str(response_text)) > 100:
-                response_text = str(response_text)[:100] + "..."
+            response_data = response.json() if response.text else {}
         except:
-            response_text = response.text[:100] if response.text else "No response body"
+            response_data = response.text if response.text else "No response body"
         
-        return passed, response.status_code, str(response_text)
+        return passed, response.status_code, response_data
         
     except requests.exceptions.ConnectionError:
         return False, 0, "Connection error - Backend server not running"
@@ -109,16 +107,19 @@ def test_endpoint(method: str, endpoint: str, expected_status: List[int] = None,
         return False, 0, str(e)
 
 
+test_user_email = ""
+
 def register_test_user() -> bool:
     """Register a test user and get authentication token"""
-    global test_user_token, test_user_id
+    global test_user_token, test_user_id, test_user_email
     
     print_header("STEP 1: USER REGISTRATION & AUTHENTICATION")
     
+    test_user_email = f"test_audit_{int(datetime.now().timestamp())}@example.com"
     user_data = {
         "first_name": "TestUser",
         "last_name": "Audit",
-        "email": f"test_audit_{int(datetime.now().timestamp())}@example.com",
+        "email": test_user_email,
         "password": "TestPassword123!",
         "role": "student",
         "location": "Test Location"
@@ -131,9 +132,9 @@ def register_test_user() -> bool:
     
     if passed:
         try:
-            response_data = json.loads(response) if isinstance(response, str) else response
-            test_user_token = response_data.get("token")
-            test_user_id = response_data.get("id")
+            response_data = response
+            test_user_token = response_data.get("access_token") or response_data.get("token")
+            test_user_id = response_data.get("user_id") or response_data.get("id")
             if test_user_token:
                 print(f"  ✓ User token obtained: {test_user_token[:20]}...")
                 return True
@@ -149,7 +150,7 @@ def test_auth_endpoints():
     
     # Login
     login_data = {
-        "email": "test_audit_user@example.com",
+        "email": test_user_email or "test_audit_user@example.com",
         "password": "TestPassword123!"
     }
     
@@ -352,31 +353,33 @@ def test_gamification_endpoints():
     
     # Get user XP
     passed, status_code, response = test_endpoint("GET", "/api/gamification/xp",
-                                                  expected_status=[200, 500],
+                                                  expected_status=[200],
                                                   headers=headers)
-    print_test_result("/api/gamification/xp", "GET", status_code, passed)
+    print_test_result("/api/gamification/xp", "GET", status_code, passed, "Get current XP")
     
-    # Add XP (if endpoint exists)
-    xp_data = {
-        "action": "complete_assessment",
-        "amount": 100
+    # Award XP
+    xp_payload = {
+        "activity_type": "complete_assessment",
+        "bonus_multiplier": 1.5,
+        "metadata": {"test": "integration"}
     }
-    
-    passed, status_code, response = test_endpoint("POST", "/api/gamification/add-xp",
-                                                  expected_status=[200, 404, 500],
-                                                  data=xp_data,
+    passed, status_code, response = test_endpoint("POST", "/api/gamification/award-xp",
+                                                  expected_status=[200],
+                                                  data=xp_payload,
                                                   headers=headers)
+    print_test_result("/api/gamification/award-xp", "POST", status_code, passed, "Award XP")
     
-    if status_code != 404:
-        print_test_result("/api/gamification/add-xp", "POST", status_code, passed)
-    
-    # Get user level
-    passed, status_code, response = test_endpoint("GET", "/api/gamification/level",
-                                                  expected_status=[200, 404, 500],
+    # Get badges
+    passed, status_code, response = test_endpoint("GET", "/api/gamification/badges",
+                                                  expected_status=[200],
                                                   headers=headers)
+    print_test_result("/api/gamification/badges", "GET", status_code, passed, "Get user badges")
     
-    if status_code != 404:
-        print_test_result("/api/gamification/level", "GET", status_code, passed)
+    # Get recent achievements
+    passed, status_code, response = test_endpoint("GET", "/api/gamification/achievements/recent",
+                                                  expected_status=[200],
+                                                  headers=headers)
+    print_test_result("/api/gamification/achievements/recent", "GET", status_code, passed, "Get recent achievements")
 
 
 def test_analytics_endpoints():

@@ -39,6 +39,7 @@ from routes.student_progress_routes import router as student_progress_router
 from routes.module_assessment_routes import router as module_assessment_router
 from routes.module_assessment_workflow_routes import router as module_assessment_workflow_router
 from routes.skill_pathway_routes import router as skill_pathway_router
+from routes.project_analyzer.router import router as project_analyzer_router
 from functions.service_health import get_dependency_health_snapshot
 from database_async import init_db, disconnect_from_mongo, get_db
 from functions.cache_utils import cache_manager
@@ -121,13 +122,19 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Set ALLOWED_ORIGINS in .env as a comma-separated list for production.
+# Defaults to localhost dev origins so local development works out of the box.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # Include routers
@@ -150,6 +157,7 @@ app.include_router(student_progress_router)
 app.include_router(module_assessment_router)
 app.include_router(module_assessment_workflow_router)
 app.include_router(skill_pathway_router)
+app.include_router(project_analyzer_router)
 
 # Mount portable RAG backend endpoints under a dedicated API prefix.
 portable_rag_backend = None
@@ -187,6 +195,8 @@ def _classify_unhandled_exception(exc: Exception) -> tuple[int, dict[str, Any]]:
     }
 
 
+import asyncio
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     incident_id = str(uuid.uuid4())
@@ -194,7 +204,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
     status_code, detail_payload = _classify_unhandled_exception(exc)
     detail_payload["incident_id"] = incident_id
-    detail_payload["dependency_status"] = get_dependency_health_snapshot()
+    detail_payload["dependency_status"] = await asyncio.to_thread(get_dependency_health_snapshot)
 
     return JSONResponse(
         status_code=status_code,
@@ -208,7 +218,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def health_check():
     lmstudio_url = os.getenv("LMSTUDIO_URL", "http://127.0.0.1:1234")
     model_name = os.getenv("LMSTUDIO_MODEL") or "auto-detect"
-    dependency_health = get_dependency_health_snapshot()
+    dependency_health = await asyncio.to_thread(get_dependency_health_snapshot)
 
     return {
         "status": "healthy" if dependency_health["status"] == "healthy" else "degraded",
@@ -221,7 +231,7 @@ async def health_check():
 
 @app.get("/health/dependencies")
 async def dependency_health_check():
-    return get_dependency_health_snapshot()
+    return await asyncio.to_thread(get_dependency_health_snapshot)
 
 
 # Root endpoint

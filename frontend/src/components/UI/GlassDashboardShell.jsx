@@ -8,7 +8,7 @@ const GlassDashboardShell = ({
   withPanel = true,
 }) => {
   return (
-    <section className="relative min-h-screen px-4 py-12 pt-28">
+    <section className="relative min-h-screen px-2 sm:px-4 py-4 sm:py-12 pt-20 sm:pt-28">
       <div className="absolute inset-0 overflow-hidden">
         <IconsCarousel
           backgroundColor="rgba(17, 24, 39, 0.8)"
@@ -17,7 +17,7 @@ const GlassDashboardShell = ({
         <div className="absolute inset-0 bg-gradient-to-br from-gray-900/90 to-gray-800/90" />
       </div>
 
-      <div className={`container mx-auto relative z-10 ${contentClassName}`}>
+      <div className={`w-full mx-auto relative z-10 ${contentClassName}`}>
         {withPanel ? (
           <div
             className={`bg-gray-800/60 backdrop-blur-lg border border-gray-700/50 rounded-2xl p-6 md:p-8 shadow-xl ${panelClassName}`}

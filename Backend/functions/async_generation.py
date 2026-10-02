@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from bson import ObjectId
@@ -23,7 +24,7 @@ async def cancel_active_job(job_id: str) -> bool:
     except Exception:
         return False
 
-async def update_job_status(job_id: str, status: str, progress: int = 0, result: Any = None, error: str = None, checkpoint: Dict[str, Any] = None):
+async def update_job_status(job_id: str, status: str, progress: int = 0, result: Any = None, error: str = None, checkpoint: Dict[str, Any] = None, warning: str = None):
     db = get_db()
     now = datetime.utcnow()
     update_doc = {
@@ -35,6 +36,8 @@ async def update_job_status(job_id: str, status: str, progress: int = 0, result:
         update_doc["result"] = result
     if error is not None:
         update_doc["error"] = error
+    if warning is not None:
+        update_doc["warning"] = warning
     
     update_op = {"$set": update_doc}
     if checkpoint:
@@ -76,8 +79,17 @@ async def background_generate_resources(
         else:
             checkpoints = job_doc.get("checkpoints", {})
 
+        # Check API Key statuses
+        warnings = []
+        if not os.getenv("TAVILY_API_KEY"):
+            warnings.append("Tavily API key is missing (Web search/articles disabled, using Wikipedia fallbacks).")
+        if not os.getenv("SERPER_API_KEY"):
+            warnings.append("Serper API key is missing (Google Search reference links disabled).")
+        
+        warning_msg = " | ".join(warnings) if warnings else None
+
         # 2. Planning
-        await update_job_status(job_id, "planning", progress=10)
+        await update_job_status(job_id, "planning", progress=10, warning=warning_msg)
         
         # 3. Discovery (Parallel Search)
         await update_job_status(job_id, "searching", progress=30)
@@ -127,6 +139,15 @@ async def background_generate_resources(
                         await update_job_status(job_id, "searching", progress=75, checkpoint={"web_results": web_results})
                 except Exception as te:
                     print(f"[JOB {job_id}] Task {t_type} failed: {te}")
+                    err_msg = str(te).lower()
+                    if "429" in err_msg or "quota" in err_msg or "limit" in err_msg:
+                        if "tavily" in err_msg:
+                            key_warn = "Tavily Search API key quota is exhausted (HTTP 429)."
+                        else:
+                            key_warn = "Google Gemini API key quota is exhausted (HTTP 429)."
+                        
+                        warning_msg = (warning_msg + " | " if warning_msg else "") + key_warn
+                        await update_job_status(job_id, "searching", progress=50, warning=warning_msg)
 
         # 4. Processing
         await update_job_status(job_id, "filtering", progress=90)

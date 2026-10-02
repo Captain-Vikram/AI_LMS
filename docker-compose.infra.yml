@@ -8,17 +8,6 @@ services:
     volumes:
       - ./mongo-data:/data/db
 
-  vector-db:
-    image: surrealdb/surrealdb:v2
-    container_name: SkillMaster-vector-db
-    user: "0:0"
-    restart: unless-stopped
-    command: start --log info --user root --pass root file:/data/SkillMaster-vector.db
-    ports:
-      - "${VECTOR_DB_HOST_PORT:-18001}:8000"
-    volumes:
-      - surrealdb_data:/data
-
   SkillMaster-redis:
     image: redis:alpine
     container_name: SkillMaster-redis
@@ -29,5 +18,5 @@ services:
       - redis_data:/data
 
 volumes:
-  surrealdb_data:
   redis_data:
+

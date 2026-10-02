@@ -66,9 +66,8 @@ const ModuleAssessmentBuilderPage = () => {
         <div className="space-y-4">
           <ErrorState message="Module not found for this classroom." />
           <AppBackButton
-            label="Back to Modules"
-            fallbackTo={`/classroom/${classroomId}/modules`}
-          />
+              fallbackTo={`/classroom/${classroomId}/modules`}
+            />
         </div>
       </GlassDashboardShell>
     );

@@ -135,44 +135,8 @@ async def get_current_user(
 
     db = get_db()
 
-    # Try Clerk verification first; if it fails, allow a development fallback
-    # that accepts local HS256 JWTs created by the internal `/api/auth/login`.
-    payload = None
-    clerk_id = None
-    try:
-        payload = await verify_clerk_token(final_token)
-        clerk_id = payload.get("sub")
-    except HTTPException as clerk_exc:
-        # Attempt to decode as a local JWT (development fallback)
-        try:
-            local_payload = jwt.decode(final_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            # local token uses `user_id` or `sub` to identify our user
-            local_user_id = local_payload.get("user_id") or local_payload.get("sub")
-            if local_user_id:
-                try:
-                    user_obj_id = ObjectId(local_user_id) if ObjectId.is_valid(local_user_id) else None
-                except Exception:
-                    user_obj_id = None
-
-                if user_obj_id:
-                    user = await db.users.find_one({"_id": user_obj_id})
-                    if user:
-                        roles = derive_user_roles(user)
-                        primary_role = get_primary_role(roles)
-                        return {
-                            "user_id": str(user["_id"]),
-                            "clerk_id": user.get("clerk_id"),
-                            "email": user.get("email"),
-                            "role": primary_role,
-                            "roles": roles,
-                            "classroom_memberships": user.get("classroom_memberships", []),
-                        }
-
-            # If local decode didn't find a user, re-raise the original clerk exception
-            raise clerk_exc
-        except Exception:
-            # Propagate original Clerk auth failure for clarity
-            raise clerk_exc
+    payload = await verify_clerk_token(final_token)
+    clerk_id = payload.get("sub")
     
     def _extract_email_from_payload(p: Dict[str, Any]) -> Optional[str]:
         # Common claim names

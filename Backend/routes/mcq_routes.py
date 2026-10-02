@@ -9,8 +9,11 @@ import os
 import json
 import functions.llm_adapter_async as genai
 from functions.mcq_functions import create_quiz_generator, generate_quiz, score_quiz
-from database import get_db
+from functions.quiz_cache import store_quiz, get_quiz, delete_quiz  # Redis-backed, no in-memory state
+from database_async import get_db
 from functions.utils import get_current_user
+from routes.gamification_routes import award_xp_internal
+from functions.user_memory import update_user_memory
 
 # Ensure environment variables are loaded
 load_dotenv(override=True)
@@ -21,7 +24,7 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-quiz_cache = {}
+
 
 # Define a class for quiz submission
 class QuizSubmission(BaseModel):
@@ -53,23 +56,14 @@ async def submit_quiz(submission: QuizSubmission, current_user = Depends(get_cur
     # Get database connection
     db = get_db()
 
-    global quiz_cache
+    # Retrieve the quiz from Redis cache
+    quiz_content = await get_quiz(submission.quiz_id)
+    if not quiz_content:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Quiz not found. It may have expired."
+        )
 
-    # Retrieve the quiz from cache or database
-    quiz_content = None
-
-    if submission.quiz_id in quiz_cache:
-        quiz_content = quiz_cache[submission.quiz_id]
-    else:
-        # Try to get from database
-        stored_quiz = db.quizzes.find_one({"quiz_id": submission.quiz_id})
-        if stored_quiz:
-            quiz_content = stored_quiz
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Quiz not found. It may have expired."
-            )
 
     # Validate submission
     if len(submission.user_answers) != len(quiz_content["questions"]):
@@ -241,16 +235,36 @@ async def submit_quiz(submission: QuizSubmission, current_user = Depends(get_cur
         }
 
         # Store in quiz_results collection
-        db.skill_assessment_results.insert_one(quiz_result_doc)
+        await db.skill_assessment_results.insert_one(quiz_result_doc)
 
         # Update user's assessment status
-        db.users.update_one(
+        await db.users.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"assessment_complete": True}}
         )
 
+        # Award XP
+        await award_xp_internal(db, user_id, "complete_assessment", metadata={"quiz_id": submission.quiz_id})
+        score_data = result.get("score") or {}
+        percentage = score_data.get("percentage") if isinstance(score_data, dict) else score_data
+        try:
+            p_val = int(percentage)
+        except Exception:
+            p_val = 0
+        if p_val == 100:
+            await award_xp_internal(db, user_id, "perfect_quiz_score", metadata={"quiz_id": submission.quiz_id})
+
+        # Update AI Memory Profile
+        await update_user_memory(
+            db=db,
+            user_id=user_id,
+            event_type="COMPLETED_MCQ_QUIZ",
+            description=f"Completed assessment quiz {submission.quiz_id} scoring {p_val}%. Assessed level: {skill_level}.",
+            data={"score": result["score"], "assessed_level": skill_level}
+        )
+
     except Exception as e:
-        print(f"Error storing quiz results: {str(e)}")
+        print(f"Error storing quiz results and awarding XP: {str(e)}")
         # Don't raise an exception here to allow the API to continue
 
     return response
@@ -311,9 +325,8 @@ async def generate_assessment(
             num_questions=params.num_questions
         )
 
-        # Store the quiz with correct answers in cache
-        global quiz_cache
-        quiz_cache[quiz_id] = quiz_content
+        # Store the quiz in Redis (auto-expires after 30 min, works across pods)
+        await store_quiz(quiz_id, quiz_content)
 
         # Create a user-facing version without correct answers
         user_quiz = {
@@ -348,10 +361,10 @@ async def get_assessment_history(current_user = Depends(get_current_user)):
     
     try:
         # Find all assessment results for this user, sorted by timestamp (newest first)
-        results = list(db.skill_assessment_results.find(
+        results = await db.skill_assessment_results.find(
             {"user_id": ObjectId(user_id)},
             {"_id": 0}  # Exclude MongoDB _id field
-        ).sort("timestamp", -1))
+        ).sort("timestamp", -1).to_list(length=None)
         
         # Convert ObjectId to string and format timestamps
         for result in results:
@@ -383,11 +396,11 @@ async def get_assessment_statistics(current_user = Depends(get_current_user)):
             {"$group": {"_id": "$assessed_level", "count": {"$sum": 1}}},
             {"$project": {"name": "$_id", "value": "$count", "_id": 0}}
         ]
-        level_distribution = list(db.skill_assessment_results.aggregate(level_pipeline))
+        level_distribution = await db.skill_assessment_results.aggregate(level_pipeline).to_list(length=None)
         
         # Find common skill gaps
         skill_gaps = []
-        results = db.skill_assessment_results.find({}, {"skill_gaps": 1})
+        results = await db.skill_assessment_results.find({}, {"skill_gaps": 1}).to_list(length=None)
         skill_count = {}
         
         for result in results:
@@ -402,14 +415,14 @@ async def get_assessment_statistics(current_user = Depends(get_current_user)):
         
         skill_gaps = [{"name": skill, "frequency": count} 
                      for skill, count in sorted(skill_count.items(), 
-                                              key=lambda x: x[1], 
-                                              reverse=True)[:10]]
+                                               key=lambda x: x[1], 
+                                               reverse=True)[:10]]
         
         # Calculate average scores over time (by month)
         from datetime import datetime
         import pandas as pd
         
-        scores = list(db.skill_assessment_results.find({}, {"timestamp": 1, "score": 1}))
+        scores = await db.skill_assessment_results.find({}, {"timestamp": 1, "score": 1}).to_list(length=None)
         
         # Convert to pandas for easier grouping
         if scores:
@@ -442,7 +455,7 @@ async def get_assessment_statistics(current_user = Depends(get_current_user)):
             
         # Get top recommendations
         recommendations = []
-        rec_results = db.skill_assessment_results.find({}, {"recommendations": 1})
+        rec_results = await db.skill_assessment_results.find({}, {"recommendations": 1}).to_list(length=None)
         rec_count = {}
         
         for result in rec_results:

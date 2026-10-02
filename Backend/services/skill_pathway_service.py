@@ -1,9 +1,42 @@
 import json
 import os
 import re
+import uuid
 from urllib.parse import quote_plus, urlparse, parse_qs
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
 from functions.llm_adapter_async import generate_text_async
+
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Module-level search tool singletons — created once, reused across all calls.
+# This avoids the overhead of re-instantiating heavy LangChain objects per request.
+# ---------------------------------------------------------------------------
+_yt_tool = None
+_tavily_tool = None
+
+
+def _get_yt_tool():
+    global _yt_tool
+    if _yt_tool is None:
+        try:
+            from langchain_community.tools import YouTubeSearchTool
+            _yt_tool = YouTubeSearchTool()
+        except Exception as e:
+            print(f"[SkillPathwayService] YouTubeSearchTool unavailable: {e}")
+    return _yt_tool
+
+
+def _get_tavily_tool():
+    global _tavily_tool
+    if _tavily_tool is None and os.getenv("TAVILY_API_KEY"):
+        try:
+            from langchain_community.tools.tavily_search import TavilySearchResults
+            _tavily_tool = TavilySearchResults()
+        except Exception as e:
+            print(f"[SkillPathwayService] TavilySearchResults unavailable: {e}")
+    return _tavily_tool
 
 
 def _extract_youtube_candidates(raw_value: Any) -> List[str]:
@@ -105,6 +138,26 @@ def _pick_non_shorts_youtube_url(raw_result: Any) -> str:
             return normalized
     return ""
 
+
+def _clean_json_text(raw_text: str) -> str:
+    text = str(raw_text or "").strip()
+    
+    # Try to find JSON block using regex if wrapped in conversational text
+    json_match = re.search(r"\{[\s\S]*\}", text)
+    if json_match:
+        text = json_match.group(0).strip()
+    else:
+        # Strip markdown code blocks if regex didn't match (fallback)
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?", "", text).strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+            
+    # Escape invalid backslashes (like LaTeX '\mathbb')
+    text = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', text)
+    return text
+
+
 class SkillPathwayService:
     def __init__(self, db_client):
         self.db = db_client
@@ -178,10 +231,11 @@ class SkillPathwayService:
         try:
             raw_response = await generate_text_async(
                 prompt_or_messages=[{"role": "user", "content": prompt}],
-                generation_config={"temperature": 0.3, "max_tokens": 1500},
+                generation_config={"temperature": 0.3, "max_tokens": 8000},
                 timeout=60
             )
-            generated_data = json.loads(raw_response)
+            cleaned_json = _clean_json_text(raw_response)
+            generated_data = json.loads(cleaned_json)
         except Exception as e:
             print(f"LLM generation failed, using fallback: {e}")
             # Fallback: Generate basic search queries from the blueprint topics
@@ -199,21 +253,10 @@ class SkillPathwayService:
         
         # 6. Parse and Call YouTube/DeepSearch APIs
         final_resources = []
-        import uuid
-        from dotenv import load_dotenv
-        load_dotenv()
-        
-        # Initialize search tools
-        yt_tool = None
-        tavily_tool = None
-        try:
-            from langchain_community.tools import YouTubeSearchTool
-            from langchain_community.tools.tavily_search import TavilySearchResults
-            yt_tool = YouTubeSearchTool()
-            if os.getenv("TAVILY_API_KEY"):
-                tavily_tool = TavilySearchResults()
-        except Exception as e:
-            print(f"Error loading search tools: {e}")
+
+        # Use module-level singletons (created once, not per-call)
+        yt_tool = _get_yt_tool()
+        tavily_tool = _get_tavily_tool()
 
         for v in generated_data.get("videos", [])[:5]:
             search_query = str(v.get("search_query") or v.get("title") or "").strip()
@@ -298,8 +341,15 @@ class SkillPathwayService:
         try:
             raw_response = await generate_text_async(
                 prompt_or_messages=[{"role": "user", "content": prompt}],
-                generation_config={"temperature": 0.2, "max_tokens": 2000}
+                generation_config={"temperature": 0.2, "max_tokens": 16000}
             )
-            return {"status": "success", "tests": json.loads(raw_response)}
+            cleaned_json = _clean_json_text(raw_response)
+            return {"status": "success", "tests": json.loads(cleaned_json)}
         except Exception as e:
+            print(f"FAILED TO PARSE TEST GENERATION JSON: {e}")
+            try:
+                print(f"RAW LLM RESPONSE:\n{raw_response}")
+                print(f"CLEANED JSON:\n{cleaned_json}")
+            except Exception:
+                pass
             return {"status": "error", "message": f"Failed to generate tests: {str(e)}"}

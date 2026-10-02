@@ -63,6 +63,10 @@ def setup_phase_2_indexes():
         
         db.users.create_index("classroom_memberships.classroom_id")
         
+        # TTL indexes for auto-expiration
+        db.login_logs.create_index("login_time", expireAfterSeconds=31536000)
+        db.activity_feed.create_index("visibility_until", expireAfterSeconds=0, sparse=True)
+        
         print("✅ Phase 2 database indexes created successfully")
     except Exception as e:
         print(f"⚠️  Warning: Could not create indexes: {e}")
@@ -81,7 +85,6 @@ def run_migrations():
             {"migration_name": MIGRATION_001_NAME, "status": "applied"}
         )
         if already_applied:
-            print("Migration 001 already applied, skipping")
             return
 
         print("Running migration 001: Adding LMS collections...")

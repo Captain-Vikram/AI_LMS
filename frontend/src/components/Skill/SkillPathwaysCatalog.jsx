@@ -45,13 +45,17 @@ const SkillPathwaysCatalog = () => {
 
   const handleEnroll = async (pathwayId) => {
     setEnrolling(pathwayId);
+    setError(null);
     try {
       const res = await apiClient.post(API_ENDPOINTS.PATHWAY_ENROLL(pathwayId));
       if (res.status === 'success') {
         navigate(`/skill-pathway/${pathwayId}`);
+      } else {
+        setError(res.message || 'Failed to enroll in pathway. Please try again.');
+        setEnrolling(null);
       }
     } catch (err) {
-      alert("Error enrolling: " + err.message);
+      setError('Error enrolling: ' + (err.message || 'Unknown error. Please try again.'));
       setEnrolling(null);
     }
   };
@@ -81,7 +85,7 @@ const SkillPathwaysCatalog = () => {
             >
               Retry Connection
             </button>
-            <AppBackButton label="Back to Dashboard" fallbackTo="/dashboard" />
+            <AppBackButton fallbackTo="/dashboard" />
           </div>
         </div>
       </GlassDashboardShell>
@@ -91,7 +95,7 @@ const SkillPathwaysCatalog = () => {
   return (
     <GlassDashboardShell contentClassName="max-w-6xl">
       <div className="mb-5">
-        <AppBackButton label="Back to Dashboard" fallbackTo="/dashboard" />
+        <AppBackButton fallbackTo="/dashboard" />
       </div>
 
       <div className="mb-10 text-center">

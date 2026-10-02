@@ -1,38 +1,49 @@
-import React, { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import React, { useEffect, useState, Suspense } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { SignedIn, SignedOut, RedirectToSignIn, useAuth, useUser } from "@clerk/clerk-react";
-import Home from "./components/Home";
+import Home from "./pages/Home";
 import Navbar from "./components/Navbar";
-import Features from "./components/Features";
-import Contact from "./components/Contact";
+import Features from "./pages/Features";
+import Contact from "./pages/Contact";
 import { BackgroundProvider } from "./context/BackgroundContext";
-import Register from "./components/Register/Register";
-import Login from "./components/Login";
-import Onboarding from "./components/onboarding/Onboarding";
-import Dashboard from "./components/Dashboard";
-import Signout from "./components/Signout";
-import OverallStatistics from "./components/OverallStatistics";
-import ClassroomList from "./components/Classroom/ClassroomList";
+import Register from "./pages/Register";
+import Login from "./pages/Login";
+import Onboarding from "./pages/onboarding/Onboarding";
+import Dashboard from "./pages/Dashboard";
+import Signout from "./pages/Signout";
+import ClassroomList from "./pages/Classroom/ClassroomList";
 import CreateClassroom from "./components/Classroom/CreateClassroom";
 import JoinByCode from "./components/Classroom/JoinByCode";
-import ClassroomPage from "./components/Classroom/ClassroomPage";
 import ClassroomDashboard from "./pages/Classroom/ClassroomDashboard";
 import ClassroomRoster from "./pages/Classroom/ClassroomRoster";
 import LearningModulesPage from "./pages/Classroom/LearningModules";
 import StudentPersonalResourcesPage from "./pages/Classroom/StudentPersonalResourcesPage";
 import ModuleAssessmentBuilderPage from "./pages/Classroom/ModuleAssessmentBuilderPage";
 import ClassroomSettings from "./pages/Classroom/ClassroomSettings";
-import InteractiveLessonViewer from "./components/Classroom/InteractiveLessonViewer";
-import TeacherGradingDashboard from "./components/Classroom/TeacherGradingDashboard";
+import InteractiveLessonViewer from "./pages/Classroom/InteractiveLessonViewer";
+import TeacherGradingDashboard from "./pages/Classroom/TeacherGradingDashboard";
 import StudentProgressTimeline from "./components/Classroom/StudentProgressTimeline";
 import SkillPathwaysCatalog from "./components/Skill/SkillPathwaysCatalog";
 import SkillPathwayTracker from "./components/Skill/SkillPathwayTracker";
 import SkillPathwayResource from "./components/Skill/SkillPathwayResource";
+import ProjectAnalyzerPage from "./pages/ProjectAnalyzerPage";
 import { ClassroomProvider } from "./context/ClassroomContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import apiClient, { setTokenGetter } from "./services/apiClient";
 import { API_ENDPOINTS } from "./config/api";
 import { storage } from "./utils/storage";
+
+// Redirect component to bypass the redundant ClassroomPage
+const ClassroomRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={`/classroom/${id}/dashboard`} replace />;
+};
+
+// Fix for broken /skill-pathway/:id route that previously rendered generic Dashboard
+const SkillPathwayRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={`/skill-pathway/${id}/resources`} replace />;
+};
 
 // Protected route to ensure the user is logged in
 const ProtectedRoute = ({ children }) => {
@@ -142,7 +153,7 @@ const App = () => {
         <ClassroomProvider>
           <BrowserRouter>
             <Navbar />
-            <Routes>
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-gray-900 text-white"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div></div>}>`n              <Routes>
             {/* Public routes */}
             <Route
               path="/"
@@ -195,10 +206,18 @@ const App = () => {
               }
             />
             <Route
+              path="/project-analyzer"
+              element={
+                <UserProgressRoute>
+                  <ProjectAnalyzerPage />
+                </UserProgressRoute>
+              }
+            />
+            <Route
               path="/skill-pathway/:id"
               element={
                 <UserProgressRoute>
-                  <Dashboard />
+                  <SkillPathwayRedirect />
                 </UserProgressRoute>
               }
             />
@@ -238,7 +257,7 @@ const App = () => {
               path="/classroom/:id"
               element={
                 <UserProgressRoute>
-                  <ClassroomPage />
+                  <ClassroomRedirect />
                 </UserProgressRoute>
               }
             />
@@ -330,8 +349,7 @@ const App = () => {
                 </UserProgressRoute>
               }
             />
-            <Route path="/overall-statistics" element={<OverallStatistics />} />
-          </Routes>
+          </Routes>`n            </Suspense>
         </BrowserRouter>
         </ClassroomProvider>
       </BackgroundProvider>
@@ -340,3 +358,7 @@ const App = () => {
 };
 
 export default App;
+
+
+
+

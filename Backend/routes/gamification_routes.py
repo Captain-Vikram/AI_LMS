@@ -4,8 +4,9 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 
-from database import get_db
+from database_async import get_db
 from functions.utils import get_current_user
+from functions.streak_utils import calculate_login_streak  # shared, single source of truth
 
 router = APIRouter(
     prefix="/api/gamification",
@@ -25,35 +26,6 @@ XP_REWARDS = {
 }
 
 
-def calculate_login_streak(db, user_id_obj: ObjectId) -> int:
-    """Calculate consecutive active days ending today (or yesterday if not active today)."""
-    login_logs = list(
-        db.login_logs.find({"user_id": user_id_obj}, {"login_time": 1}).sort("login_time", -1)
-    )
-
-    login_dates = {
-        log.get("login_time").date()
-        for log in login_logs
-        if isinstance(log.get("login_time"), datetime)
-    }
-
-    if not login_dates:
-        return 0
-
-    today = datetime.utcnow().date()
-    cursor = today if today in login_dates else today - timedelta(days=1)
-
-    if cursor not in login_dates:
-        return 0
-
-    streak = 0
-    while cursor in login_dates:
-        streak += 1
-        cursor -= timedelta(days=1)
-
-    return streak
-
-
 def _serialize_date(value):
     if isinstance(value, datetime):
         return value.isoformat()
@@ -66,7 +38,7 @@ async def get_user_xp(current_user = Depends(get_current_user)):
     user_id_obj = ObjectId(user_id)
 
     db = get_db()
-    user_data = db.users.find_one({"_id": user_id_obj})
+    user_data = await db.users.find_one({"_id": user_id_obj})
 
     if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
@@ -81,7 +53,7 @@ async def get_user_xp(current_user = Depends(get_current_user)):
         },
     )
 
-    streak = calculate_login_streak(db, user_id_obj)
+    streak = await calculate_login_streak(db, user_id_obj)
 
     current_xp = xp_data.get("current", 0)
     return {
@@ -94,22 +66,15 @@ async def get_user_xp(current_user = Depends(get_current_user)):
     }
 
 
-@router.post("/award-xp")
-async def award_xp(activity_data: Dict[str, Any], current_user = Depends(get_current_user)):
-    user_id = current_user["user_id"]
-    db = get_db()
-
-    activity_type = activity_data.get("activity_type")
-    bonus_multiplier = activity_data.get("bonus_multiplier", 1.0)
-
+async def award_xp_internal(db, user_id: str, activity_type: str, bonus_multiplier: float = 1.0, metadata: dict = None) -> dict:
     if activity_type not in XP_REWARDS:
-        raise HTTPException(status_code=400, detail="Invalid activity type")
+        return {"error": "Invalid activity type"}
 
     xp_to_award = int(XP_REWARDS[activity_type] * bonus_multiplier)
 
-    user = db.users.find_one({"_id": ObjectId(user_id)})
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return {"error": "User not found"}
 
     xp_data = user.get(
         "xp_data",
@@ -131,15 +96,15 @@ async def award_xp(activity_data: Dict[str, Any], current_user = Depends(get_cur
         xp_data["level_threshold"] = calculate_next_level_threshold(xp_data["level"])
         level_up = True
 
-    db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"xp_data": xp_data}})
+    await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"xp_data": xp_data}})
 
-    db.xp_activities.insert_one(
+    await db.xp_activities.insert_one(
         {
             "user_id": ObjectId(user_id),
             "activity_type": activity_type,
             "xp_awarded": xp_to_award,
             "timestamp": datetime.utcnow(),
-            "metadata": activity_data.get("metadata", {}),
+            "metadata": metadata or {},
         }
     )
 
@@ -152,14 +117,29 @@ async def award_xp(activity_data: Dict[str, Any], current_user = Depends(get_cur
     }
 
 
+@router.post("/award-xp")
+async def award_xp(activity_data: Dict[str, Any], current_user = Depends(get_current_user)):
+    user_id = current_user["user_id"]
+    db = get_db()
+    activity_type = activity_data.get("activity_type")
+    bonus_multiplier = activity_data.get("bonus_multiplier", 1.0)
+    metadata = activity_data.get("metadata", {})
+    
+    res = await award_xp_internal(db, user_id, activity_type, bonus_multiplier, metadata)
+    if "error" in res:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
+
+
 @router.get("/badges")
 async def get_user_badges(current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
     db = get_db()
 
-    all_badges = list(db.gamification.find({"resource_type": "badge"}))
+    cursor = db.gamification.find({"resource_type": "badge"})
+    all_badges = await cursor.to_list(length=None)
 
-    user_data = db.users.find_one({"_id": ObjectId(user_id)})
+    user_data = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -203,7 +183,7 @@ async def get_recent_achievements(current_user = Depends(get_current_user)):
     user_id = current_user["user_id"]
     db = get_db()
 
-    user_data = db.users.find_one({"_id": ObjectId(user_id)})
+    user_data = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -211,7 +191,8 @@ async def get_recent_achievements(current_user = Depends(get_current_user)):
     if not earned_badges:
         return {"achievements": []}
 
-    all_badges = list(db.gamification.find({"resource_type": "badge"}))
+    cursor = db.gamification.find({"resource_type": "badge"})
+    all_badges = await cursor.to_list(length=None)
     badge_by_id = {str(badge["_id"]): badge for badge in all_badges}
 
     def _earned_sort_key(item):

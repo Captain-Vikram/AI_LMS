@@ -374,7 +374,6 @@ const SkillPathwayResource = () => {
           </p>
           <div className="flex justify-center">
             <AppBackButton
-              label="Back to Pathway"
               fallbackTo={`/skill-pathway/${pathwayId}/resources`}
             />
           </div>
@@ -395,7 +394,6 @@ const SkillPathwayResource = () => {
           
       <header className="rounded-2xl border border-gray-700/50 bg-gray-800/60 backdrop-blur-md p-5 pb-6">
         <AppBackButton
-          label="Back to Pathway"
           fallbackTo={`/skill-pathway/${pathwayId}/resources`}
         />
         <h1 className="mt-4 text-3xl md:text-4xl font-bold text-white tracking-tight">{resource.title || "Resource"}</h1>

@@ -229,11 +229,12 @@ export const useAnnouncements = (classroomId) => {
           `/api/classroom/${classroomId}/announcements/${announcementId}/view`
         );
         storage.clearClassroomCache(classroomId);
+        await fetchAnnouncements(false);
       } catch (err) {
         console.error('Failed to mark announcement as viewed:', err);
       }
     },
-    [classroomId]
+    [classroomId, fetchAnnouncements]
   );
 
   const deleteAnnouncement = useCallback(

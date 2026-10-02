@@ -1,10 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from typing import Dict, Any, List
+import shutil
+import zipfile
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Body, File, Form, UploadFile
+from typing import Dict, Any, List, Optional
 from urllib.parse import quote_plus, urlparse
 from datetime import datetime, timedelta
 from database import get_db
 from functions.utils import get_current_user
 from services.skill_pathway_service import SkillPathwayService
+from routes.project_analyzer.analyzer import ProjectAnalyzer
+from routes.project_analyzer.github_utils import GitHubUtils
+from routes.project_analyzer.router import read_project_files
+
+_analyzer_instance = None
+_github_utils_instance = None
+
+def _get_analyzer_and_github():
+    global _analyzer_instance, _github_utils_instance
+    if not _analyzer_instance:
+        _analyzer_instance = ProjectAnalyzer()
+    if not _github_utils_instance:
+        _github_utils_instance = GitHubUtils()
+    return _analyzer_instance, _github_utils_instance
 
 router = APIRouter(prefix="/api/pathways", tags=["Skill Pathways"])
 
@@ -211,6 +228,128 @@ def get_stage_details(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{pathway_id}/stage/{stage_index}/submit-project")
+async def submit_stage_project(
+    pathway_id: str,
+    stage_index: int,
+    file: Optional[UploadFile] = File(None),
+    repo_url: Optional[str] = Form(None),
+    branch: Optional[str] = Form("main"),
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Analyze and submit a student's project for this stage using Project Analyzer."""
+    student_id = str(current_user["user_id"])
+    progress = db.student_pathway_progress.find_one({"student_id": student_id, "pathway_id": pathway_id})
+    if not progress:
+        raise HTTPException(status_code=404, detail="Enrollment not found")
+
+    pathway = db.global_learning_pathways.find_one({"_id": pathway_id})
+    if not pathway:
+        raise HTTPException(status_code=404, detail="Pathway blueprint not found")
+
+    stage_blueprint = next((s for s in pathway.get("stages", []) if s["stage_index"] == stage_index), None)
+    if not stage_blueprint:
+        raise HTTPException(status_code=404, detail="Stage blueprint not found")
+
+    analyzer, github_utils = _get_analyzer_and_github()
+
+    # Collect project assessment context and topics as custom requirements
+    project_prompt = stage_blueprint.get("project_assessment_prompt", "")
+    topics = stage_blueprint.get("topics", [])
+    custom_reqs = []
+    for topic in topics:
+        topic_name = topic.get("name") or ""
+        subtopics = topic.get("subtopics") or []
+        if topic_name:
+            custom_reqs.append(f"{topic_name}: {', '.join(subtopics) if subtopics else ''}")
+
+    analysis_req = {
+        "project_topic": f"Stage {stage_index}: {stage_blueprint.get('title', 'Skill Pathway Project')}",
+        "problem_statement": project_prompt,
+        "custom_requirements": custom_reqs
+    }
+
+    files_data = []
+    temp_zip_path = None
+    extract_path = None
+    repo_path = None
+
+    try:
+        if file and file.filename:
+            if not file.filename.endswith('.zip'):
+                raise HTTPException(status_code=400, detail="Only ZIP files are supported for project upload.")
+            upload_dir = Path("./uploads")
+            upload_dir.mkdir(exist_ok=True)
+            safe_name = Path(file.filename).name
+            temp_zip_path = upload_dir / f"stage_{pathway_id}_{stage_index}_{safe_name}"
+            with open(temp_zip_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            extract_path = upload_dir / f"extracted_{safe_name.replace('.zip', '')}_{pathway_id}_{stage_index}"
+            extract_path.mkdir(exist_ok=True)
+            with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            files_data = await read_project_files(extract_path)
+        elif repo_url and repo_url.strip():
+            clean_url = repo_url.strip()
+            if not clean_url.startswith(('https://github.com/', 'http://github.com/')):
+                raise HTTPException(status_code=400, detail="Invalid GitHub URL.")
+            repo_path = await github_utils.clone_repository(clean_url, branch or "main")
+            files_data = await github_utils.read_project_files(repo_path)
+        else:
+            raise HTTPException(status_code=400, detail="Please provide either a ZIP file or a GitHub repository URL.")
+
+        if not files_data:
+            raise HTTPException(status_code=400, detail="No readable code files found in the submission.")
+
+        # Run AI analysis
+        analysis_result = await analyzer.analyze_project(files_data, analysis_req)
+        score = analysis_result.get("final_verdict", {}).get("score", 0)
+        grade = analysis_result.get("final_verdict", {}).get("grade", "F")
+        passed = score >= 60
+
+        # Save review report to progress
+        update_fields = {
+            "stage_progress.$.project_review": analysis_result,
+            "stage_progress.$.project_score": score,
+            "stage_progress.$.project_grade": grade,
+        }
+
+        if passed:
+            update_fields["stage_progress.$.status"] = "completed"
+            update_fields["stage_progress.$.project_completed"] = True
+
+            # Unlock next stage
+            next_stage_index = stage_index + 1
+            db.student_pathway_progress.update_one(
+                {"student_id": student_id, "pathway_id": pathway_id, "stage_progress.stage_index": next_stage_index},
+                {"$set": {"stage_progress.$.status": "in-progress"}}
+            )
+
+        db.student_pathway_progress.update_one(
+            {"student_id": student_id, "pathway_id": pathway_id, "stage_progress.stage_index": stage_index},
+            {"$set": update_fields}
+        )
+
+        return {
+            "status": "success",
+            "passed": passed,
+            "score": score,
+            "grade": grade,
+            "message": "Project passed! Stage completed and next stage unlocked." if passed else "Project analyzed. Review the feedback and make improvements to pass (60% required).",
+            "report": analysis_result
+        }
+
+    finally:
+        if temp_zip_path and temp_zip_path.exists():
+            temp_zip_path.unlink()
+        if extract_path and extract_path.exists():
+            shutil.rmtree(extract_path, ignore_errors=True)
+        if repo_path:
+            await github_utils.cleanup(repo_path)
 
 @router.post("/{pathway_id}/stage/{stage_index}/complete")
 def complete_stage_manually(

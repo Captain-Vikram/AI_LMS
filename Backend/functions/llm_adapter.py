@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional
 import requests
 
 DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234"
-DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
 DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_GOOGLE_MODEL = "gemini-1.5-flash"
 AUTO_MODEL_SENTINELS = {"", "auto", "default", "local-model"}
@@ -41,22 +39,15 @@ def cloud_fallback_enabled() -> bool:
 
 def get_cloud_fallback_provider() -> str:
     provider = (os.getenv("LLM_FALLBACK_PROVIDER", "google") or "google").strip().lower()
-    if provider == "gemini":
+    if provider in {"gemini", "google"}:
         return "google"
-    return provider
+    return "google"
 
 
 def cloud_fallback_ready() -> bool:
-    provider = get_cloud_fallback_provider()
-
     if not cloud_fallback_enabled():
         return False
-
-    if provider == "groq":
-        return bool(os.getenv("GROQ_API_KEY"))
-
-    if provider == "google":
-        return bool(os.getenv("GOOGLE_API_KEY"))
+    return bool(os.getenv("GOOGLE_API_KEY"))
 
     return False
 
@@ -188,7 +179,11 @@ def _detect_model_id(timeout: int = 15) -> Optional[str]:
     return None
 
 
+_resolved_model_cache: Optional[str] = None
+
+
 def resolve_model_name(model_name: Optional[str] = None) -> Optional[str]:
+    global _resolved_model_cache
     requested = (model_name or "").strip()
     if requested and requested.lower() not in AUTO_MODEL_SENTINELS:
         return requested
@@ -197,7 +192,13 @@ def resolve_model_name(model_name: Optional[str] = None) -> Optional[str]:
     if default_model:
         return default_model
 
-    return _detect_model_id()
+    if _resolved_model_cache is not None:
+        return _resolved_model_cache
+
+    model_id = _detect_model_id()
+    if model_id:
+        _resolved_model_cache = model_id
+    return model_id
 
 
 
@@ -387,59 +388,6 @@ def _build_responses_payload(
     return payload
 
 
-def _generate_text_via_groq(
-    messages: List[Dict[str, str]],
-    generation_config: Dict[str, Any],
-    timeout: int,
-) -> str:
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not configured")
-
-    base_url = (os.getenv("GROQ_BASE_URL") or DEFAULT_GROQ_BASE_URL).rstrip("/")
-    model = (
-        (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
-        or (os.getenv("GROQ_MODEL") or "").strip()
-        or DEFAULT_GROQ_MODEL
-    )
-
-    payload: Dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "temperature": generation_config.get("temperature", 0.2),
-        "top_p": generation_config.get("top_p", 0.95),
-    }
-
-    max_tokens = generation_config.get("max_tokens", generation_config.get("max_output_tokens", 1024))
-    if max_tokens is not None:
-        payload["max_tokens"] = int(max_tokens)
-
-    response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=timeout,
-    )
-
-    if response.status_code >= 400:
-        raise RuntimeError(f"Groq fallback failed with HTTP {response.status_code}: {response.text[:180]}")
-
-    try:
-        data = response.json()
-    except ValueError:
-        data = response.text
-
-    text = _extract_text(data)
-    if not text or not text.strip():
-        raise RuntimeError("Groq fallback returned an empty response")
-
-    return text
-
-
 def _generate_text_via_google(
     messages: List[Dict[str, str]],
     generation_config: Dict[str, Any],
@@ -564,26 +512,14 @@ def generate_text(
             default_timeout=45,
         )
 
-        if provider == "groq":
-            try:
-                return _generate_text_via_groq(
-                    messages=messages,
-                    generation_config=generation_config,
-                    timeout=max(5, fallback_timeout),
-                )
-            except Exception as exc:
-                fallback_errors.append(f"groq -> {exc}")
-        elif provider == "google":
-            try:
-                return _generate_text_via_google(
-                    messages=messages,
-                    generation_config=generation_config,
-                    timeout=max(5, fallback_timeout),
-                )
-            except Exception as exc:
-                fallback_errors.append(f"google -> {exc}")
-        else:
-            fallback_errors.append(f"Unsupported fallback provider: {provider}")
+        try:
+            return _generate_text_via_google(
+                messages=messages,
+                generation_config=generation_config,
+                timeout=max(5, fallback_timeout),
+            )
+        except Exception as exc:
+            fallback_errors.append(f"google -> {exc}")
     else:
         fallback_errors.append("Cloud fallback disabled by ENABLE_CLOUD_LLM_FALLBACK")
 

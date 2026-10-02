@@ -89,7 +89,6 @@ const ClassroomRoster = () => {
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-6">
         <AppBackButton
-          label="Back to Dashboard"
           fallbackTo={`/classroom/${classroomId}/dashboard`}
         />
 

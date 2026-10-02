@@ -256,8 +256,10 @@ const StudentAssessmentTaker = ({ assessmentId, studentId, onClose, onSubmitted 
               </div>
               <div className="flex-grow pt-1">
                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="px-2 py-0.5 bg-gray-800 text-[10px] font-bold text-gray-400 rounded uppercase tracking-widest border border-gray-700">
-                      Bloom Level {q.bloom_level}
+                    <span className="px-2 py-0.5 bg-gray-800 text-[10px] font-bold text-gray-300 rounded uppercase tracking-widest border border-gray-700">
+                      {Number(q.bloom_level) === 3 ? "Bloom 3: Apply Concepts" :
+                       Number(q.bloom_level) === 4 ? "Bloom 4: Analyze Relations" :
+                       Number(q.bloom_level) === 5 ? "Bloom 5: Critical Evaluation" : `Bloom Level ${q.bloom_level}`}
                     </span>
                     <span className="text-[10px] font-bold text-indigo-400/80 uppercase tracking-widest">
                        • {q.marks} Points

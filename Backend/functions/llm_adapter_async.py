@@ -14,8 +14,6 @@ from dotenv import load_dotenv
 # Import all constants and helper functions from sync adapter
 from functions.llm_adapter import (
     DEFAULT_LMSTUDIO_URL,
-    DEFAULT_GROQ_BASE_URL,
-    DEFAULT_GROQ_MODEL,
     DEFAULT_GOOGLE_BASE_URL,
     DEFAULT_GOOGLE_MODEL,
     AUTO_MODEL_SENTINELS,
@@ -39,6 +37,29 @@ from functions.llm_adapter import (
 )
 
 load_dotenv(override=True)
+
+_resolved_model_cache: Optional[str] = None
+
+
+async def resolve_model_name_async(model_name: Optional[str] = None) -> Optional[str]:
+    """Asynchronously resolve the model name with caching"""
+    global _resolved_model_cache
+    
+    requested = (model_name or "").strip()
+    if requested and requested.lower() not in AUTO_MODEL_SENTINELS:
+        return requested
+
+    default_model = get_default_model()
+    if default_model:
+        return default_model
+
+    if _resolved_model_cache is not None:
+        return _resolved_model_cache
+
+    model_id = await _detect_model_id_async()
+    if model_id:
+        _resolved_model_cache = model_id
+    return model_id
 
 
 async def _detect_model_id_async(timeout: int = 15) -> Optional[str]:
@@ -78,60 +99,6 @@ async def _detect_model_id_async(timeout: int = 15) -> Optional[str]:
                 continue
 
     return None
-
-
-async def _generate_text_via_groq_async(
-    messages: List[Dict[str, str]],
-    generation_config: Dict[str, Any],
-    timeout: int,
-) -> str:
-    """Async version of Groq fallback"""
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not configured")
-
-    base_url = (os.getenv("GROQ_BASE_URL") or DEFAULT_GROQ_BASE_URL).rstrip("/")
-    model = (
-        (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
-        or (os.getenv("GROQ_MODEL") or "").strip()
-        or DEFAULT_GROQ_MODEL
-    )
-
-    payload: Dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "temperature": generation_config.get("temperature", 0.2),
-        "top_p": generation_config.get("top_p", 0.95),
-    }
-
-    max_tokens = generation_config.get("max_tokens", generation_config.get("max_output_tokens", 1024))
-    if max_tokens is not None:
-        payload["max_tokens"] = int(max_tokens)
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"{base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-
-        if response.status_code >= 400:
-            raise RuntimeError(f"Groq fallback failed with HTTP {response.status_code}: {response.text[:180]}")
-
-        try:
-            data = response.json()
-        except ValueError:
-            data = response.text
-
-    text = _extract_text(data)
-    if not text or not text.strip():
-        raise RuntimeError("Groq fallback returned an empty response")
-
-    return text
 
 
 async def _generate_text_via_google_async(
@@ -200,11 +167,11 @@ async def generate_text_async(
 ) -> str:
     """
     Asynchronously generate text from a local LM Studio server.
-    Falls back to cloud providers (Groq, Google) if configured.
+    Falls back to cloud providers (Google Gemini) if configured.
     """
     generation_config = generation_config or {}
     messages = _normalize_messages(prompt_or_messages)
-    resolved_model_name = resolve_model_name(model_name)
+    resolved_model_name = await resolve_model_name_async(model_name)
     effective_timeout = _resolve_timeout(
         explicit_timeout=timeout,
         env_var="LMSTUDIO_TIMEOUT_SECONDS",
@@ -258,26 +225,14 @@ async def generate_text_async(
             default_timeout=45,
         )
 
-        if provider == "groq":
-            try:
-                return await _generate_text_via_groq_async(
-                    messages=messages,
-                    generation_config=generation_config,
-                    timeout=max(5, fallback_timeout),
-                )
-            except Exception as exc:
-                fallback_errors.append(f"groq -> {exc}")
-        elif provider == "google":
-            try:
-                return await _generate_text_via_google_async(
-                    messages=messages,
-                    generation_config=generation_config,
-                    timeout=max(5, fallback_timeout),
-                )
-            except Exception as exc:
-                fallback_errors.append(f"google -> {exc}")
-        else:
-            fallback_errors.append(f"Unsupported fallback provider: {provider}")
+        try:
+            return await _generate_text_via_google_async(
+                messages=messages,
+                generation_config=generation_config,
+                timeout=max(5, fallback_timeout),
+            )
+        except Exception as exc:
+            fallback_errors.append(f"google -> {exc}")
     else:
         fallback_errors.append("Cloud fallback disabled by ENABLE_CLOUD_LLM_FALLBACK")
 

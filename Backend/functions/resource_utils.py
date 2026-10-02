@@ -5,10 +5,8 @@ import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from functions.youtube_quiz_functions import extract_video_id
-
-def _assessment_signature(payload: Dict[str, Any]) -> str:
-    serialized = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+from functions.shared_utils import assessment_signature as _assessment_signature
+from functions.shared_utils import to_iso as _to_iso
 
 def _normalize_url(url_value) -> str:
     """Extract a clean absolute URL from string/list/legacy list-like string inputs."""
@@ -190,11 +188,6 @@ def _build_resources_from_outputs(
             break
 
     return deduped
-
-def _to_iso(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
 
 def _serialize_resource(resource: Dict[str, Any]) -> Dict[str, Any]:
     module_id = resource.get("module_id")

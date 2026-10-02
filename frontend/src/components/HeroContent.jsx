@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Link as RouterLink } from "react-router-dom";
-import { gsap } from "gsap";
 
 const HeroContent = () => {
   const contentRef = useRef(null);
@@ -66,60 +65,6 @@ const HeroContent = () => {
     };
   }, []);
 
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      const tl = gsap.timeline({ defaults: { ease: "expo.out" } });
-
-      // 1. Initial State: Hide elements to prevent flash
-      gsap.set("[data-gsap='title-line'] span", { y: "110%" });
-
-      tl.from("[data-gsap='badge']", {
-        y: 20,
-        opacity: 0,
-        duration: 1,
-        delay: 0.2
-      })
-      // 2. Reveal Title with a "Masked Slide"
-      .to("[data-gsap='title-line'] span", {
-        y: "0%",
-        duration: 1.2,
-        stagger: 0.1,
-        ease: "power4.out"
-      }, "-=0.8")
-      // 3. Subtitle Fade + Slide
-      .from("[data-gsap='subtitle']", {
-        y: 15,
-        opacity: 0,
-        duration: 1
-      }, "-=0.9")
-      // 4. Features - Staggered Slide In
-      .from("[data-gsap='feature']", {
-        x: -20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.8
-      }, "-=0.7")
-      // 5. Buttons - Pop In
-      .from("[data-gsap='cta']", {
-        scale: 0.9,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.6,
-        ease: "back.out(1.7)"
-      }, "-=0.5");
-
-      // Continuous Floating Animation for Accent
-      gsap.to("[data-gsap='accent']", {
-        y: -5,
-        duration: 2,
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut"
-      });
-    }, contentRef);
-
-    return () => ctx.revert();
-  }, []);
 
   return (
     <div ref={contentRef} className="relative z-30 flex justify-center items-center min-h-screen px-6 lg:px-10 overflow-hidden">

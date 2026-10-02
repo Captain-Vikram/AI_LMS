@@ -20,6 +20,10 @@ import requests
 from database import db
 import functions.llm_adapter_async as genai
 from functions.utils import get_user_display_name
+from database_async import get_db as get_async_db
+from routes.gamification_routes import award_xp_internal
+from functions.user_memory import update_user_memory
+from functions.shared_utils import to_object_id as _to_object_id, to_iso as _to_iso_or_value, clean_json_text as _clean_json_payload
 
 
 router = APIRouter(
@@ -123,10 +127,6 @@ def _as_dict(value: Any) -> Dict[str, Any]:
 
 def _as_list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
-
-
-def _to_iso_or_value(value: Any) -> Any:
-    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def _default_bloom_config() -> Dict[str, Any]:
@@ -294,13 +294,6 @@ def _sync_selected_topic_id(category_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return category_cfg
 
 
-def _to_object_id(raw_value: Any) -> Optional[ObjectId]:
-    try:
-        return ObjectId(str(raw_value))
-    except Exception:
-        return None
-
-
 def _id_candidates(raw_value: Any) -> List[Any]:
     raw_text = str(raw_value)
     candidates: List[Any] = [raw_text]
@@ -312,15 +305,6 @@ def _id_candidates(raw_value: Any) -> List[Any]:
 
 def _find_by_id(collection, raw_id: str) -> Optional[Dict[str, Any]]:
     return collection.find_one({"_id": {"$in": _id_candidates(raw_id)}})
-
-
-def _clean_json_payload(raw_text: str) -> str:
-    text = _safe_text(raw_text)
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-    if text.endswith("```"):
-        text = text[:-3].strip()
-    return text
 
 
 def _collect_module_sources(module: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -1743,6 +1727,22 @@ async def submit_scenario_answers(submission_id: str, request: ScenarioSubmissio
 
     refreshed = db.module_assessment_workflow_submissions.find_one({"_id": submission.get("_id")})
 
+    # Award XP and log activity to AI Memory
+    try:
+        student_id = str(submission.get("student_id") or "")
+        if student_id:
+            async_db = get_async_db()
+            await award_xp_internal(async_db, student_id, "complete_assessment", metadata={"submission_id": str(submission.get("_id"))})
+            await update_user_memory(
+                db=async_db,
+                user_id=student_id,
+                event_type="SUBMITTED_SCENARIO_ASSESSMENT",
+                description=f"Submitted scenario assessment answers for workflow {submission.get('workflow_id')}. Pending teacher review.",
+                data={"workflow_id": str(submission.get("workflow_id")), "submission_id": str(submission.get("_id"))}
+            )
+    except Exception as exc:
+        print(f"Warning: failed to award XP or update memory for scenario submission: {exc}")
+
     return {
         "message": "Scenario answers submitted. Pending teacher review.",
         "submission": _serialize_submission(refreshed or submission),
@@ -1782,8 +1782,9 @@ async def submit_article_link(submission_id: str, request: ArticleLinkSubmission
         )
         raise HTTPException(status_code=400, detail="A valid http(s) URL is required")
 
+    import asyncio
     try:
-        article_text = _fetch_article_text(url)
+        article_text = await asyncio.to_thread(_fetch_article_text, url)
     except Exception as exc:
         # Revert submitted_at
         db.module_assessment_workflow_submissions.update_one(
@@ -1825,6 +1826,26 @@ async def submit_article_link(submission_id: str, request: ArticleLinkSubmission
     )
 
     refreshed = db.module_assessment_workflow_submissions.find_one({"_id": submission.get("_id")})
+
+    # Award XP and log activity to AI Memory
+    try:
+        student_id = str(submission.get("student_id") or "")
+        if student_id:
+            async_db = get_async_db()
+            await award_xp_internal(async_db, student_id, "complete_assessment", metadata={"submission_id": str(submission.get("_id"))})
+            if passed:
+                await award_xp_internal(async_db, student_id, "improve_skill_level", metadata={"submission_id": str(submission.get("_id"))})
+            
+            p_val = round(percentage * 100, 2)
+            await update_user_memory(
+                db=async_db,
+                user_id=student_id,
+                event_type="SUBMITTED_ARTICLE_ASSESSMENT",
+                description=f"Submitted article URL assessment for workflow {submission.get('workflow_id')} scoring {p_val}%. Status: {'Passed' if passed else 'Failed'}.",
+                data={"workflow_id": str(submission.get("workflow_id")), "submission_id": str(submission.get("_id")), "passed": passed, "ai_score": round(final_score, 2)}
+            )
+    except Exception as exc:
+        print(f"Warning: failed to award XP or update memory for article submission: {exc}")
 
     return {
         "message": "Article submission graded by AI. Pending teacher review.",
@@ -1927,6 +1948,23 @@ async def submit_artifact(
 
         refreshed = db.module_assessment_workflow_submissions.find_one({"_id": submission.get("_id")})
 
+        # Award XP and log activity to AI Memory
+        try:
+            student_id = str(submission.get("student_id") or "")
+            if student_id:
+                async_db = get_async_db()
+                await award_xp_internal(async_db, student_id, "complete_assessment", metadata={"submission_id": str(submission.get("_id"))})
+                p_score = float(evaluation.get("partial_score") or 0)
+                await update_user_memory(
+                    db=async_db,
+                    user_id=student_id,
+                    event_type="SUBMITTED_PPT_ASSESSMENT",
+                    description=f"Submitted PPT/PDF assessment for workflow {submission.get('workflow_id')} receiving partial score {p_score}.",
+                    data={"workflow_id": str(submission.get("workflow_id")), "submission_id": str(submission.get("_id")), "partial_score": p_score}
+                )
+        except Exception as exc:
+            print(f"Warning: failed to award XP or update memory for PPT submission: {exc}")
+
         return {
             "message": "PPT/PDF submission received. Partial AI grading complete and pending teacher review.",
             "submission": _serialize_submission(refreshed or submission),
@@ -1976,6 +2014,26 @@ async def submit_artifact(
     )
 
     refreshed = db.module_assessment_workflow_submissions.find_one({"_id": submission.get("_id")})
+
+    # Award XP and log activity to AI Memory
+    try:
+        student_id = str(submission.get("student_id") or "")
+        if student_id:
+            async_db = get_async_db()
+            await award_xp_internal(async_db, student_id, "complete_assessment", metadata={"submission_id": str(submission.get("_id"))})
+            if passed:
+                await award_xp_internal(async_db, student_id, "improve_skill_level", metadata={"submission_id": str(submission.get("_id"))})
+            
+            p_val = round(percentage * 100, 2)
+            await update_user_memory(
+                db=async_db,
+                user_id=student_id,
+                event_type="SUBMITTED_RESEARCH_LATEX",
+                description=f"Submitted research LaTeX assessment for workflow {submission.get('workflow_id')} scoring {p_val}%. Status: {'Passed' if passed else 'Failed'}.",
+                data={"workflow_id": str(submission.get("workflow_id")), "submission_id": str(submission.get("_id")), "passed": passed, "ai_score": round(final_score, 2)}
+            )
+    except Exception as exc:
+        print(f"Warning: failed to award XP or update memory for research LaTeX submission: {exc}")
 
     return {
         "message": "Research submission graded by AI with template alignment checks.",

@@ -27,15 +27,9 @@ def get_web_links(query):
     except Exception:
         return []
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(Exception),
-    reraise=False
-)
 def _sync_tavily_search(query: str, search_depth: str = "advanced", max_results: int = 5):
     """
-    Synchronous Tavily search call with retry.
+    Synchronous Tavily search call.
     """
     try:
         # bias towards educational/official docs
@@ -106,27 +100,20 @@ async def generate_skill_resources(input_json, stop_event: Optional[asyncio.Even
         "max_output_tokens": 3000
     }
 
-    # Fallback model strategy
-    primary_model_name = os.getenv("LMSTUDIO_MODEL")
-    fallback_model_name = os.getenv("LMSTUDIO_MODEL_FALLBACK") or primary_model_name
-
-    async def get_model(use_fallback=False):
-        model_name = fallback_model_name if use_fallback else primary_model_name
-        return genai.GenerativeModelAsync(
-            model_name=model_name,
-            generation_config=generation_config
-        )
-
     # Helper function: clean the generative model's JSON response
     def clean_json_response(response_text):
         cleaned_text = re.sub(r"```json|```", "", response_text).strip()
         return cleaned_text
 
     # Helper function: generate a workflow (list of subtopics) for a given skill
-    async def generate_workflow(skill, use_fallback=False):
-        model = await get_model(use_fallback)
+    async def generate_workflow(skill):
         if stop_event and stop_event.is_set():
             return json.dumps({"skill": skill, "subtopics": []})
+
+        model = genai.GenerativeModelAsync(
+            model_name=os.getenv("LMSTUDIO_MODEL"),
+            generation_config=generation_config
+        )
         
         prompt = f"""You are an expert curriculum designer. Generate a structured learning path for the skill: "{skill}".
 The student's current assessed level is: {assessed_level}.
@@ -164,10 +151,6 @@ Return valid JSON in this exact schema:
             print(f"\nRaw response for {skill}:\n{raw_text}")
             return clean_json_response(raw_text)
         except Exception as exc:
-            if not use_fallback and fallback_model_name != primary_model_name:
-                print(f"Primary model failed for {skill}, trying fallback...")
-                return await generate_workflow(skill, use_fallback=True)
-            
             print(f"Workflow generation failed for {skill}: {exc}")
             fallback_payload = {
                 "skill": skill,
@@ -263,16 +246,44 @@ Return valid JSON in this exact schema:
                 })
             combined_articles.extend(all_serper_links)
             
+            # Fallback if no articles retrieved
+            if not combined_articles:
+                from urllib.parse import quote_plus
+                combined_articles.append({
+                    "url": f"https://en.wikipedia.org/wiki/{quote_plus(skill)}",
+                    "title": f"{skill} - Wikipedia Overview",
+                    "content": f"A comprehensive reference document covering details of {skill}.",
+                    "blueprint_subtopic": f"{skill} Overview",
+                    "search_query_used": "fallback",
+                    "difficulty_tag": "intermediate"
+                })
+
             if stop_event and stop_event.is_set():
                 filtered_articles = []
             else:
                 filtered_articles = await filter_pipeline(skill, combined_articles)
+                if not filtered_articles and combined_articles:
+                    print(f"Filter pipeline rejected all articles for {skill}. Falling back to unfiltered articles.")
+                    filtered_articles = combined_articles
+
+            # Segregate blogs and documents
+            docs_list = []
+            blogs_list = []
+            blog_keywords = {"blog", "medium.com", "dev.to", "hashnode", "substack", "wp-", "blogspot"}
+            
+            for article in filtered_articles[:15]:
+                url_str = (article.get("url") or "").lower()
+                is_blog = any(kw in url_str for kw in blog_keywords)
+                if is_blog:
+                    blogs_list.append(article.get("url"))
+                else:
+                    docs_list.append(article)
 
             return {
                 "skill": skill,
                 "subtopics": subtopics,
-                "documents": filtered_articles[:15],
-                "blogs": []
+                "documents": docs_list,
+                "blogs": blogs_list
             }
         except Exception as e:
             print(f"Failed to process skill resources for '{skill}': {e}")

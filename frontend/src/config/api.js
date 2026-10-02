@@ -57,6 +57,7 @@ export const API_ENDPOINTS = {
   PATHWAY_GET_PROGRESS: (id) => `/api/pathways/progress/${id}`,
   PATHWAY_ENROLL: (id) => `/api/pathways/${id}/enroll`,
   PATHWAY_STAGE_DETAILS: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}`,
+  PATHWAY_SUBMIT_PROJECT: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/submit-project`,
   PATHWAY_COMPLETE_STAGE: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/complete`,
   PATHWAY_GENERATE_RESOURCES: (pathwayId, stageIdx) => `/api/pathways/${pathwayId}/stage/${stageIdx}/generate-resources`,
   PATHWAY_GENERATE_TESTS: (pathwayId, stageIdx, resourceId) => `/api/pathways/${pathwayId}/stage/${stageIdx}/resource/${resourceId}/tests`,

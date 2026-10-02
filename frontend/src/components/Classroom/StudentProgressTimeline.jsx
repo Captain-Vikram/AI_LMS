@@ -235,7 +235,6 @@ const StudentProgressTimeline = () => {
 
           <div className="relative px-6 pt-6 pb-6 space-y-4">
             <AppBackButton
-              label="Back to Roster"
               fallbackTo={`/classroom/${classroomId}/roster`}
             />
             <div className="pt-3">

@@ -54,14 +54,14 @@ const CreateClassroom = () => {
     setLoading(true);
     try {
       const formData = new FormData();
-      formData.append('name', name.trim());
+      formData.append('classroom_name', name.trim());
       formData.append('subject', subject.trim());
       formData.append('grade_level', grade.trim());
-      formData.append('subject_description', subjectDescription.trim());
-      formData.append('student_expectations', studentExpectations.trim());
-      formData.append('description', subjectDescription.trim());
-      formData.append('require_approval', 'true');
+      formData.append('classroom_description', subjectDescription.trim());
+      formData.append('teaching_goals', studentExpectations.trim());
       formData.append('curriculum_pdf', curriculumFile);
+      formData.append('institution_name', '');
+      formData.append('preferred_pace', 'balanced');
 
       const res = await apiClient.post(API_ENDPOINTS.CLASSROOM_CREATE, formData);
       localStorage.setItem("onboardingComplete", "true");
@@ -86,7 +86,7 @@ const CreateClassroom = () => {
                 announcements, and learning modules.
               </p>
             </div>
-            <AppBackButton label="Back to Classrooms" fallbackTo="/classrooms" />
+            <AppBackButton fallbackTo="/classrooms" />
           </div>
         </div>
 

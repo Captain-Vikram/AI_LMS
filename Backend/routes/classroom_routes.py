@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from database_async import get_db
-from database import get_db as get_sync_db
 from bson import ObjectId, Binary
 import asyncio
 from datetime import datetime
@@ -198,16 +197,15 @@ async def _parse_create_classroom_request(request: Request) -> Tuple[Dict[str, A
     if "multipart/form-data" in content_type:
         form = await request.form()
         payload = {
-            "name": form.get("name"),
+            "name": form.get("name") or form.get("classroom_name"),
             "subject": form.get("subject"),
             "grade_level": form.get("grade_level"),
-            "description": form.get("description"),
-            "subject_description": form.get("subject_description"),
-            "student_expectations": form.get("student_expectations"),
+            "description": form.get("description") or form.get("classroom_description"),
+            "subject_description": form.get("subject_description") or form.get("classroom_description"),
+            "student_expectations": form.get("student_expectations") or form.get("teaching_goals"),
             "require_approval": form.get("require_approval"),
         }
         curriculum_pdf = form.get("curriculum_pdf")
-        # request.form() yields Starlette UploadFile objects; accept both FastAPI and Starlette types.
         if curriculum_pdf is not None and not isinstance(curriculum_pdf, (UploadFile, StarletteUploadFile)):
             curriculum_pdf = None
         return payload, curriculum_pdf
@@ -798,12 +796,12 @@ async def create_classroom(request: Request, current_user = Depends(get_current_
 
     classroom_data, curriculum_pdf = await _parse_create_classroom_request(request)
 
-    classroom_name = (classroom_data.get("name") or "").strip()
+    classroom_name = (classroom_data.get("name") or classroom_data.get("classroom_name") or "").strip()
     subject = (classroom_data.get("subject") or "").strip()
     grade_level = (classroom_data.get("grade_level") or "").strip()
-    description = (classroom_data.get("description") or "").strip()
-    subject_description = (classroom_data.get("subject_description") or "").strip()
-    student_expectations = (classroom_data.get("student_expectations") or "").strip()
+    description = (classroom_data.get("description") or classroom_data.get("classroom_description") or "").strip()
+    subject_description = (classroom_data.get("subject_description") or classroom_data.get("classroom_description") or "").strip()
+    student_expectations = (classroom_data.get("student_expectations") or classroom_data.get("teaching_goals") or "").strip()
     require_approval = _parse_bool(classroom_data.get("require_approval"))
 
     if not classroom_name:
@@ -1529,6 +1527,33 @@ async def generate_classroom_resources(
     return {"status": "generation_started", "job_id": job_id, "message": "Classroom resource discovery started"}
 
 
+@router.get("/find")
+async def find_classroom_by_code(code: str):
+    """Find a classroom by enrollment code. Returns basic info if found."""
+    db = get_db()
+    trimmed_code = str(code or "").strip()
+    if not trimmed_code:
+        raise HTTPException(status_code=400, detail="Enrollment code is required")
+
+    classroom = await db.classrooms.find_one(
+        {
+            "enrollment_code": {
+                "$regex": f"^{re.escape(trimmed_code)}$",
+                "$options": "i",
+            }
+        }
+    )
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Classroom not found")
+
+    return {
+        "classroom_id": str(classroom["_id"]),
+        "name": classroom.get("name"),
+        "subject": classroom.get("subject"),
+        "grade_level": classroom.get("grade_level")
+    }
+
+
 @router.get("/{classroom_id}")
 @cache_response(ttl=600, key_prefix="classroom")
 async def get_classroom(classroom_id: str, current_user = Depends(get_current_user)):
@@ -1565,33 +1590,6 @@ async def get_classroom(classroom_id: str, current_user = Depends(get_current_us
     return classroom
 
 
-@router.get("/find")
-async def find_classroom_by_code(code: str):
-    """Find a classroom by enrollment code. Returns basic info if found."""
-    db = get_db()
-    trimmed_code = str(code or "").strip()
-    if not trimmed_code:
-        raise HTTPException(status_code=400, detail="Enrollment code is required")
-
-    classroom = await db.classrooms.find_one(
-        {
-            "enrollment_code": {
-                "$regex": f"^{re.escape(trimmed_code)}$",
-                "$options": "i",
-            }
-        }
-    )
-    if not classroom:
-        raise HTTPException(status_code=404, detail="Classroom not found")
-
-    return {
-        "classroom_id": str(classroom["_id"]),
-        "name": classroom.get("name"),
-        "subject": classroom.get("subject"),
-        "grade_level": classroom.get("grade_level")
-    }
-
-
 @router.post("/{classroom_id}/join")
 async def join_classroom(classroom_id: str, enrollment_code: str, current_user = Depends(get_current_user)):
     db = get_db()
@@ -1612,9 +1610,10 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
     user_oid = ObjectId(user_id)
     normalized_role = normalize_user_role(current_user.get("role"))
 
-    is_primary_teacher = user_oid == classroom.get("teacher_id")
-    is_co_teacher = user_id in classroom.get("co_teachers", [])
-    is_student = user_oid in classroom.get("students", [])
+    # String-safe comparisons to handle mixed ObjectId/string storage
+    is_primary_teacher = str(classroom.get("teacher_id", "")) == user_id
+    is_co_teacher = any(str(t) == user_id for t in classroom.get("co_teachers", []))
+    is_student = any(str(s) == user_id for s in classroom.get("students", []))
 
     if is_primary_teacher:
         raise HTTPException(status_code=400, detail="You already own this classroom")
@@ -1642,6 +1641,27 @@ async def join_classroom(classroom_id: str, enrollment_code: str, current_user =
             {"_id": ObjectId(classroom_id)},
             {"$addToSet": {"students": user_oid}},
         )
+
+    # Invalidate any cached classroom/dashboard responses so the new member
+    # is not blocked by a previously cached 403 or stale data.
+    try:
+        from functions.cache_utils import invalidate_cache
+        import hashlib, json as _json
+        for prefix in ("classroom", "dashboard", "overview"):
+            for method in ("GET",):
+                for path in (
+                    f"/api/classroom/{classroom_id}",
+                    f"/api/classroom/{classroom_id}/dashboard",
+                    f"/api/classroom/{classroom_id}/overview",
+                ):
+                    raw_key = f"{prefix}:{method}:{path}::{user_id}"
+                    ck = f"{prefix}:{hashlib.md5(raw_key.encode()).hexdigest()}"
+                    from functions.cache_utils import cache_manager
+                    rc = cache_manager.get_redis()
+                    if rc:
+                        await rc.delete(ck)
+    except Exception:
+        pass
 
     user_doc = await db.users.find_one({"_id": user_oid}, {"classroom_memberships": 1}) or {}
     memberships = user_doc.get("classroom_memberships", [])

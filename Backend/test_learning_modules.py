@@ -3,6 +3,7 @@ Test script to verify learning module system end-to-end
 Tests auto-generation, progress tracking, and analytics
 """
 import sys
+import asyncio
 from datetime import datetime
 from bson import ObjectId
 
@@ -18,7 +19,7 @@ class MockCollection:
     def __init__(self):
         self.data = []
     
-    def find_one(self, query, *args, **kwargs):
+    async def find_one(self, query, *args, **kwargs):
         for doc in self.data:
             match = True
             for key, value in query.items():
@@ -47,11 +48,11 @@ class MockCollection:
                 results.append(doc)
         return MockFindResult(results)
     
-    def insert_one(self, doc):
+    async def insert_one(self, doc):
         self.data.append(doc)
         return MockInsertResult(doc.get("_id"))
     
-    def update_one(self, query, update, *args, **kwargs):
+    async def update_one(self, query, update, *args, **kwargs):
         for doc in self.data:
             match = True
             for key, value in query.items():
@@ -67,7 +68,13 @@ class MockCollection:
             return MockUpdateResult(upserted=1)
         return MockUpdateResult(matched=0)
     
-    def count_documents(self, query):
+    async def delete_one(self, query):
+        initial_len = len(self.data)
+        self.data = [doc for doc in self.data if not all(doc.get(k) == v for k, v in query.items())]
+        deleted_count = initial_len - len(self.data)
+        return MockDeleteResult(deleted_count)
+    
+    async def count_documents(self, query):
         count = 0
         for doc in self.data:
             match = True
@@ -90,6 +97,9 @@ class MockFindResult:
     def __iter__(self):
         return iter(self.data)
     
+    async def to_list(self, length=None):
+        return self.data
+    
     def sort(self, *args, **kwargs):
         return self
     
@@ -109,8 +119,12 @@ class MockUpdateResult:
         self.matched_count = matched
         self.upserted_id = upserted
 
+class MockDeleteResult:
+    def __init__(self, deleted_count):
+        self.deleted_count = deleted_count
+
 # Setup test data
-def setup_test_classroom():
+async def setup_test_classroom():
     db = MockDB()
     
     classroom_id = ObjectId()
@@ -165,134 +179,145 @@ def setup_test_classroom():
         ]
     }
     
-    db.classrooms.insert_one(classroom)
+    await db.classrooms.insert_one(classroom)
     return db, str(classroom_id)
 
 # Test the service
 def test_auto_generation():
-    from services.learning_module_service import LearningModuleService
-    
-    print("\n" + "="*60)
-    print("TEST 1: Auto-Generate Modules from Resources")
-    print("="*60)
-    
-    db, classroom_id = setup_test_classroom()
-    service = LearningModuleService(db)
-    
-    # Generate modules
-    result = service.auto_generate_modules_from_resources(classroom_id)
-    
-    print(f"Status: {result['status']}")
-    print(f"Message: {result['message']}")
-    print(f"Modules Created: {result['modules_created']}")
-    
-    assert result['status'] == 'success', "Generation should succeed"
-    assert result['modules_created'] == 2, "Should create 2 modules (Python Basics, Data Structures)"
-    
-    print("\n✅ Modules created successfully!")
-    for module in result['modules']:
-        print(f"  - {module['name']} ({module['resource_count']} resources)")
-    
-    return db, classroom_id, result['modules']
+    async def _test():
+        from services.learning_module_service import LearningModuleService
+        
+        print("\n" + "="*60)
+        print("TEST 1: Auto-Generate Modules from Resources")
+        print("="*60)
+        
+        db, classroom_id = await setup_test_classroom()
+        service = LearningModuleService(db)
+        
+        # Generate modules
+        result = await service.auto_generate_modules_from_resources(classroom_id)
+        
+        print(f"Status: {result['status']}")
+        print(f"Message: {result['message']}")
+        print(f"Modules Created: {result['modules_created']}")
+        
+        assert result['status'] == 'success', "Generation should succeed"
+        assert result['modules_created'] == 2, "Should create 2 modules (Python Basics, Data Structures)"
+        
+        print("\n✅ Modules created successfully!")
+        for module in result['modules']:
+            print(f"  - {module['name']} ({module['resource_count']} resources)")
+        
+        return db, classroom_id, result['modules']
+    return asyncio.run(_test())
 
 def test_module_retrieval():
-    from services.learning_module_service import LearningModuleService
-    
-    print("\n" + "="*60)
-    print("TEST 2: Retrieve Modules")
-    print("="*60)
-    
     db, classroom_id, created_modules = test_auto_generation()
-    service = LearningModuleService(db)
     
-    # Retrieve modules
-    result = service.get_classroom_modules(classroom_id)
-    
-    print(f"Status: {result['status']}")
-    print(f"Total Modules: {result['total']}")
-    
-    assert result['status'] == 'success', "Retrieval should succeed"
-    assert len(result['modules']) == 2, "Should retrieve 2 modules"
-    
-    print("\n✅ Modules retrieved successfully!")
-    for module in result['modules']:
-        print(f"  - {module['name']} (Order: {module['order']}, Resources: {len(module['resources'])})")
-    
-    return db, classroom_id, result['modules']
+    async def _test():
+        from services.learning_module_service import LearningModuleService
+        
+        print("\n" + "="*60)
+        print("TEST 2: Retrieve Modules")
+        print("="*60)
+        
+        service = LearningModuleService(db)
+        
+        # Retrieve modules
+        result = await service.get_classroom_modules(classroom_id)
+        
+        print(f"Status: {result['status']}")
+        print(f"Total Modules: {result['total']}")
+        
+        assert result['status'] == 'success', "Retrieval should succeed"
+        assert len(result['modules']) == 2, "Should retrieve 2 modules"
+        
+        print("\n✅ Modules retrieved successfully!")
+        for module in result['modules']:
+            print(f"  - {module['name']} (Order: {module['order']}, Resources: {len(module['resources'])})")
+        
+        return db, classroom_id, result['modules']
+    return asyncio.run(_test())
 
 def test_resource_engagement():
-    from services.learning_module_service import LearningModuleService
-    
-    print("\n" + "="*60)
-    print("TEST 3: Track Resource Engagement")
-    print("="*60)
-    
     db, classroom_id, modules = test_module_retrieval()
-    service = LearningModuleService(db)
     
-    # Get first module
-    module = modules[0]
-    module_id = module['module_id']
-    
-    # Simulate student engagement with a resource
-    student_id = str(ObjectId())
-    resource_id = module['resources'][0]['id'] if module['resources'] else 'res_1'
-    
-    engagement_data = {
-        "viewed": True,
-        "view_duration_seconds": 600,
-        "completion_percentage": 85,
-        "test_score": 90,
-        "test_attempts": 1,
-        "helpful": True
-    }
-    
-    result = service.track_resource_engagement(
-        student_id,
-        resource_id,
-        module_id,
-        engagement_data
-    )
-    
-    print(f"Status: {result['status']}")
-    print(f"Message: {result['message']}")
-    
-    assert result['status'] == 'success', "Engagement tracking should succeed"
-    
-    print("\n✅ Resource engagement tracked successfully!")
-    print(f"  - Student viewed resource for 10 minutes")
-    print(f"  - Completion: 85%")
-    print(f"  - Test Score: 90%")
-    
-    return db, classroom_id, module_id, student_id
+    async def _test():
+        from services.learning_module_service import LearningModuleService
+        
+        print("\n" + "="*60)
+        print("TEST 3: Track Resource Engagement")
+        print("="*60)
+        
+        service = LearningModuleService(db)
+        
+        # Get first module
+        module = modules[0]
+        module_id = module['module_id']
+        
+        # Simulate student engagement with a resource
+        student_id = str(ObjectId())
+        resource_id = module['resources'][0]['id'] if module['resources'] else 'res_1'
+        
+        engagement_data = {
+            "viewed": True,
+            "view_duration_seconds": 600,
+            "completion_percentage": 85,
+            "test_score": 90,
+            "test_attempts": 1,
+            "helpful": True
+        }
+        
+        result = await service.track_resource_engagement(
+            student_id,
+            resource_id,
+            module_id,
+            engagement_data
+        )
+        
+        print(f"Status: {result['status']}")
+        print(f"Message: {result['message']}")
+        
+        assert result['status'] == 'success', "Engagement tracking should succeed"
+        
+        print("\n✅ Resource engagement tracked successfully!")
+        print(f"  - Student viewed resource for 10 minutes")
+        print(f"  - Completion: 85%")
+        print(f"  - Test Score: 90%")
+        
+        return db, classroom_id, module_id, student_id
+    return asyncio.run(_test())
 
 def test_module_progress():
-    from services.learning_module_service import LearningModuleService
-    
-    print("\n" + "="*60)
-    print("TEST 4: Calculate Module Progress")
-    print("="*60)
-    
     db, classroom_id, module_id, student_id = test_resource_engagement()
-    service = LearningModuleService(db)
     
-    # Get module progress
-    progress = service.get_module_progress(
-        ObjectId(student_id),
-        ObjectId(module_id)
-    )
-    
-    print(f"Module Progress for {progress['module_id']}:")
-    print(f"  - Progress: {progress['progress_percentage']}%")
-    print(f"  - Resources Completed: {progress['resources_completed']}/{progress['total_resources']}")
-    print(f"  - Average Test Score: {progress['average_score']}%")
-    print(f"  - Status: {progress['status']}")
-    
-    assert progress['status'] in ['not_started', 'in_progress', 'completed'], "Status should be valid"
-    
-    print("\n✅ Module progress calculated successfully!")
-    
-    return db
+    async def _test():
+        from services.learning_module_service import LearningModuleService
+        
+        print("\n" + "="*60)
+        print("TEST 4: Calculate Module Progress")
+        print("="*60)
+        
+        service = LearningModuleService(db)
+        
+        # Get module progress
+        progress = await service.get_module_progress(
+            ObjectId(student_id),
+            ObjectId(module_id)
+        )
+        
+        print(f"Module Progress for {progress['module_id']}:")
+        print(f"  - Progress: {progress['progress_percentage']}%")
+        print(f"  - Resources Completed: {progress['resources_completed']}/{progress['total_resources']}")
+        print(f"  - Average Test Score: {progress['average_score']}%")
+        print(f"  - Status: {progress['status']}")
+        
+        assert progress['status'] in ['not_started', 'in_progress', 'completed'], "Status should be valid"
+        
+        print("\n✅ Module progress calculated successfully!")
+        
+        return db
+    return asyncio.run(_test())
 
 def main():
     try:
@@ -327,3 +352,4 @@ def main():
 if __name__ == "__main__":
     success = main()
     sys.exit(0 if success else 1)
+

@@ -745,7 +745,6 @@ const LearningModulesPage = () => {
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-6">
           <AppBackButton
-            label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
           />
 
@@ -804,9 +803,9 @@ const LearningModulesPage = () => {
                   onChange={handleSyllabusFileChange}
                 />
                 <button
-                  onClick={async () => {
-                    if (window.confirm('This will restart the AI discovery process using your syllabus. Continue?')) {
-                      await handleRegenerateResources();
+                  onClick={() => {
+                    if (window.confirm('Please select/re-upload your syllabus PDF to start the AI resource discovery process.')) {
+                      if (syllabusInputRef.current) syllabusInputRef.current.click();
                     }
                   }}
                   className="inline-flex h-11 items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-5 text-sm font-bold text-cyan-300 transition-all hover:bg-cyan-500/20 hover:scale-105 active:scale-95"
@@ -1024,7 +1023,6 @@ const LearningModulesPage = () => {
       <GlassDashboardShell contentClassName="max-w-7xl">
         <div className="space-y-6">
           <AppBackButton
-            label="Back to Dashboard"
             fallbackTo={`/classroom/${classroomId}/dashboard`}
           />
           <LearningModulesStudent classroomId={classroomId} modules={orderedModules} />
@@ -1036,7 +1034,6 @@ const LearningModulesPage = () => {
     <GlassDashboardShell contentClassName="max-w-7xl">
       <div className="space-y-8 pb-20">
         <AppBackButton
-          label="Back to Dashboard"
           fallbackTo={`/classroom/${classroomId}/dashboard`}
         />
 

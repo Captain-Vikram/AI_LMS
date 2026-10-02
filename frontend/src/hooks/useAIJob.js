@@ -10,6 +10,7 @@ export const useAIJobStatus = (jobId) => {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [warning, setWarning] = useState(null);
   const [isReady, setIsReady] = useState(false);
   const [jobConfig, setJobConfig] = useState({});
 
@@ -28,6 +29,7 @@ export const useAIJobStatus = (jobId) => {
         setProgress(initial.progress || 0);
         if (initial.result) setResult(initial.result);
         if (initial.error) setError(initial.error);
+        if (initial.warning) setWarning(initial.warning);
         setJobConfig(initial.config || {});
         if (initial.config && initial.config.use_sse === false) {
           useSSE = false;
@@ -45,6 +47,7 @@ export const useAIJobStatus = (jobId) => {
           const data = JSON.parse(event.data);
           setStatus(data.status);
           setProgress(data.progress || 0);
+          if (data.warning) setWarning(data.warning);
           if (data.config) setJobConfig(data.config || {});
           if (data.status === 'ready') {
             setResult(data.result);
@@ -75,6 +78,7 @@ export const useAIJobStatus = (jobId) => {
             const res = await apiClient.get(API_ENDPOINTS.AI_JOB_STATUS(jobId));
             setStatus(res.status);
             setProgress(res.progress || 0);
+            if (res.warning) setWarning(res.warning);
             if (res.config) setJobConfig(res.config || {});
             if (res.status === 'ready') {
               setResult(res.result);
@@ -132,6 +136,7 @@ export const useAIJobStatus = (jobId) => {
       setStatus('pending');
       setProgress(0);
       setError(null);
+      setWarning(null);
       setResult(null);
     } catch (err) {
       setError(err.message || 'Failed to retry job');
@@ -149,5 +154,5 @@ export const useAIJobStatus = (jobId) => {
     }
   }, [jobId]);
 
-  return { status, progress, result, error, isReady, stopJob, retryJob, updateConfig, config: jobConfig };
+  return { status, progress, result, error, warning, isReady, stopJob, retryJob, updateConfig, config: jobConfig };
 };

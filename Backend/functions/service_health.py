@@ -104,7 +104,6 @@ def _probe_external_api_config() -> Dict[str, Any]:
         "TAVILY_API_KEY",
         "SERPER_API_KEY",
         "DEEPGRAM_API_KEY",
-        "GROQ_API_KEY",
     ]
     missing_keys = [key for key in required_keys if not os.getenv(key)]
 
@@ -133,7 +132,7 @@ def _probe_cloud_llm_fallback() -> Dict[str, Any]:
             "message": "Cloud LLM fallback is disabled by configuration.",
         }
 
-    if provider not in {"groq", "google"}:
+    if provider not in {"google", "gemini"}:
         return {
             "status": "down",
             "provider": provider,
@@ -146,44 +145,6 @@ def _probe_cloud_llm_fallback() -> Dict[str, Any]:
             "provider": provider,
             "message": "Cloud LLM fallback is enabled but not ready. Configure fallback API credentials.",
         }
-
-    if provider == "groq":
-        api_key = (os.getenv("GROQ_API_KEY") or "").strip()
-        base_url = (os.getenv("GROQ_BASE_URL") or "https://api.groq.com/openai/v1").rstrip("/")
-
-        try:
-            response = requests.get(
-                f"{base_url}/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=2,
-            )
-
-            if response.status_code in (401, 403):
-                return {
-                    "status": "down",
-                    "provider": provider,
-                    "message": "Cloud fallback API key is invalid.",
-                }
-
-            if response.status_code >= 400:
-                return {
-                    "status": "down",
-                    "provider": provider,
-                    "message": f"Cloud fallback probe failed with HTTP {response.status_code}.",
-                }
-
-            return {
-                "status": "up",
-                "provider": provider,
-                "message": "Cloud LLM fallback is configured and ready.",
-            }
-        except requests.RequestException as exc:
-            return {
-                "status": "down",
-                "provider": provider,
-                "message": "Cloud fallback provider is unreachable.",
-                "error": f"{exc.__class__.__name__}: {exc}",
-            }
 
     # Google fallback probe
     api_key = (os.getenv("GOOGLE_API_KEY") or "").strip()

@@ -17,25 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 # Intel Optimization Imports
 from intel_acceleration import HAS_OPENVINO, get_openvino_device
 
-def extract_video_id(youtube_url):
-    """
-    Extract the video ID from a YouTube URL.
-    Supports various YouTube URL formats.
-    """
-    # Regular expression to match various YouTube URL formats
-    youtube_regex = (
-        r'(https?://)?(www\.)?'
-        r'(youtube|youtu|youtube-nocookie)\.(com|be)/'
-        r'(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
-    )
-
-    youtube_match = re.match(youtube_regex, youtube_url)
-
-    if youtube_match:
-        return youtube_match.group(6)
-
-    return None
-
+from functions.youtube_quiz_functions import extract_video_id
 
 def format_timestamp(seconds):
     """
@@ -319,7 +301,7 @@ class YouTubeLangChainRAG:
 
         return self.video_data[video_id]
 
-    def answer_question(self, video_url, question, languages=['en'], top_k=3):
+    async def answer_question(self, video_url, question, languages=['en'], top_k=3):
         """
         Answer a question about a YouTube video using RAG.
 
@@ -332,6 +314,7 @@ class YouTubeLangChainRAG:
         Returns:
             dict: Answer with source timestamps
         """
+        import asyncio
         # Extract video ID
         video_id = extract_video_id(video_url)
         if not video_id:
@@ -339,7 +322,7 @@ class YouTubeLangChainRAG:
 
         # Process video if not already processed
         if video_id not in self.video_data:
-            self.process_video(video_url, languages)
+            await asyncio.to_thread(self.process_video, video_url, languages)
 
         # Get video data
         video_data = self.video_data[video_id]
@@ -402,7 +385,7 @@ class YouTubeLangChainRAG:
 
         try:
             # Get answer from LLM
-            answer = self.llm.invoke(prompt).content
+            answer = (await self.llm.ainvoke(prompt)).content
         except Exception as exc:
             fallback = True
             fallback_reason = self._classify_fallback_reason(str(exc))

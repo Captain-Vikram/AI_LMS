@@ -19,6 +19,7 @@ import functions.llm_adapter_async as genai
 from functions.youtube_quiz_functions import extract_video_id, get_transcript
 from functions.utils import get_user_display_name
 from models.activity_feed import ActivityType
+from functions.shared_utils import to_object_id as _to_object_id, to_iso as _serialize_datetime, clean_json_text as _clean_json_payload
 
 load_dotenv(override=True)
 
@@ -70,13 +71,6 @@ class GradeSubmissionRequest(BaseModel):
         description="List of {question_id, points_awarded, teacher_comment}",
     )
     overall_feedback: Optional[str] = None
-
-
-def _to_object_id(value: str) -> Optional[ObjectId]:
-    try:
-        return ObjectId(str(value))
-    except Exception:
-        return None
 
 
 def _id_candidates(value: Any) -> List[Any]:
@@ -136,15 +130,6 @@ def _normalize_question_type(value: Any) -> str:
     if normalized in {"mcq", "fill_blank", "short_answer", "essay"}:
         return normalized
     return ""
-
-
-def _clean_json_payload(raw_text: str) -> str:
-    text = str(raw_text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-    if text.endswith("```"):
-        text = text[:-3].strip()
-    return text
 
 
 def _normalize_resource_url(raw_url: Any) -> str:
@@ -433,12 +418,6 @@ def _auto_grade_question(question: Dict[str, Any], student_answer: str) -> Dict[
         "is_correct": is_correct,
         "points": points if is_correct else 0,
     }
-
-
-def _serialize_datetime(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
 
 
 def _serialize_assessment(assessment: Dict[str, Any]) -> Dict[str, Any]:

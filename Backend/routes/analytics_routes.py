@@ -3,36 +3,20 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from bson import ObjectId
 
-from database import get_db
+from database_async import get_db
 from functions.utils import get_current_user, normalize_user_role
+from functions.streak_utils import calculate_streak_from_dates  # shared, no duplicate
 from services.classroom_analytics_service import ClassroomAnalyticsService
 from services.rbac_service import RBACService
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 
+
 def _to_iso(value):
     if isinstance(value, datetime):
         return value.isoformat()
     return value
-
-
-def _calculate_login_streak(login_dates):
-    if not login_dates:
-        return 0
-
-    today = datetime.utcnow().date()
-    cursor = today if today in login_dates else today - timedelta(days=1)
-
-    if cursor not in login_dates:
-        return 0
-
-    streak = 0
-    while cursor in login_dates:
-        streak += 1
-        cursor -= timedelta(days=1)
-
-    return streak
 
 
 def _build_weekly_activity_percentages(login_logs):
@@ -60,17 +44,18 @@ async def get_dashboard_analytics(current_user = Depends(get_current_user)):
 
     db = get_db()
     # current_user already contains user info, but we might need full user doc for badges etc.
-    user = db.users.find_one({"_id": user_id_obj})
+    user = await db.users.find_one({"_id": user_id_obj})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     now = datetime.utcnow()
     week_start = now - timedelta(days=7)
 
-    weekly_logs = list(
-        db.login_logs.find({"user_id": user_id_obj, "login_time": {"$gte": week_start}})
-    )
-    all_logs = list(db.login_logs.find({"user_id": user_id_obj}, {"login_time": 1}))
+    weekly_logs_cursor = db.login_logs.find({"user_id": user_id_obj, "login_time": {"$gte": week_start}})
+    weekly_logs = await weekly_logs_cursor.to_list(length=None)
+    
+    all_logs_cursor = db.login_logs.find({"user_id": user_id_obj}, {"login_time": 1})
+    all_logs = await all_logs_cursor.to_list(length=None)
 
     login_dates = {
         log.get("login_time").date()
@@ -80,13 +65,14 @@ async def get_dashboard_analytics(current_user = Depends(get_current_user)):
     if user.get("last_login") and isinstance(user.get("last_login"), datetime):
         login_dates.add(user.get("last_login").date())
 
-    learning_streak = _calculate_login_streak(login_dates)
+    learning_streak = calculate_streak_from_dates(login_dates)  # shared utility
 
-    completed_assessments = db.skill_assessment_results.count_documents({"user_id": user_id_obj})
-    completed_milestones = db.user_milestones.count_documents(
+
+    completed_assessments = await db.skill_assessment_results.count_documents({"user_id": user_id_obj})
+    completed_milestones = await db.user_milestones.count_documents(
         {"user_id": user_id_obj, "status": "completed"}
     )
-    active_milestones_count = db.user_milestones.count_documents(
+    active_milestones_count = await db.user_milestones.count_documents(
         {"user_id": user_id_obj, "status": "active"}
     )
 
@@ -102,14 +88,13 @@ async def get_dashboard_analytics(current_user = Depends(get_current_user)):
 
     total_learning_hours = round((total_earned_xp / 60.0) + (completed_assessments * 0.5), 1)
 
-    milestone_docs = list(
-        db.user_milestones.find({"user_id": user_id_obj, "status": "active"}).sort(
-            [
-                ("target_date", 1),
-                ("created_at", -1),
-            ]
-        )
+    milestone_cursor = db.user_milestones.find({"user_id": user_id_obj, "status": "active"}).sort(
+        [
+            ("target_date", 1),
+            ("created_at", -1),
+        ]
     )
+    milestone_docs = await milestone_cursor.to_list(length=None)
 
     upcoming_milestones = []
     for milestone in milestone_docs[:5]:
@@ -124,7 +109,11 @@ async def get_dashboard_analytics(current_user = Depends(get_current_user)):
         )
 
     if not upcoming_milestones:
-        active_goal = db.user_goals.find_one(
+        # LEGACY FALLBACK: user_goals collection is frozen (no new writes since commit 2fa7edf
+        # removed the onboarding route that populated it). This read-only fallback is kept to
+        # show existing goals for users who had them before the migration. New users will see
+        # no milestones here. Safe to remove once confirmed no active user_goals remain in DB.
+        active_goal = await db.user_goals.find_one(
             {"user_id": user_id_obj, "status": "active"},
             sort=[("created_at", -1)],
         )
@@ -139,7 +128,8 @@ async def get_dashboard_analytics(current_user = Depends(get_current_user)):
                 }
             )
 
-    badge_docs = list(db.gamification.find({"resource_type": "badge"}))
+    badge_cursor = db.gamification.find({"resource_type": "badge"})
+    badge_docs = await badge_cursor.to_list(length=None)
     badge_map = {str(badge.get("_id")): badge for badge in badge_docs}
 
     recent_earned_badges = sorted(
@@ -181,18 +171,18 @@ async def get_classroom_analytics(
     current_user = Depends(get_current_user)
 ):
     """Get classroom-wide analytics (teacher only)"""
+    import asyncio
     db = get_db()
     rbac = RBACService(db)
 
     if not await rbac.is_teacher(current_user["user_id"], classroom_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Only teachers can view classroom analytics"
-        )
+        raise HTTPException(status_code=403, detail="Only teachers can view classroom analytics")
 
-    analytics_svc = ClassroomAnalyticsService(db)
+    # ClassroomAnalyticsService uses sync PyMongo internally; run off the event loop thread.
+    from database import get_db as get_sync_db
+    analytics_svc = ClassroomAnalyticsService(get_sync_db())
     try:
-        analytics = analytics_svc.get_classroom_analytics(classroom_id)
+        analytics = await asyncio.to_thread(analytics_svc.get_classroom_analytics, classroom_id)
         return {"status": "success", "data": analytics}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -204,18 +194,17 @@ async def get_student_clusters(
     current_user = Depends(get_current_user)
 ):
     """Get student clusters based on performance (teacher only)"""
+    import asyncio
     db = get_db()
     rbac = RBACService(db)
 
     if not await rbac.is_teacher(current_user["user_id"], classroom_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Only teachers can view student clusters"
-        )
+        raise HTTPException(status_code=403, detail="Only teachers can view student clusters")
 
-    analytics_svc = ClassroomAnalyticsService(db)
+    from database import get_db as get_sync_db
+    analytics_svc = ClassroomAnalyticsService(get_sync_db())
     try:
-        clusters = analytics_svc.get_student_clusters(classroom_id)
+        clusters = await asyncio.to_thread(analytics_svc.get_student_clusters, classroom_id)
         return {"status": "success", "data": clusters}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -228,18 +217,17 @@ async def get_student_progress(
     current_user = Depends(get_current_user)
 ):
     """Get student's progress in classroom (teacher only)"""
+    import asyncio
     db = get_db()
     rbac = RBACService(db)
 
     if not await rbac.is_teacher(current_user["user_id"], classroom_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Only teachers can view student analytics"
-        )
+        raise HTTPException(status_code=403, detail="Only teachers can view student analytics")
 
-    analytics_svc = ClassroomAnalyticsService(db)
+    from database import get_db as get_sync_db
+    analytics_svc = ClassroomAnalyticsService(get_sync_db())
     try:
-        progress = analytics_svc.get_student_progress(classroom_id, student_id)
+        progress = await asyncio.to_thread(analytics_svc.get_student_progress, classroom_id, student_id)
         return {"status": "success", "data": progress}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -251,18 +239,17 @@ async def get_my_progress(
     current_user = Depends(get_current_user)
 ):
     """Get current student's progress (students only)"""
+    import asyncio
     db = get_db()
     rbac = RBACService(db)
 
     if not await rbac.is_student(current_user["user_id"], classroom_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Students can only view their own progress"
-        )
+        raise HTTPException(status_code=403, detail="Students can only view their own progress")
 
-    analytics_svc = ClassroomAnalyticsService(db)
+    from database import get_db as get_sync_db
+    analytics_svc = ClassroomAnalyticsService(get_sync_db())
     try:
-        progress = analytics_svc.get_student_progress(classroom_id, current_user["user_id"])
+        progress = await asyncio.to_thread(analytics_svc.get_student_progress, classroom_id, current_user["user_id"])
         return {"status": "success", "data": progress}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -275,6 +262,7 @@ async def get_ai_questions_by_module(
     current_user = Depends(get_current_user)
 ):
     """Get ask-AI heatmap counts grouped by module and source for classroom or current student."""
+    import asyncio
     db = get_db()
     rbac = RBACService(db)
 
@@ -290,15 +278,14 @@ async def get_ai_questions_by_module(
         resolved_student_id = requested_student_id
     else:
         if requested_student_id and requested_student_id != current_user["user_id"]:
-            raise HTTPException(
-                status_code=403,
-                detail="Students can only view their own ask-AI heatmap",
-            )
+            raise HTTPException(status_code=403, detail="Students can only view their own ask-AI heatmap")
         resolved_student_id = current_user["user_id"]
 
-    analytics_svc = ClassroomAnalyticsService(db)
+    from database import get_db as get_sync_db
+    analytics_svc = ClassroomAnalyticsService(get_sync_db())
     try:
-        payload = analytics_svc.get_ai_questions_by_module(classroom_id, resolved_student_id)
+        payload = await asyncio.to_thread(analytics_svc.get_ai_questions_by_module, classroom_id, resolved_student_id)
         return {"status": "success", "data": payload}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+

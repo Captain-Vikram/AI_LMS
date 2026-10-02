@@ -33,6 +33,7 @@ const Navbar = () => {
     { name: "Home", to: "/" },
     { name: "Features", to: "/#features", isScroll: true },
     ...(isSignedIn ? [{ name: "Classrooms", to: "/classrooms" }] : []),
+    ...(isSignedIn ? [{ name: "Project Analyzer", to: "/project-analyzer" }] : []),
     { name: "Contact", to: "/contact" },
   ];
 

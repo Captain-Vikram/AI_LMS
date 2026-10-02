@@ -6,7 +6,8 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
 
-from database import db
+import asyncio
+from database_async import get_db
 
 load_dotenv(override=True)
 
@@ -59,10 +60,11 @@ async def get_student_progress(
         if classroom_oid:
             module_filter["classroom_id"] = classroom_oid
 
-        module = db.learning_modules.find_one(module_filter)
+        db = get_db()
+        module = await db.learning_modules.find_one(module_filter)
         if not module:
             # Fallback in case classroom id was not ObjectId in older records.
-            module = db.learning_modules.find_one({"_id": module_oid})
+            module = await db.learning_modules.find_one({"_id": module_oid})
 
         if not module:
             raise HTTPException(status_code=404, detail="Module not found")
@@ -78,7 +80,7 @@ async def get_student_progress(
                 continue
 
             # Fetch student progress for this resource
-            progress = db.student_progress.find_one({
+            progress = await db.student_progress.find_one({
                 "student_id": student_id,
                 "resource_id": current_resource_id,
                 "module_id": module_id,
@@ -110,13 +112,13 @@ async def get_student_progress(
             })
 
         # Fetch final assessment status
-        assessment = db.module_assessments.find_one(
+        assessment = await db.module_assessments.find_one(
             {"module_id": {"$in": [module_id, str(module_oid)]}},
             sort=[("updated_at", -1)],
         )
 
         # Check for workflow assessment as well
-        workflow = db.module_assessment_workflows.find_one(
+        workflow = await db.module_assessment_workflows.find_one(
             {
                 "module_id": {"$in": [module_id, str(module_oid)]},
                 "is_published": True
@@ -144,7 +146,7 @@ async def get_student_progress(
                 final_assessment_data["valid_from"] = workflow["finalized_at"].isoformat()
             
             # Check for workflow submission
-            wf_submission = db.module_assessment_workflow_submissions.find_one({
+            wf_submission = await db.module_assessment_workflow_submissions.find_one({
                 "workflow_id": {"$in": [workflow_id, workflow.get("_id")]},
                 "student_id": student_id,
             }, sort=[("submitted_at", -1)])
@@ -170,7 +172,7 @@ async def get_student_progress(
                 final_assessment_data["valid_until"] = assessment["valid_until"].isoformat()
 
             # Check if student has already taken it
-            submission = db.assessment_submissions.find_one({
+            submission = await db.assessment_submissions.find_one({
                 "assessment_id": {"$in": [assessment_id, assessment.get("_id")]},
                 "student_id": student_id,
             })
@@ -205,11 +207,13 @@ async def get_unlocked_resources(
     Get list of all unlocked resource IDs for a student in a module.
     """
     try:
-        progress_docs = db.student_progress.find({
+        db = get_db()
+        cursor = db.student_progress.find({
             "student_id": student_id,
             "module_id": module_id,
             "is_unlocked": True,
         })
+        progress_docs = await cursor.to_list(length=None)
 
         unlocked_ids = [p["resource_id"] for p in progress_docs]
 

@@ -1,24 +1,50 @@
-SkillMaster/.env
-Backend/routes/__pycache__/onboarding_routes.cpython-310.pyc
-Backend/routes/__pycache__/auth_routes.cpython-310.pyc
-Backend/routes/__pycache__/mcq_routes.cpython-310.pyc
-Backend/models/__pycache__/user_models.cpython-310.pyc
-Backend/models/__pycache__/quiz_models.cpython-310.pyc
-Backend/models/__pycache__/onboarding_models.cpython-310.pyc
-Backend/functions/__pycache__/mcq_functions.cpython-310.pyc
-Backend/__pycache__/main.cpython-310.pyc
-Backend/__pycache__/jwt_config.cpython-310.pyc
-Backend/__pycache__/database.cpython-310.pyc
+# Environments
 .env
-mongo-data/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 .venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js / Vite build output
+dist-ssr/
+.next/
+out/
+build/
+
+# Database / Local state
+mongo-data/
+data/portable_rag/
+data/portable_rag/**
+
+# IDEs and Editors
 .idea/
 .vscode/
-__pycache__/
-.pytest_cache/
-*.pyc
-Backend/data/portable_rag/
-Backend/data/portable_rag/**
-/handoff_fastapi/
-/data/
-/project-analyzer (3)/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

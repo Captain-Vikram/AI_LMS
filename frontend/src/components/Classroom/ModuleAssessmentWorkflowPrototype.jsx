@@ -1314,18 +1314,18 @@ const ModuleAssessmentWorkflowPrototype = ({ moduleId, module, onPublished }) =>
 
                             <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs font-medium text-gray-500 mt-2">
                               <div className="flex items-center gap-2">
-                                <span>Bloom</span>
+                                <span>Bloom Alignment</span>
                                 <select
                                   value={question.bloom_level || 3}
                                   disabled={isReadOnly}
                                   onChange={(event) =>
                                     updateScenarioQuestion(scenarioSet.id, question.id, 'bloom_level', Number(event.target.value))
                                   }
-                                  className="bg-transparent text-blue-400 outline-none border-b border-transparent focus:border-blue-500 pb-0.5 cursor-pointer"
+                                  className="bg-gray-800 hover:bg-gray-800/80 text-blue-400 outline-none border border-gray-700/50 rounded px-2 py-0.5 cursor-pointer transition-colors"
                                 >
-                                  <option value={3}>Level 3 (Apply)</option>
-                                  <option value={4}>Level 4 (Analyze)</option>
-                                  <option value={5}>Level 5 (Evaluate)</option>
+                                  <option value={3} className="bg-gray-900 text-gray-200">Bloom 3: Apply Concepts</option>
+                                  <option value={4} className="bg-gray-900 text-gray-200">Bloom 4: Analyze Relations</option>
+                                  <option value={5} className="bg-gray-900 text-gray-200">Bloom 5: Critical Evaluation</option>
                                 </select>
                               </div>
                               

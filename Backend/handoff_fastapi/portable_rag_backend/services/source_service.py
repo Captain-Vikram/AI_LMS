@@ -38,14 +38,14 @@ class SourceService:
     def get_source(self, source_id: str) -> dict[str, Any] | None:
         return self.metadata_store.get_source(source_id)
 
-    def get_notebook_detail(self, notebook_id: str) -> dict[str, Any]:
-        notebook = self.metadata_store.get_notebook_detail(notebook_id)
+    def get_notebook_detail(self, notebook_id: str, user_id: str | None = None) -> dict[str, Any]:
+        notebook = self.metadata_store.get_notebook_detail(notebook_id, user_id)
         if notebook is None:
             raise ValueError(f"Notebook '{notebook_id}' not found")
         return notebook
 
-    def delete_notebook(self, notebook_id: str) -> dict[str, Any]:
-        return self.metadata_store.delete_notebook(notebook_id)
+    def delete_notebook(self, notebook_id: str, user_id: str | None = None) -> dict[str, Any]:
+        return self.metadata_store.delete_notebook(notebook_id, user_id)
 
     def link_source_to_notebook(self, notebook_id: str, source_id: str) -> bool:
         return self.metadata_store.link_source_to_notebook(notebook_id, source_id)
@@ -381,6 +381,13 @@ class SourceService:
         notebook = self.metadata_store.get_notebook(notebook_id)
         if notebook is None:
             raise ValueError(f"Notebook '{notebook_id}' not found")
+
+        # Enforce maximum of 5 sources per source type in every notebook
+        existing_sources = self.metadata_store.list_sources(notebook_id=notebook_id)
+        type_count = sum(1 for src in existing_sources if src.get("source_type") == source_type)
+        if type_count >= 5:
+            type_label = "PDF/File" if source_type == "file" else "URL/YouTube Link" if source_type == "url" else "Text Note"
+            raise ValueError(f"Maximum limit of 5 {type_label} sources reached for this notebook.")
 
         if not content.strip():
             raise ValueError("Source content is empty")
