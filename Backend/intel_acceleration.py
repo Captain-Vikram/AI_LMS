@@ -1,11 +1,19 @@
 import os
 import logging
 
-try:
-    import intel_extension_for_pytorch as ipex
-    HAS_IPEX = True
-except ImportError:
-    HAS_IPEX = False
+
+logger = logging.getLogger(__name__)
+
+HAS_IPEX = False
+ipex = None
+
+# IPEX is optional, and should not be loaded in CI unless explicitly enabled.
+if os.getenv("DISABLE_IPEX", "").lower() not in {"1", "true", "yes", "on"}:
+    try:
+        import intel_extension_for_pytorch as ipex
+        HAS_IPEX = True
+    except Exception as exc:
+        logger.warning("Intel Extension for PyTorch unavailable: %s", exc)
 
 try:
     import openvino as ov
@@ -19,7 +27,6 @@ try:
 except ImportError:
     HAS_SKLEARN_EX = False
 
-logger = logging.getLogger(__name__)
 
 def apply_intel_optimizations():
     """
@@ -68,4 +75,7 @@ if __name__ == "__main__":
     opts = apply_intel_optimizations()
     for opt in opts:
         print(f"[SUCCESS] {opt}")
+
+
+
 
